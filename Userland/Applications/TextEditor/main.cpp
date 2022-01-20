@@ -18,7 +18,7 @@ using namespace TextEditor;
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    TRY(Core::System::pledge("stdio recvfd sendfd thread rpath cpath wpath unix prot_exec"));
+    TRY(Core::System::pledge("stdio recvfd sendfd thread rpath cpath wpath unix"));
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
@@ -35,7 +35,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/tmp/portal/launch", "rw"));
     TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
     TRY(Core::System::unveil("/tmp/portal/filesystemaccess", "rw"));
-    TRY(Core::System::unveil("/usr/lib/libunicodedata.so.serenity", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     StringView preview_mode_view = preview_mode;
@@ -45,30 +44,30 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = TRY(GUI::Window::try_create());
     window->resize(640, 400);
 
-    auto& text_widget = window->set_main_widget<MainWidget>();
+    auto text_widget = TRY(window->try_set_main_widget<MainWidget>());
 
-    text_widget.editor().set_focus(true);
+    text_widget->editor().set_focus(true);
 
     window->on_close_request = [&]() -> GUI::Window::CloseRequestDecision {
-        if (text_widget.request_close())
+        if (text_widget->request_close())
             return GUI::Window::CloseRequestDecision::Close;
         return GUI::Window::CloseRequestDecision::StayOpen;
     };
 
     if (preview_mode_view == "auto") {
-        text_widget.set_auto_detect_preview_mode(true);
+        text_widget->set_auto_detect_preview_mode(true);
     } else if (preview_mode_view == "markdown") {
-        text_widget.set_preview_mode(MainWidget::PreviewMode::Markdown);
+        text_widget->set_preview_mode(MainWidget::PreviewMode::Markdown);
     } else if (preview_mode_view == "html") {
-        text_widget.set_preview_mode(MainWidget::PreviewMode::HTML);
+        text_widget->set_preview_mode(MainWidget::PreviewMode::HTML);
     } else if (preview_mode_view == "none") {
-        text_widget.set_preview_mode(MainWidget::PreviewMode::None);
+        text_widget->set_preview_mode(MainWidget::PreviewMode::None);
     } else {
         warnln("Invalid mode '{}'", preview_mode);
         return 1;
     }
 
-    text_widget.initialize_menubar(*window);
+    text_widget->initialize_menubar(*window);
 
     window->show();
     window->set_icon(app_icon.bitmap_for_size(16));
@@ -78,14 +77,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         auto response = FileSystemAccessClient::Client::the().request_file_read_only_approved(window->window_id(), parsed_argument.filename());
 
         if (response.error == 0) {
-            if (!text_widget.read_file_and_close(*response.fd, *response.chosen_file))
+            if (!text_widget->read_file_and_close(*response.fd, *response.chosen_file))
                 return 1;
-            text_widget.editor().set_cursor_and_focus_line(parsed_argument.line().value_or(1) - 1, parsed_argument.column().value_or(0));
+            text_widget->editor().set_cursor_and_focus_line(parsed_argument.line().value_or(1) - 1, parsed_argument.column().value_or(0));
         } else {
-            text_widget.open_nonexistent_file(parsed_argument.filename());
+            text_widget->open_nonexistent_file(parsed_argument.filename());
         }
     }
-    text_widget.update_title();
+    text_widget->update_title();
 
     return app->exec();
 }

@@ -107,7 +107,7 @@ TerminalWidget::TerminalWidget(int ptm_fd, bool automatic_size_policy)
     m_auto_scroll_timer->on_timeout = [this] {
         if (m_auto_scroll_direction != AutoScrollDirection::None) {
             int scroll_amount = m_auto_scroll_direction == AutoScrollDirection::Up ? -1 : 1;
-            m_scrollbar->set_value(m_scrollbar->value() + scroll_amount);
+            m_scrollbar->increase_slider_by(scroll_amount);
         }
     };
     m_auto_scroll_timer->start();
@@ -215,11 +215,11 @@ void TerminalWidget::keydown_event(GUI::KeyEvent& event)
     m_cursor_blink_timer->start();
 
     if (event.key() == KeyCode::Key_PageUp && event.modifiers() == Mod_Shift) {
-        m_scrollbar->set_value(m_scrollbar->value() - m_terminal.rows());
+        m_scrollbar->decrease_slider_by(m_terminal.rows());
         return;
     }
     if (event.key() == KeyCode::Key_PageDown && event.modifiers() == Mod_Shift) {
-        m_scrollbar->set_value(m_scrollbar->value() + m_terminal.rows());
+        m_scrollbar->increase_slider_by(m_terminal.rows());
         return;
     }
     if (event.key() == KeyCode::Key_Alt) {
@@ -264,9 +264,6 @@ void TerminalWidget::paint_event(GUI::PaintEvent& event)
     auto visual_beep_active = m_visual_beep_timer->is_active();
 
     painter.add_clip_rect(event.rect());
-
-    Gfx::IntRect terminal_buffer_rect(frame_inner_rect().top_left(), { frame_inner_rect().width() - m_scrollbar->width(), frame_inner_rect().height() });
-    painter.add_clip_rect(terminal_buffer_rect);
 
     if (visual_beep_active)
         painter.clear_rect(frame_inner_rect(), terminal_color_to_rgb(VT::Color::named(VT::Color::ANSIColor::Red)));
@@ -546,6 +543,11 @@ void TerminalWidget::set_opacity(u8 new_opacity)
     window()->set_has_alpha_channel(new_opacity < 255);
     m_opacity = new_opacity;
     update();
+}
+
+void TerminalWidget::set_show_scrollbar(bool show_scrollbar)
+{
+    m_scrollbar->set_visible(show_scrollbar);
 }
 
 bool TerminalWidget::has_selection() const
@@ -916,7 +918,7 @@ void TerminalWidget::mousewheel_event(GUI::MouseEvent& event)
     if (!is_scrollable())
         return;
     set_auto_scroll_direction(AutoScrollDirection::None);
-    m_scrollbar->set_value(m_scrollbar->value() + event.wheel_delta() * scroll_length());
+    m_scrollbar->increase_slider_by(event.wheel_delta() * scroll_length());
     GUI::Frame::mousewheel_event(event);
 }
 

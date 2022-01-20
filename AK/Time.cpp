@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Array.h>
 #include <AK/Checked.h>
 #include <AK/Time.h>
 
@@ -18,19 +17,6 @@
 #endif
 
 namespace AK {
-
-int day_of_year(int year, unsigned month, int day)
-{
-    VERIFY(month >= 1 && month <= 12);
-
-    constexpr Array seek_table = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-    int day_of_year = seek_table[month - 1] + day - 1;
-
-    if (is_leap_year(year) && month >= 3)
-        day_of_year++;
-
-    return day_of_year;
-}
 
 int days_in_month(int year, unsigned month)
 {
@@ -58,6 +44,7 @@ Time Time::from_timespec(const struct timespec& ts)
     i32 extra_secs = sane_mod(nsecs, 1'000'000'000);
     return Time::from_half_sanitized(ts.tv_sec, extra_secs, nsecs);
 }
+
 Time Time::from_timeval(const struct timeval& tv)
 {
     i32 usecs = tv.tv_usec;
@@ -75,6 +62,7 @@ i64 Time::to_truncated_seconds() const
     }
     return m_seconds;
 }
+
 i64 Time::to_truncated_milliseconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -93,6 +81,7 @@ i64 Time::to_truncated_milliseconds() const
         return milliseconds.value();
     return m_seconds < 0 ? -0x8000'0000'0000'0000LL : 0x7fff'ffff'ffff'ffffLL;
 }
+
 i64 Time::to_truncated_microseconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -111,6 +100,7 @@ i64 Time::to_truncated_microseconds() const
         return microseconds.value();
     return m_seconds < 0 ? -0x8000'0000'0000'0000LL : 0x7fff'ffff'ffff'ffffLL;
 }
+
 i64 Time::to_seconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -121,6 +111,7 @@ i64 Time::to_seconds() const
     }
     return m_seconds;
 }
+
 i64 Time::to_milliseconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -137,6 +128,7 @@ i64 Time::to_milliseconds() const
         return milliseconds.value();
     return m_seconds < 0 ? -0x8000'0000'0000'0000LL : 0x7fff'ffff'ffff'ffffLL;
 }
+
 i64 Time::to_microseconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -153,6 +145,7 @@ i64 Time::to_microseconds() const
         return microseconds.value();
     return m_seconds < 0 ? -0x8000'0000'0000'0000LL : 0x7fff'ffff'ffff'ffffLL;
 }
+
 i64 Time::to_nanoseconds() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -167,11 +160,13 @@ i64 Time::to_nanoseconds() const
         return nanoseconds.value();
     return m_seconds < 0 ? -0x8000'0000'0000'0000LL : 0x7fff'ffff'ffff'ffffLL;
 }
+
 timespec Time::to_timespec() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
     return { static_cast<time_t>(m_seconds), static_cast<long>(m_nanoseconds) };
 }
+
 timeval Time::to_timeval() const
 {
     VERIFY(m_nanoseconds < 1'000'000'000);
@@ -253,14 +248,17 @@ bool Time::operator<(const Time& other) const
 {
     return m_seconds < other.m_seconds || (m_seconds == other.m_seconds && m_nanoseconds < other.m_nanoseconds);
 }
+
 bool Time::operator<=(const Time& other) const
 {
     return m_seconds < other.m_seconds || (m_seconds == other.m_seconds && m_nanoseconds <= other.m_nanoseconds);
 }
+
 bool Time::operator>(const Time& other) const
 {
     return m_seconds > other.m_seconds || (m_seconds == other.m_seconds && m_nanoseconds > other.m_nanoseconds);
 }
+
 bool Time::operator>=(const Time& other) const
 {
     return m_seconds > other.m_seconds || (m_seconds == other.m_seconds && m_nanoseconds >= other.m_nanoseconds);
@@ -297,6 +295,7 @@ static Time now_time_from_clock(clockid_t clock_id)
     return Time::from_timespec(now_spec);
 }
 }
+
 Time Time::now_realtime()
 {
     return now_time_from_clock(CLOCK_REALTIME);

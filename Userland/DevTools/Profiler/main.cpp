@@ -46,7 +46,7 @@ static bool generate_profile(pid_t& pid);
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     int pid = 0;
-    const char* perfcore_file_arg = nullptr;
+    char const* perfcore_file_arg = nullptr;
     Core::ArgsParser args_parser;
     args_parser.add_option(pid, "PID to profile", "pid", 'p', "PID");
     args_parser.add_positional_argument(perfcore_file_arg, "Path of perfcore file", "perfcore-file", Core::ArgsParser::Required::No);
@@ -153,13 +153,31 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     };
 
+    auto source_view = TRY(bottom_splitter->try_add<GUI::TableView>());
+    source_view->set_visible(false);
+
+    auto update_source_model = [&] {
+        if (source_view->is_visible() && !tree_view->selection().is_empty()) {
+            profile->set_source_index(tree_view->selection().first());
+            source_view->set_model(profile->source_model());
+        } else {
+            source_view->set_model(nullptr);
+        }
+    };
+
     tree_view->on_selection_change = [&] {
         update_disassembly_model();
+        update_source_model();
     };
 
     auto disassembly_action = GUI::Action::create_checkable("Show &Disassembly", { Mod_Ctrl, Key_D }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/x86.png").release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
         disassembly_view->set_visible(action.is_checked());
         update_disassembly_model();
+    });
+
+    auto source_action = GUI::Action::create_checkable("Show &Source", { Mod_Ctrl, Key_S }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/x86.png").release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
+        source_view->set_visible(action.is_checked());
+        update_source_model();
     });
 
     auto samples_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Samples"));
@@ -172,7 +190,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto individual_sample_view = TRY(samples_splitter->try_add<GUI::TableView>());
     samples_table_view->on_selection_change = [&] {
-        const auto& index = samples_table_view->selection().first();
+        auto const& index = samples_table_view->selection().first();
         auto model = IndividualSampleModel::create(*profile, index.data(GUI::ModelRole::Custom).to_integer<size_t>());
         individual_sample_view->set_model(move(model));
     };
@@ -187,7 +205,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto individual_signpost_view = TRY(signposts_splitter->try_add<GUI::TableView>());
     signposts_table_view->on_selection_change = [&] {
-        const auto& index = signposts_table_view->selection().first();
+        auto const& index = signposts_table_view->selection().first();
         auto model = IndividualSampleModel::create(*profile, index.data(GUI::ModelRole::Custom).to_integer<size_t>());
         individual_signpost_view->set_model(move(model));
     };
@@ -198,9 +216,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto flamegraph_view = TRY(flamegraph_tab->try_add<FlameGraphView>(profile->model(), ProfileModel::Column::StackFrame, ProfileModel::Column::SampleCount));
 
-    const u64 start_of_trace = profile->first_timestamp();
-    const u64 end_of_trace = start_of_trace + profile->length_in_ms();
-    const auto clamp_timestamp = [start_of_trace, end_of_trace](u64 timestamp) -> u64 {
+    u64 const start_of_trace = profile->first_timestamp();
+    u64 const end_of_trace = start_of_trace + profile->length_in_ms();
+    auto const clamp_timestamp = [start_of_trace, end_of_trace](u64 timestamp) -> u64 {
         return min(end_of_trace, max(timestamp, start_of_trace));
     };
 
@@ -255,11 +273,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         profile->set_show_percentages(action.is_checked());
         tree_view->update();
         disassembly_view->update();
+        source_view->update();
     });
     percent_action->set_checked(false);
     TRY(view_menu->try_add_action(percent_action));
 
     TRY(view_menu->try_add_action(disassembly_action));
+    TRY(view_menu->try_add_action(source_action));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
@@ -271,7 +291,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     return app->exec();
 }
 
-static bool prompt_to_stop_profiling(pid_t pid, const String& process_name)
+static bool prompt_to_stop_profiling(pid_t pid, String const& process_name)
 {
     auto window = GUI::Window::construct();
     window->set_title(String::formatted("Profiling {}({})", process_name, pid));

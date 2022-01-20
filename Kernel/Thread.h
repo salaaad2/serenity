@@ -13,7 +13,6 @@
 #include <AK/IntrusiveList.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
-#include <AK/String.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <AK/Variant.h>
@@ -146,7 +145,7 @@ struct ThreadRegisters {
 };
 
 class Thread
-    : public ListedRefCounted<Thread>
+    : public ListedRefCounted<Thread, LockType::Spinlock>
     , public Weakable<Thread> {
     AK_MAKE_NONCOPYABLE(Thread);
     AK_MAKE_NONMOVABLE(Thread);
@@ -1241,7 +1240,13 @@ public:
     bool is_profiling_suppressed() const { return m_is_profiling_suppressed; }
     void set_profiling_suppressed() { m_is_profiling_suppressed = true; }
 
-    String backtrace();
+    bool is_promise_violation_pending() const { return m_is_promise_violation_pending; }
+    void set_promise_violation_pending(bool value) { m_is_promise_violation_pending = value; }
+
+    bool is_allocation_enabled() const { return m_allocation_enabled; }
+    void set_allocation_enabled(bool value) { m_allocation_enabled = value; }
+
+    ErrorOr<NonnullOwnPtr<KString>> backtrace();
 
 private:
     Thread(NonnullRefPtr<Process>, NonnullOwnPtr<Memory::Region>, NonnullRefPtr<Timer>, NonnullOwnPtr<KString>);
@@ -1336,7 +1341,7 @@ private:
     SignalBlockerSet m_signal_blocker_set;
     FlatPtr m_kernel_stack_base { 0 };
     FlatPtr m_kernel_stack_top { 0 };
-    OwnPtr<Memory::Region> m_kernel_stack_region;
+    NonnullOwnPtr<Memory::Region> m_kernel_stack_region;
     VirtualAddress m_thread_specific_data;
     Optional<Memory::VirtualRange> m_thread_specific_range;
     Array<SignalActionData, NSIG> m_signal_action_data;
@@ -1345,6 +1350,7 @@ private:
     u32 m_lock_requested_count { 0 };
     IntrusiveListNode<Thread> m_blocked_threads_list_node;
     LockRank m_lock_rank_mask { LockRank::None };
+    bool m_allocation_enabled { true };
 
 #if LOCK_DEBUG
     struct HoldingLockInfo {
@@ -1390,6 +1396,7 @@ private:
     bool m_in_block { false };
     bool m_is_idle_thread { false };
     bool m_is_crashing { false };
+    bool m_is_promise_violation_pending { false };
     Atomic<bool> m_have_any_unmasked_pending_signals { false };
     Atomic<u32> m_nested_profiler_calls { 0 };
 

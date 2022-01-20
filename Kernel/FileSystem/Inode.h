@@ -23,7 +23,7 @@
 
 namespace Kernel {
 
-class Inode : public ListedRefCounted<Inode>
+class Inode : public ListedRefCounted<Inode, LockType::Spinlock>
     , public Weakable<Inode> {
     friend class VirtualFileSystem;
     friend class FileSystem;
@@ -31,7 +31,7 @@ class Inode : public ListedRefCounted<Inode>
 public:
     virtual ~Inode();
 
-    virtual void one_ref_left() { }
+    virtual void remove_from_secondary_lists() { }
 
     FileSystem& fs() { return m_file_system; }
     FileSystem const& fs() const { return m_file_system; }
@@ -106,8 +106,8 @@ protected:
     void set_metadata_dirty(bool);
     ErrorOr<void> prepare_to_write_data();
 
-    void did_add_child(InodeIdentifier const& child_id, String const& name);
-    void did_remove_child(InodeIdentifier const& child_id, String const& name);
+    void did_add_child(InodeIdentifier child_id, StringView);
+    void did_remove_child(InodeIdentifier child_id, StringView);
     void did_modify_contents();
     void did_delete_self();
 

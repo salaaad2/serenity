@@ -67,16 +67,6 @@ static inline u64 page_count_to_bytes(size_t count)
     return count * 4096;
 }
 
-static inline u64 page_count_to_kb(u64 count)
-{
-    return page_count_to_bytes(count) / 1024;
-}
-
-static inline u64 bytes_to_kb(u64 bytes)
-{
-    return bytes / 1024;
-}
-
 void MemoryStatsWidget::refresh()
 {
     auto proc_memstat = Core::File::construct("/proc/memstat");
@@ -87,7 +77,6 @@ void MemoryStatsWidget::refresh()
     auto json_result = JsonValue::from_string(file_contents).release_value_but_fixme_should_propagate_errors();
     auto const& json = json_result.as_object();
 
-    [[maybe_unused]] u32 kmalloc_eternal_allocated = json.get("kmalloc_eternal_allocated").to_u32();
     u32 kmalloc_allocated = json.get("kmalloc_allocated").to_u32();
     u32 kmalloc_available = json.get("kmalloc_available").to_u32();
     u64 user_physical_allocated = json.get("user_physical_allocated").to_u64();

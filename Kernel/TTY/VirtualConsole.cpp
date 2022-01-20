@@ -7,7 +7,6 @@
  */
 
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Devices/HID/HIDManagement.h>
@@ -103,10 +102,7 @@ void VirtualConsole::set_graphical(bool graphical)
 
 UNMAP_AFTER_INIT NonnullRefPtr<VirtualConsole> VirtualConsole::create(size_t index)
 {
-    // FIXME: Don't make a temporary String here
-    auto pts_name_or_error = KString::try_create(String::formatted("/dev/tty/{}", index));
-    VERIFY(!pts_name_or_error.is_error());
-    auto pts_name = pts_name_or_error.release_value();
+    auto pts_name = MUST(KString::formatted("/dev/tty/{}", index));
 
     auto virtual_console_or_error = DeviceManagement::try_create_device<VirtualConsole>(index, move(pts_name));
     // FIXME: Find a way to propagate errors
@@ -134,7 +130,7 @@ UNMAP_AFTER_INIT void VirtualConsole::initialize()
 
     // Allocate twice of the max row * max column * sizeof(Cell) to ensure we can have some sort of history mechanism...
     auto size = GraphicsManagement::the().console()->max_column() * GraphicsManagement::the().console()->max_row() * sizeof(Cell) * 2;
-    m_cells = MM.allocate_kernel_region(Memory::page_round_up(size), "Virtual Console Cells", Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow).release_value();
+    m_cells = MM.allocate_kernel_region(Memory::page_round_up(size).release_value_but_fixme_should_propagate_errors(), "Virtual Console Cells", Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow).release_value();
 
     // Add the lines, so we also ensure they will be flushed now
     for (size_t row = 0; row < rows(); row++) {
@@ -153,7 +149,7 @@ void VirtualConsole::refresh_after_resolution_change()
     // Note: From now on, columns() and rows() are updated with the new settings.
 
     auto size = GraphicsManagement::the().console()->max_column() * GraphicsManagement::the().console()->max_row() * sizeof(Cell) * 2;
-    auto new_cells = MM.allocate_kernel_region(Memory::page_round_up(size), "Virtual Console Cells", Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow).release_value();
+    auto new_cells = MM.allocate_kernel_region(Memory::page_round_up(size).release_value_but_fixme_should_propagate_errors(), "Virtual Console Cells", Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow).release_value();
 
     if (rows() < old_rows_count) {
         m_lines.shrink(rows());

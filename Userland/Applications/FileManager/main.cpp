@@ -30,6 +30,7 @@
 #include <LibGUI/Desktop.h>
 #include <LibGUI/FileIconProvider.h>
 #include <LibGUI/FileSystemModel.h>
+#include <LibGUI/InputBox.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
 #include <LibGUI/MessageBox.h>
@@ -54,10 +55,11 @@
 using namespace FileManager;
 
 static ErrorOr<int> run_in_desktop_mode();
-static ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_on_init);
+static ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& entry_focused_on_init);
 static void do_copy(Vector<String> const& selected_file_paths, FileOperation file_operation);
 static void do_paste(String const& target_directory, GUI::Window* window);
 static void do_create_link(Vector<String> const& selected_file_paths, GUI::Window* window);
+static void do_create_archive(Vector<String> const& selected_file_paths, GUI::Window* window);
 static void do_unzip_archive(Vector<String> const& selected_file_paths, GUI::Window* window);
 static void show_properties(String const& container_dir_path, String const& path, Vector<String> const& selected, GUI::Window* window);
 static bool add_launch_handler_actions_to_menu(RefPtr<GUI::Menu>& menu, DirectoryView const& directory_view, String const& full_path, RefPtr<GUI::Action>& default_action, NonnullRefPtrVector<LauncherHandler>& current_file_launch_handlers);
@@ -187,6 +189,58 @@ void do_create_link(Vector<String> const& selected_file_paths, GUI::Window* wind
     }
 }
 
+void do_create_archive(Vector<String> const& selected_file_paths, GUI::Window* window)
+{
+    String archive_name;
+    if (GUI::InputBox::show(window, archive_name, "Enter name:", "Create Archive") != GUI::InputBox::ExecOK)
+        return;
+
+    auto output_directory_path = LexicalPath(selected_file_paths.first());
+
+    StringBuilder path_builder;
+    path_builder.append(output_directory_path.dirname());
+    path_builder.append("/");
+    if (archive_name.is_empty()) {
+        path_builder.append(output_directory_path.parent().basename());
+        path_builder.append(".zip");
+    } else {
+        path_builder.append(archive_name);
+        if (!archive_name.ends_with(".zip"))
+            path_builder.append(".zip");
+    }
+    auto output_path = path_builder.build();
+
+    pid_t zip_pid = fork();
+    if (zip_pid < 0) {
+        perror("fork");
+        VERIFY_NOT_REACHED();
+    }
+
+    if (!zip_pid) {
+        Vector<String> relative_paths;
+        Vector<char const*> arg_list;
+        arg_list.append("/bin/zip");
+        arg_list.append("-r");
+        arg_list.append("-f");
+        arg_list.append(output_path.characters());
+        for (auto const& path : selected_file_paths) {
+            relative_paths.append(LexicalPath::relative_path(path, output_directory_path.dirname()));
+            arg_list.append(relative_paths.last().characters());
+        }
+        arg_list.append(nullptr);
+        int rc = execvp("/bin/zip", const_cast<char* const*>(arg_list.data()));
+        if (rc < 0) {
+            perror("execvp");
+            _exit(1);
+        }
+    } else {
+        int status;
+        int rc = waitpid(zip_pid, &status, 0);
+        if (rc < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            GUI::MessageBox::show(window, "Could not create archive", "Archive Error", GUI::MessageBox::Type::Error);
+    }
+}
+
 void do_unzip_archive(Vector<String> const& selected_file_paths, GUI::Window* window)
 {
     String archive_file_path = selected_file_paths.first();
@@ -307,6 +361,19 @@ ErrorOr<int> run_in_desktop_mode()
         window);
     copy_action->set_enabled(false);
 
+    auto create_archive_action
+        = GUI::Action::create(
+            "Create &Archive",
+            Gfx::Bitmap::try_load_from_file("/res/icons/16x16/filetype-archive.png").release_value_but_fixme_should_propagate_errors(),
+            [&](GUI::Action const&) {
+                auto paths = directory_view->selected_file_paths();
+                if (paths.is_empty())
+                    return;
+
+                do_create_archive(paths, directory_view->window());
+            },
+            window);
+
     auto unzip_archive_action
         = GUI::Action::create(
             "E&xtract Here",
@@ -420,6 +487,7 @@ ErrorOr<int> run_in_desktop_mode()
                 file_context_menu->add_action(paste_action);
                 file_context_menu->add_action(directory_view->delete_action());
                 file_context_menu->add_action(directory_view->rename_action());
+                file_context_menu->add_action(create_archive_action);
                 file_context_menu->add_separator();
 
                 if (node.full_path().ends_with(".zip", AK::CaseSensitivity::CaseInsensitive)) {
@@ -452,7 +520,7 @@ ErrorOr<int> run_in_desktop_mode()
     return GUI::Application::the()->exec();
 }
 
-ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_on_init)
+ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& entry_focused_on_init)
 {
     auto window = TRY(GUI::Window::try_create());
     window->set_title("File Manager");
@@ -732,6 +800,20 @@ ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_
             },
             window);
 
+    auto create_archive_action
+        = GUI::Action::create(
+            "Create &Archive",
+            Gfx::Bitmap::try_load_from_file("/res/icons/16x16/filetype-archive.png").release_value_but_fixme_should_propagate_errors(),
+            [&](GUI::Action const&) {
+                auto paths = directory_view->selected_file_paths();
+                if (paths.is_empty())
+                    return;
+
+                do_create_archive(paths, directory_view->window());
+                refresh_tree_view();
+            },
+            window);
+
     auto unzip_archive_action
         = GUI::Action::create(
             "E&xtract Here",
@@ -869,6 +951,10 @@ ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_
     directory_view->set_should_show_dotfiles(show_dotfiles);
     action_show_dotfiles->set_checked(show_dotfiles);
 
+    auto const initial_location_contains_dotfile = initial_location.contains("/."sv);
+    action_show_dotfiles->set_checked(initial_location_contains_dotfile);
+    action_show_dotfiles->on_activation(action_show_dotfiles);
+
     auto view_menu = TRY(window->try_add_menu("&View"));
     auto layout_menu = TRY(view_menu->try_add_submenu("&Layout"));
     TRY(layout_menu->try_add_action(*layout_toolbar_action));
@@ -884,7 +970,7 @@ ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_
     TRY(view_menu->try_add_separator());
     TRY(view_menu->try_add_action(action_show_dotfiles));
 
-    auto go_to_location_action = GUI::Action::create("Go to &Location...", { Mod_Ctrl, Key_L }, [&](auto&) {
+    auto go_to_location_action = GUI::Action::create("Go to &Location...", { Mod_Ctrl, Key_L }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png").release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         toolbar_container.set_visible(true);
         location_toolbar.set_visible(true);
         breadcrumb_toolbar.set_visible(false);
@@ -1049,6 +1135,7 @@ ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_
     TRY(directory_context_menu->try_add_action(directory_view->delete_action()));
     TRY(directory_context_menu->try_add_action(directory_view->rename_action()));
     TRY(directory_context_menu->try_add_action(shortcut_action));
+    TRY(directory_context_menu->try_add_action(create_archive_action));
     TRY(directory_context_menu->try_add_separator());
     TRY(directory_context_menu->try_add_action(properties_action));
 
@@ -1098,6 +1185,7 @@ ErrorOr<int> run_in_windowed_mode(String initial_location, String entry_focused_
                 file_context_menu->add_action(directory_view->delete_action());
                 file_context_menu->add_action(directory_view->rename_action());
                 file_context_menu->add_action(shortcut_action);
+                file_context_menu->add_action(create_archive_action);
                 file_context_menu->add_separator();
 
                 if (node.full_path().ends_with(".zip", AK::CaseSensitivity::CaseInsensitive)) {

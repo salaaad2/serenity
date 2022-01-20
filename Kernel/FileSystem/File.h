@@ -71,11 +71,11 @@ public:
 //   - Should create a Region in the Process and return it if successful.
 
 class File
-    : public RefCountedBase
+    : public RefCounted<File>
     , public Weakable<File> {
 public:
-    virtual bool unref() const;
-    virtual void before_removing() { }
+    virtual bool unref() const { return RefCounted<File>::unref(); }
+    virtual void will_be_destroyed() { }
     virtual ~File();
 
     virtual ErrorOr<NonnullRefPtr<OpenFileDescription>> open(int options);

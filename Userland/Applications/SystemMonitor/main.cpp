@@ -51,7 +51,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-static NonnullRefPtr<GUI::Window> build_process_window(pid_t);
+static ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t);
 static NonnullRefPtr<GUI::Widget> build_storage_widget();
 static NonnullRefPtr<GUI::Widget> build_hardware_tab();
 static NonnullRefPtr<GUI::Widget> build_performance_tab();
@@ -139,20 +139,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_title("System Monitor");
     window->resize(560, 430);
 
-    auto& main_widget = window->set_main_widget<GUI::Widget>();
-    main_widget.set_layout<GUI::VerticalBoxLayout>();
-    main_widget.set_fill_with_background_color(true);
+    auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
+    main_widget->set_layout<GUI::VerticalBoxLayout>();
+    main_widget->set_fill_with_background_color(true);
 
     // Add a tasteful separating line between the menu and the main UI.
-    auto& top_line = main_widget.add<GUI::SeparatorWidget>(Gfx::Orientation::Horizontal);
+    auto& top_line = main_widget->add<GUI::SeparatorWidget>(Gfx::Orientation::Horizontal);
     top_line.set_fixed_height(2);
 
-    auto& tabwidget_container = main_widget.add<GUI::Widget>();
+    auto& tabwidget_container = main_widget->add<GUI::Widget>();
     tabwidget_container.set_layout<GUI::VerticalBoxLayout>();
     tabwidget_container.layout()->set_margins({ 0, 4, 4 });
     auto& tabwidget = tabwidget_container.add<GUI::TabWidget>();
 
-    statusbar = main_widget.add<GUI::Statusbar>(3);
+    statusbar = main_widget->add<GUI::Statusbar>(3);
 
     auto process_model = ProcessModel::create();
     process_model->on_state_update = [&](int process_count, int thread_count) {
@@ -280,7 +280,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             RefPtr<GUI::Window> process_window;
             auto it = process_windows.find(pid);
             if (it == process_windows.end()) {
-                process_window = build_process_window(pid);
+                auto process_window_or_error = build_process_window(pid);
+                if (process_window_or_error.is_error())
+                    return;
+                process_window = process_window_or_error.release_value();
                 process_window->on_close_request = [pid, &process_windows] {
                     process_windows.remove(pid);
                     return GUI::Window::CloseRequestDecision::Close;
@@ -396,17 +399,17 @@ public:
     }
 };
 
-NonnullRefPtr<GUI::Window> build_process_window(pid_t pid)
+ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t pid)
 {
     auto window = GUI::Window::construct();
     window->resize(480, 360);
     window->set_title(String::formatted("PID {} - System Monitor", pid));
 
-    auto& main_widget = window->set_main_widget<GUI::Widget>();
-    main_widget.set_fill_with_background_color(true);
-    main_widget.set_layout<GUI::VerticalBoxLayout>();
+    auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
+    main_widget->set_fill_with_background_color(true);
+    main_widget->set_layout<GUI::VerticalBoxLayout>();
 
-    auto& hero_container = main_widget.add<GUI::Widget>();
+    auto& hero_container = main_widget->add<GUI::Widget>();
     hero_container.set_shrink_to_fit(true);
     hero_container.set_layout<GUI::HorizontalBoxLayout>();
     hero_container.layout()->set_margins(4);
@@ -436,10 +439,10 @@ NonnullRefPtr<GUI::Window> build_process_window(pid_t pid)
         process_index.sibling_at_column(ProcessModel::Column::Name).data().to_string(),
         pid));
 
-    auto& separator = main_widget.add<GUI::HorizontalSeparator>();
+    auto& separator = main_widget->add<GUI::HorizontalSeparator>();
     separator.set_fixed_height(2);
 
-    auto& widget_stack = main_widget.add<GUI::StackWidget>();
+    auto& widget_stack = main_widget->add<GUI::StackWidget>();
     auto& unavailable_process_widget = widget_stack.add<UnavailableProcessWidget>(String::formatted("Unable to access PID {}", pid));
 
     auto& process_tab_widget = widget_stack.add<GUI::TabWidget>();
@@ -574,7 +577,7 @@ NonnullRefPtr<GUI::Widget> build_hardware_tab()
             Vector<GUI::JsonArrayModel::FieldSpec> processors_field;
             processors_field.empend("processor", "Processor", Gfx::TextAlignment::CenterRight);
             processors_field.empend("cpuid", "CPUID", Gfx::TextAlignment::CenterLeft);
-            processors_field.empend("brandstr", "Brand", Gfx::TextAlignment::CenterLeft);
+            processors_field.empend("brand", "Brand", Gfx::TextAlignment::CenterLeft);
             processors_field.empend("Features", Gfx::TextAlignment::CenterLeft, [](auto& object) {
                 StringBuilder builder;
                 auto features = object.get("features").as_array();
@@ -665,28 +668,37 @@ NonnullRefPtr<GUI::Widget> build_performance_tab()
     graphs_container->layout()->set_margins(4);
 
     auto& cpu_graph_group_box = graphs_container->add<GUI::GroupBox>("CPU usage");
-    cpu_graph_group_box.set_layout<GUI::HorizontalBoxLayout>();
-    cpu_graph_group_box.layout()->set_margins(6);
-    cpu_graph_group_box.set_fixed_height(120);
+    cpu_graph_group_box.set_layout<GUI::VerticalBoxLayout>();
+
+    size_t cpu_graphs_per_row = min(4, ProcessModel::the().cpus().size());
+    auto cpu_graph_rows = ceil_div(ProcessModel::the().cpus().size(), cpu_graphs_per_row);
+    cpu_graph_group_box.set_fixed_height(120u * cpu_graph_rows);
+
     Vector<GraphWidget&> cpu_graphs;
-    for (size_t i = 0; i < ProcessModel::the().cpus().size(); i++) {
-        auto& cpu_graph = cpu_graph_group_box.add<GraphWidget>();
-        cpu_graph.set_max(100);
-        cpu_graph.set_value_format(0, {
-                                          .graph_color_role = ColorRole::SyntaxPreprocessorStatement,
-                                          .text_formatter = [](int value) {
-                                              return String::formatted("Total: {}%", value);
-                                          },
-                                      });
-        cpu_graph.set_value_format(1, {
-                                          .graph_color_role = ColorRole::SyntaxPreprocessorValue,
-                                          .text_formatter = [](int value) {
-                                              return String::formatted("Kernel: {}%", value);
-                                          },
-                                      });
-        cpu_graphs.append(cpu_graph);
+    for (auto row = 0u; row < cpu_graph_rows; ++row) {
+        auto& cpu_graph_row = cpu_graph_group_box.add<GUI::Widget>();
+        cpu_graph_row.set_layout<GUI::HorizontalBoxLayout>();
+        cpu_graph_row.layout()->set_margins(6);
+        cpu_graph_row.set_fixed_height(108);
+        for (auto i = 0u; i < cpu_graphs_per_row; ++i) {
+            auto& cpu_graph = cpu_graph_row.add<GraphWidget>();
+            cpu_graph.set_max(100);
+            cpu_graph.set_value_format(0, {
+                                              .graph_color_role = ColorRole::SyntaxPreprocessorStatement,
+                                              .text_formatter = [](int value) {
+                                                  return String::formatted("Total: {}%", value);
+                                              },
+                                          });
+            cpu_graph.set_value_format(1, {
+                                              .graph_color_role = ColorRole::SyntaxPreprocessorValue,
+                                              .text_formatter = [](int value) {
+                                                  return String::formatted("Kernel: {}%", value);
+                                              },
+                                          });
+            cpu_graphs.append(cpu_graph);
+        }
     }
-    ProcessModel::the().on_cpu_info_change = [cpu_graphs](const NonnullOwnPtrVector<ProcessModel::CpuInfo>& cpus) {
+    ProcessModel::the().on_cpu_info_change = [cpu_graphs](const NonnullOwnPtrVector<ProcessModel::CpuInfo>& cpus) mutable {
         float sum_cpu = 0;
         for (size_t i = 0; i < cpus.size(); ++i) {
             cpu_graphs[i].add_value({ static_cast<size_t>(cpus[i].total_cpu_percent), static_cast<size_t>(cpus[i].total_cpu_percent_kernel) });

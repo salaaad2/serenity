@@ -80,6 +80,17 @@ private:
 
 public:
     SinglyLinkedList() = default;
+    SinglyLinkedList(const SinglyLinkedList& other) = delete;
+    SinglyLinkedList(SinglyLinkedList&& other)
+        : m_head(other.m_head)
+        , m_tail(other.m_tail)
+    {
+        other.m_head = nullptr;
+        other.m_tail = nullptr;
+    }
+    SinglyLinkedList& operator=(const SinglyLinkedList& other) = delete;
+    SinglyLinkedList& operator=(SinglyLinkedList&&) = delete;
+
     ~SinglyLinkedList() { clear(); }
 
     bool is_empty() const { return !head(); }

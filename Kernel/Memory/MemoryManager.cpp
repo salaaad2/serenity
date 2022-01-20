@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -44,6 +44,14 @@ extern size_t multiboot_copy_boot_modules_count;
 __attribute__((section(".super_pages"))) static u8 super_pages[4 * MiB];
 
 namespace Kernel::Memory {
+
+ErrorOr<FlatPtr> page_round_up(FlatPtr x)
+{
+    if (x > (explode_byte(0xFF) & ~0xFFF)) {
+        return Error::from_errno(EINVAL);
+    }
+    return (((FlatPtr)(x)) + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
+}
 
 // NOTE: We can NOT use Singleton for this class, because
 // MemoryManager::initialize is called *before* global constructors are
@@ -93,13 +101,13 @@ UNMAP_AFTER_INIT void MemoryManager::protect_kernel_image()
 {
     SpinlockLocker page_lock(kernel_page_directory().get_lock());
     // Disable writing to the kernel text and rodata segments.
-    for (auto i = start_of_kernel_text; i < start_of_kernel_data; i += PAGE_SIZE) {
+    for (auto const* i = start_of_kernel_text; i < start_of_kernel_data; i += PAGE_SIZE) {
         auto& pte = *ensure_pte(kernel_page_directory(), VirtualAddress(i));
         pte.set_writable(false);
     }
     if (Processor::current().has_feature(CPUFeature::NX)) {
         // Disable execution of the kernel data, bss and heap segments.
-        for (auto i = start_of_kernel_data; i < end_of_kernel_image; i += PAGE_SIZE) {
+        for (auto const* i = start_of_kernel_data; i < end_of_kernel_image; i += PAGE_SIZE) {
             auto& pte = *ensure_pte(kernel_page_directory(), VirtualAddress(i));
             pte.set_execute_disabled(true);
         }
@@ -115,7 +123,7 @@ UNMAP_AFTER_INIT void MemoryManager::unmap_prekernel()
     auto end = end_of_prekernel_image.page_base().get();
 
     for (auto i = start; i <= end; i += PAGE_SIZE)
-        release_pte(kernel_page_directory(), VirtualAddress(i), i == end ? IsLastPTERelease::Yes : IsLastPTERelease::No, UnsafeIgnoreMissingPageTable::Yes);
+        release_pte(kernel_page_directory(), VirtualAddress(i), i == end ? IsLastPTERelease::Yes : IsLastPTERelease::No);
     flush_tlb(&kernel_page_directory(), VirtualAddress(start), (end - start) / PAGE_SIZE);
 }
 
@@ -137,7 +145,7 @@ void MemoryManager::unmap_text_after_init()
     SpinlockLocker mm_lock(s_mm_lock);
 
     auto start = page_round_down((FlatPtr)&start_of_unmap_after_init);
-    auto end = page_round_up((FlatPtr)&end_of_unmap_after_init);
+    auto end = page_round_up((FlatPtr)&end_of_unmap_after_init).release_value_but_fixme_should_propagate_errors();
 
     // Unmap the entire .unmap_after_init section
     for (auto i = start; i < end; i += PAGE_SIZE) {
@@ -155,7 +163,7 @@ UNMAP_AFTER_INIT void MemoryManager::protect_ksyms_after_init()
     SpinlockLocker page_lock(kernel_page_directory().get_lock());
 
     auto start = page_round_down((FlatPtr)start_of_kernel_ksyms);
-    auto end = page_round_up((FlatPtr)end_of_kernel_ksyms);
+    auto end = page_round_up((FlatPtr)end_of_kernel_ksyms).release_value_but_fixme_should_propagate_errors();
 
     for (auto i = start; i < end; i += PAGE_SIZE) {
         auto& pte = *ensure_pte(kernel_page_directory(), VirtualAddress(i));
@@ -164,6 +172,17 @@ UNMAP_AFTER_INIT void MemoryManager::protect_ksyms_after_init()
     }
 
     dmesgln("Write-protected kernel symbols after init.");
+}
+
+IterationDecision MemoryManager::for_each_physical_memory_range(Function<IterationDecision(PhysicalMemoryRange const&)> callback)
+{
+    VERIFY(!m_physical_memory_ranges.is_empty());
+    for (auto& current_range : m_physical_memory_ranges) {
+        IterationDecision decision = callback(current_range);
+        if (decision != IterationDecision::Continue)
+            return decision;
+    }
+    return IterationDecision::Continue;
 }
 
 UNMAP_AFTER_INIT void MemoryManager::register_reserved_ranges()
@@ -190,15 +209,14 @@ UNMAP_AFTER_INIT void MemoryManager::register_reserved_ranges()
     m_reserved_memory_ranges.append(ContiguousReservedMemoryRange { range.start, m_physical_memory_ranges.last().start.get() + m_physical_memory_ranges.last().length - range.start.get() });
 }
 
-bool MemoryManager::is_allowed_to_mmap_to_userspace(PhysicalAddress start_address, VirtualRange const& range) const
+bool MemoryManager::is_allowed_to_read_physical_memory_for_userspace(PhysicalAddress start_address, size_t read_length) const
 {
-    VERIFY(!m_reserved_memory_ranges.is_empty());
     // Note: Guard against overflow in case someone tries to mmap on the edge of
     // the RAM
-    if (start_address.offset_addition_would_overflow(range.size()))
+    if (start_address.offset_addition_would_overflow(read_length))
         return false;
-    auto end_address = start_address.offset(range.size());
-    for (auto& current_range : m_reserved_memory_ranges) {
+    auto end_address = start_address.offset(read_length);
+    for (auto const& current_range : m_reserved_memory_ranges) {
         if (current_range.start > start_address)
             continue;
         if (current_range.start.offset(current_range.length) < end_address)
@@ -213,7 +231,7 @@ UNMAP_AFTER_INIT void MemoryManager::parse_memory_map()
     // Register used memory regions that we know of.
     m_used_memory_ranges.ensure_capacity(4);
     m_used_memory_ranges.append(UsedMemoryRange { UsedMemoryRangeType::LowMemory, PhysicalAddress(0x00000000), PhysicalAddress(1 * MiB) });
-    m_used_memory_ranges.append(UsedMemoryRange { UsedMemoryRangeType::Kernel, PhysicalAddress(virtual_to_low_physical((FlatPtr)start_of_kernel_image)), PhysicalAddress(page_round_up(virtual_to_low_physical((FlatPtr)end_of_kernel_image))) });
+    m_used_memory_ranges.append(UsedMemoryRange { UsedMemoryRangeType::Kernel, PhysicalAddress(virtual_to_low_physical((FlatPtr)start_of_kernel_image)), PhysicalAddress(page_round_up(virtual_to_low_physical((FlatPtr)end_of_kernel_image)).release_value_but_fixme_should_propagate_errors()) });
 
     if (multiboot_flags & 0x4) {
         auto* bootmods_start = multiboot_copy_boot_modules_array;
@@ -380,7 +398,7 @@ UNMAP_AFTER_INIT void MemoryManager::initialize_physical_pages()
 
     // Calculate how many bytes the array will consume
     auto physical_page_array_size = m_physical_page_entries_count * sizeof(PhysicalPageEntry);
-    auto physical_page_array_pages = page_round_up(physical_page_array_size) / PAGE_SIZE;
+    auto physical_page_array_pages = page_round_up(physical_page_array_size).release_value_but_fixme_should_propagate_errors() / PAGE_SIZE;
     VERIFY(physical_page_array_pages * PAGE_SIZE >= physical_page_array_size);
 
     // Calculate how many page tables we will need to be able to map them all
@@ -487,9 +505,7 @@ UNMAP_AFTER_INIT void MemoryManager::initialize_physical_pages()
     // so finish setting up the kernel page directory
     m_kernel_page_directory->allocate_kernel_directory();
 
-    // Now create legit PhysicalPage objects for the page tables we created, so that
-    // we can put them into kernel_page_directory().m_page_tables
-    auto& kernel_page_tables = kernel_page_directory().m_page_tables;
+    // Now create legit PhysicalPage objects for the page tables we created.
     virtual_page_array_current_page = virtual_page_array_base;
     for (size_t pt_index = 0; pt_index < needed_page_table_count; pt_index++) {
         VERIFY(virtual_page_array_current_page <= range.end().get());
@@ -497,8 +513,9 @@ UNMAP_AFTER_INIT void MemoryManager::initialize_physical_pages()
         auto physical_page_index = PhysicalAddress::physical_page_index(pt_paddr.get());
         auto& physical_page_entry = m_physical_page_entries[physical_page_index];
         auto physical_page = adopt_ref(*new (&physical_page_entry.allocated.physical_page) PhysicalPage(MayReturnToFreeList::No));
-        auto result = kernel_page_tables.set(virtual_page_array_current_page & ~0x1fffff, move(physical_page));
-        VERIFY(result == AK::HashSetResult::InsertedNewEntry);
+
+        // NOTE: This leaked ref is matched by the unref in MemoryManager::release_pte()
+        (void)physical_page.leak_ref();
 
         virtual_page_array_current_page += (PAGE_SIZE / sizeof(PageTableEntry)) * PAGE_SIZE;
     }
@@ -550,39 +567,38 @@ PageTableEntry* MemoryManager::ensure_pte(PageDirectory& page_directory, Virtual
     u32 page_table_index = (vaddr.get() >> 12) & 0x1ff;
 
     auto* pd = quickmap_pd(page_directory, page_directory_table_index);
-    PageDirectoryEntry& pde = pd[page_directory_index];
-    if (!pde.is_present()) {
-        bool did_purge = false;
-        auto page_table = allocate_user_physical_page(ShouldZeroFill::Yes, &did_purge);
-        if (!page_table) {
-            dbgln("MM: Unable to allocate page table to map {}", vaddr);
-            return nullptr;
-        }
-        if (did_purge) {
-            // If any memory had to be purged, ensure_pte may have been called as part
-            // of the purging process. So we need to re-map the pd in this case to ensure
-            // we're writing to the correct underlying physical page
-            pd = quickmap_pd(page_directory, page_directory_table_index);
-            VERIFY(&pde == &pd[page_directory_index]); // Sanity check
+    auto& pde = pd[page_directory_index];
+    if (pde.is_present())
+        return &quickmap_pt(PhysicalAddress(pde.page_table_base()))[page_table_index];
 
-            VERIFY(!pde.is_present()); // Should have not changed
-        }
-        pde.set_page_table_base(page_table->paddr().get());
-        pde.set_user_allowed(true);
-        pde.set_present(true);
-        pde.set_writable(true);
-        pde.set_global(&page_directory == m_kernel_page_directory.ptr());
-        // Use page_directory_table_index and page_directory_index as key
-        // This allows us to release the page table entry when no longer needed
-        auto result = page_directory.m_page_tables.set(vaddr.get() & ~(FlatPtr)0x1fffff, page_table.release_nonnull());
-        // If you're hitting this VERIFY on x86_64 chances are a 64-bit pointer was truncated somewhere
-        VERIFY(result == AK::HashSetResult::InsertedNewEntry);
+    bool did_purge = false;
+    auto page_table = allocate_user_physical_page(ShouldZeroFill::Yes, &did_purge);
+    if (!page_table) {
+        dbgln("MM: Unable to allocate page table to map {}", vaddr);
+        return nullptr;
     }
+    if (did_purge) {
+        // If any memory had to be purged, ensure_pte may have been called as part
+        // of the purging process. So we need to re-map the pd in this case to ensure
+        // we're writing to the correct underlying physical page
+        pd = quickmap_pd(page_directory, page_directory_table_index);
+        VERIFY(&pde == &pd[page_directory_index]); // Sanity check
 
-    return &quickmap_pt(PhysicalAddress((FlatPtr)pde.page_table_base()))[page_table_index];
+        VERIFY(!pde.is_present()); // Should have not changed
+    }
+    pde.set_page_table_base(page_table->paddr().get());
+    pde.set_user_allowed(true);
+    pde.set_present(true);
+    pde.set_writable(true);
+    pde.set_global(&page_directory == m_kernel_page_directory.ptr());
+
+    // NOTE: This leaked ref is matched by the unref in MemoryManager::release_pte()
+    (void)page_table.leak_ref();
+
+    return &quickmap_pt(PhysicalAddress(pde.page_table_base()))[page_table_index];
 }
 
-void MemoryManager::release_pte(PageDirectory& page_directory, VirtualAddress vaddr, IsLastPTERelease is_last_pte_release, UnsafeIgnoreMissingPageTable unsafe_ignore_missing_page_table)
+void MemoryManager::release_pte(PageDirectory& page_directory, VirtualAddress vaddr, IsLastPTERelease is_last_pte_release)
 {
     VERIFY_INTERRUPTS_DISABLED();
     VERIFY(s_mm_lock.is_locked_by_current_processor());
@@ -609,10 +625,8 @@ void MemoryManager::release_pte(PageDirectory& page_directory, VirtualAddress va
                 }
             }
             if (all_clear) {
+                get_physical_page_entry(PhysicalAddress { pde.page_table_base() }).allocated.physical_page.unref();
                 pde.clear();
-
-                auto result = page_directory.m_page_tables.remove(vaddr.get() & ~0x1fffff);
-                VERIFY(unsafe_ignore_missing_page_table == UnsafeIgnoreMissingPageTable::Yes || result);
             }
         }
     }
@@ -631,10 +645,10 @@ UNMAP_AFTER_INIT void MemoryManager::initialize(u32 cpu)
 Region* MemoryManager::kernel_region_from_vaddr(VirtualAddress vaddr)
 {
     SpinlockLocker lock(s_mm_lock);
-    auto* region_ptr = MM.m_kernel_regions.find_largest_not_above(vaddr.get());
-    if (!region_ptr)
+    auto* region = MM.m_kernel_regions.find_largest_not_above(vaddr.get());
+    if (!region || !region->contains(vaddr))
         return nullptr;
-    return (*region_ptr)->contains(vaddr) ? *region_ptr : nullptr;
+    return region;
 }
 
 Region* MemoryManager::find_user_region_from_vaddr_no_lock(AddressSpace& space, VirtualAddress vaddr)
@@ -723,6 +737,42 @@ ErrorOr<NonnullOwnPtr<Region>> MemoryManager::allocate_contiguous_kernel_region(
     auto vmobject = TRY(AnonymousVMObject::try_create_physically_contiguous_with_size(size));
     auto range = TRY(kernel_page_directory().range_allocator().try_allocate_anywhere(size));
     return allocate_kernel_region_with_vmobject(range, move(vmobject), name, access, cacheable);
+}
+
+ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_page(StringView name, Memory::Region::Access access, RefPtr<Memory::PhysicalPage>& dma_buffer_page)
+{
+    dma_buffer_page = allocate_supervisor_physical_page();
+    if (dma_buffer_page.is_null())
+        return ENOMEM;
+    // Do not enable Cache for this region as physical memory transfers are performed (Most architectures have this behaviour by default)
+    auto region_or_error = allocate_kernel_region(dma_buffer_page->paddr(), PAGE_SIZE, name, access, Region::Cacheable::No);
+    return region_or_error;
+}
+
+ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_page(StringView name, Memory::Region::Access access)
+{
+    RefPtr<Memory::PhysicalPage> dma_buffer_page;
+
+    return allocate_dma_buffer_page(name, access, dma_buffer_page);
+}
+
+ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access, NonnullRefPtrVector<Memory::PhysicalPage>& dma_buffer_pages)
+{
+    VERIFY(!(size % PAGE_SIZE));
+    dma_buffer_pages = allocate_contiguous_supervisor_physical_pages(size);
+    if (dma_buffer_pages.is_empty())
+        return ENOMEM;
+    // Do not enable Cache for this region as physical memory transfers are performed (Most architectures have this behaviour by default)
+    auto region_or_error = allocate_kernel_region(dma_buffer_pages.first().paddr(), size, name, access, Region::Cacheable::No);
+    return region_or_error;
+}
+
+ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access)
+{
+    VERIFY(!(size % PAGE_SIZE));
+    NonnullRefPtrVector<Memory::PhysicalPage> dma_buffer_pages;
+
+    return allocate_dma_buffer_pages(size, name, access, dma_buffer_pages);
 }
 
 ErrorOr<NonnullOwnPtr<Region>> MemoryManager::allocate_kernel_region(size_t size, StringView name, Region::Access access, AllocationStrategy strategy, Region::Cacheable cacheable)
@@ -936,7 +986,7 @@ void MemoryManager::enter_process_address_space(Process& process)
 
 void MemoryManager::enter_address_space(AddressSpace& space)
 {
-    auto current_thread = Thread::current();
+    auto* current_thread = Thread::current();
     VERIFY(current_thread != nullptr);
     SpinlockLocker lock(s_mm_lock);
 
@@ -1057,33 +1107,32 @@ bool MemoryManager::validate_user_stack(AddressSpace& space, VirtualAddress vadd
     return validate_user_stack_no_lock(space, vaddr);
 }
 
-void MemoryManager::register_region(Region& region)
+void MemoryManager::register_kernel_region(Region& region)
 {
+    VERIFY(region.is_kernel());
     SpinlockLocker lock(s_mm_lock);
-    if (region.is_kernel())
-        m_kernel_regions.insert(region.vaddr().get(), &region);
+    m_kernel_regions.insert(region.vaddr().get(), region);
 }
 
-void MemoryManager::unregister_region(Region& region)
+void MemoryManager::unregister_kernel_region(Region& region)
 {
+    VERIFY(region.is_kernel());
     SpinlockLocker lock(s_mm_lock);
-    if (region.is_kernel())
-        m_kernel_regions.remove(region.vaddr().get());
+    m_kernel_regions.remove(region.vaddr().get());
 }
 
 void MemoryManager::dump_kernel_regions()
 {
     dbgln("Kernel regions:");
 #if ARCH(I386)
-    auto addr_padding = "";
+    char const* addr_padding = "";
 #else
-    auto addr_padding = "        ";
+    char const* addr_padding = "        ";
 #endif
     dbgln("BEGIN{}         END{}        SIZE{}       ACCESS NAME",
         addr_padding, addr_padding, addr_padding);
     SpinlockLocker lock(s_mm_lock);
-    for (auto* region_ptr : m_kernel_regions) {
-        auto& region = *region_ptr;
+    for (auto const& region : m_kernel_regions) {
         dbgln("{:p} -- {:p} {:p} {:c}{:c}{:c}{:c}{:c}{:c} {}",
             region.vaddr().get(),
             region.vaddr().offset(region.size() - 1).get(),

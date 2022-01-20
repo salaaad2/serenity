@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2019-2020, William McPherson <willmcpherson2@gmail.com>
- * Copyright (c) 2021, kleines Filmröllchen <malu.bertsch@gmail.com>
+ * Copyright (c) 2021, kleines Filmröllchen <filmroellchen@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -239,7 +239,7 @@ void RollWidget::mouseup_event([[maybe_unused]] GUI::MouseEvent& event)
 void RollWidget::mousewheel_event(GUI::MouseEvent& event)
 {
     if (event.modifiers() & KeyModifier::Mod_Shift) {
-        horizontal_scrollbar().set_value(horizontal_scrollbar().value() + (event.wheel_delta() * horizontal_scroll_sensitivity));
+        horizontal_scrollbar().increase_slider_by(event.wheel_delta() * horizontal_scroll_sensitivity);
         return;
     }
 

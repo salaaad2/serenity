@@ -9,11 +9,13 @@ set(SOURCES
         main.cpp
         IndividualSampleModel.cpp
         FlameGraphView.cpp
+        Gradient.cpp
         Process.cpp
         Profile.cpp
         ProfileModel.cpp
         SamplesModel.cpp
         SignpostsModel.cpp
+        SourceModel.cpp
         TimelineContainer.cpp
         TimelineHeader.cpp
         TimelineTrack.cpp

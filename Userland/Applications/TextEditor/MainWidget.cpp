@@ -20,6 +20,7 @@
 #include <LibGUI/FilePicker.h>
 #include <LibGUI/FontPicker.h>
 #include <LibGUI/GMLSyntaxHighlighter.h>
+#include <LibGUI/GitCommitSyntaxHighlighter.h>
 #include <LibGUI/GroupBox.h>
 #include <LibGUI/INISyntaxHighlighter.h>
 #include <LibGUI/Menu.h>
@@ -252,7 +253,7 @@ MainWidget::MainWidget()
 
     m_new_action = GUI::Action::create("&New", { Mod_Ctrl, Key_N }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/new.png").release_value_but_fixme_should_propagate_errors(), [this](GUI::Action const&) {
         if (editor().document().is_modified()) {
-            auto save_document_first_result = GUI::MessageBox::show(window(), "Save changes to current document first?", "Warning", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
+            auto save_document_first_result = GUI::MessageBox::ask_about_unsaved_changes(window(), m_path, editor().document().undo_stack().last_unmodified_timestamp());
             if (save_document_first_result == GUI::Dialog::ExecResult::ExecYes)
                 m_save_action->activate();
             if (save_document_first_result != GUI::Dialog::ExecResult::ExecNo && editor().document().is_modified())
@@ -274,7 +275,7 @@ MainWidget::MainWidget()
         }
 
         if (editor().document().is_modified()) {
-            auto save_document_first_result = GUI::MessageBox::show(window(), "Save changes to current document first?", "Warning", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
+            auto save_document_first_result = GUI::MessageBox::ask_about_unsaved_changes(window(), m_path, editor().document().undo_stack().last_unmodified_timestamp());
             if (save_document_first_result == GUI::Dialog::ExecResult::ExecYes)
                 m_save_action->activate();
             if (save_document_first_result != GUI::Dialog::ExecResult::ExecNo && editor().document().is_modified())
@@ -303,24 +304,23 @@ MainWidget::MainWidget()
     });
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
-        if (!m_path.is_empty()) {
-            auto response = FileSystemAccessClient::Client::the().request_file(window()->window_id(), m_path, Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
+        if (m_path.is_empty()) {
+            m_save_as_action->activate();
+            return;
+        }
+        auto response = FileSystemAccessClient::Client::the().request_file(window()->window_id(), m_path, Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
 
-            if (response.error != 0) {
-                if (response.error != -1)
-                    GUI::MessageBox::show_error(window(), String::formatted("Unable to save file: {}", strerror(response.error)));
-                return;
-            }
-
-            int fd = *response.fd;
-
-            if (!m_editor->write_to_file_and_close(fd)) {
-                GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
-            }
+        if (response.error != 0) {
+            if (response.error != -1)
+                GUI::MessageBox::show_error(window(), String::formatted("Unable to save file: {}", strerror(response.error)));
             return;
         }
 
-        m_save_as_action->activate();
+        int fd = *response.fd;
+
+        if (!m_editor->write_to_file_and_close(fd)) {
+            GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
+        }
     });
 
     m_toolbar->add_action(*m_new_action);
@@ -587,6 +587,13 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     syntax_actions.add_action(*m_html_highlight);
     syntax_menu.add_action(*m_html_highlight);
 
+    m_git_highlight = GUI::Action::create_checkable("Git Commit", [&](auto&) {
+        m_editor->set_syntax_highlighter(make<GUI::GitCommitSyntaxHighlighter>());
+        m_editor->update();
+    });
+    syntax_actions.add_action(*m_git_highlight);
+    syntax_menu.add_action(*m_git_highlight);
+
     m_gml_highlight = GUI::Action::create_checkable("&GML", [&](auto&) {
         m_editor->set_syntax_highlighter(make<GUI::GMLSyntaxHighlighter>());
         m_editor->update();
@@ -640,9 +647,11 @@ void MainWidget::set_path(StringView path)
         m_cpp_highlight->activate();
     } else if (m_extension == "js" || m_extension == "mjs" || m_extension == "json") {
         m_js_highlight->activate();
+    } else if (m_name == "COMMIT_EDITMSG") {
+        m_git_highlight->activate();
     } else if (m_extension == "gml") {
         m_gml_highlight->activate();
-    } else if (m_extension == "ini") {
+    } else if (m_extension == "ini" || m_extension == "af") {
         m_ini_highlight->activate();
     } else if (m_extension == "sh" || m_extension == "bash") {
         m_shell_highlight->activate();
@@ -719,7 +728,7 @@ bool MainWidget::request_close()
 {
     if (!editor().document().is_modified())
         return true;
-    auto result = GUI::MessageBox::show(window(), "The document has been modified. Would you like to save?", "Unsaved changes", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
+    auto result = GUI::MessageBox::ask_about_unsaved_changes(window(), m_path, editor().document().undo_stack().last_unmodified_timestamp());
 
     if (result == GUI::MessageBox::ExecYes) {
         m_save_action->activate();

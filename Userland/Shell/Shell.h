@@ -48,7 +48,8 @@
     __ENUMERATE_SHELL_BUILTIN(bg)      \
     __ENUMERATE_SHELL_BUILTIN(wait)    \
     __ENUMERATE_SHELL_BUILTIN(dump)    \
-    __ENUMERATE_SHELL_BUILTIN(kill)
+    __ENUMERATE_SHELL_BUILTIN(kill)    \
+    __ENUMERATE_SHELL_BUILTIN(noop)
 
 #define ENUMERATE_SHELL_OPTIONS()                                                                                    \
     __ENUMERATE_SHELL_OPTION(inline_exec_keep_empty_segments, false, "Keep empty segments in inline execute $(...)") \
@@ -87,7 +88,7 @@ public:
 
     int run_command(StringView, Optional<SourcePosition> = {});
     bool is_runnable(StringView);
-    RefPtr<Job> run_command(const AST::Command&);
+    ErrorOr<RefPtr<Job>> run_command(const AST::Command&);
     NonnullRefPtrVector<Job> run_commands(Vector<AST::Command>&);
     bool run_file(const String&, bool explicitly_invoked = true);
     bool run_builtin(const AST::Command&, const NonnullRefPtrVector<AST::Rewiring>&, int& retval);
@@ -212,7 +213,7 @@ public:
     char hostname[HostNameSize];
 
     uid_t uid;
-    int last_return_code { 0 };
+    Optional<int> last_return_code;
     Vector<String> directory_stack;
     CircularQueue<String, 8> cd_history; // FIXME: have a configurable cd history length
     HashMap<u64, NonnullRefPtr<Job>> jobs;
@@ -228,12 +229,15 @@ public:
         None,
         InternalControlFlowBreak,
         InternalControlFlowContinue,
+        InternalControlFlowInterrupted,
+        InternalControlFlowKilled,
         EvaluatedSyntaxError,
         NonExhaustiveMatchRules,
         InvalidGlobError,
         InvalidSliceContentsError,
         OpenFailure,
         OutOfMemory,
+        LaunchError,
     };
 
     void raise_error(ShellError kind, String description, Optional<AST::Position> position = {})
@@ -259,6 +263,8 @@ public:
         switch (error) {
         case ShellError::InternalControlFlowBreak:
         case ShellError::InternalControlFlowContinue:
+        case ShellError::InternalControlFlowInterrupted:
+        case ShellError::InternalControlFlowKilled:
             return true;
         default:
             return false;
@@ -328,6 +334,8 @@ private:
         ENUMERATE_SHELL_BUILTINS()
 
 #undef __ENUMERATE_SHELL_BUILTIN
+
+            ":", // POSIX-y name for "noop".
     };
 
     bool m_should_ignore_jobs_on_next_exit { false };

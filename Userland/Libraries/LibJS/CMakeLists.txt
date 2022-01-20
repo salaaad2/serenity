@@ -82,7 +82,7 @@ set(SOURCES
     Runtime/GeneratorFunctionConstructor.cpp
     Runtime/GeneratorFunctionPrototype.cpp
     Runtime/GeneratorObject.cpp
-    Runtime/GeneratorObjectPrototype.cpp
+    Runtime/GeneratorPrototype.cpp
     Runtime/GlobalEnvironment.cpp
     Runtime/GlobalObject.cpp
     Runtime/IndexedProperties.cpp
@@ -219,4 +219,4 @@ set(SOURCES
 )
 
 serenity_lib(LibJS js)
-target_link_libraries(LibJS LibM LibCore LibCrypto LibRegex LibSyntax LibUnicode)
+target_link_libraries(LibJS LibM LibCore LibCrypto LibRegex LibSyntax LibTimeZone LibUnicode)

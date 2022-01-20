@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, kleines Filmröllchen <malu.bertsch@gmail.com>
+ * Copyright (c) 2021, kleines Filmröllchen <filmroellchen@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -100,6 +100,7 @@ public:
     virtual int total_samples() override { return static_cast<int>(m_total_samples); }
     virtual u32 sample_rate() override { return m_sample_rate; }
     virtual u16 num_channels() override { return m_num_channels; }
+    virtual String format_name() override { return "FLAC (.flac)"; }
     virtual PcmSampleFormat pcm_format() override { return m_sample_format; }
     virtual RefPtr<Core::File> file() override { return m_file; }
 
@@ -111,8 +112,8 @@ private:
     // Either returns the metadata block or sets error message.
     // Additionally, increments m_data_start_location past the read meta block.
     ErrorOr<FlacRawMetadataBlock, LoaderError> next_meta_block(InputBitStream& bit_input);
-    // Fetches and sets the next FLAC frame
-    MaybeLoaderError next_frame();
+    // Fetches and writes the next FLAC frame
+    MaybeLoaderError next_frame(Span<Sample>);
     // Helper of next_frame that fetches a sub frame's header
     ErrorOr<FlacSubframeHeader, LoaderError> next_subframe_header(InputBitStream& bit_input, u8 channel_index);
     // Helper of next_frame that decompresses a subframe
@@ -151,7 +152,8 @@ private:
     u64 m_data_start_location { 0 };
     OwnPtr<FlacInputStream<FLAC_BUFFER_SIZE>> m_stream;
     Optional<FlacFrameHeader> m_current_frame;
-    Vector<Sample> m_current_frame_data;
+    // Whatever the last get_more_samples() call couldn't return gets stored here.
+    Vector<Sample, FLAC_BUFFER_SIZE> m_unread_data;
     u64 m_current_sample_or_frame { 0 };
 };
 

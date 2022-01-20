@@ -14,11 +14,10 @@ SerenityOS is a love letter to '90s user interfaces with a custom Unix-like core
 
 Roughly speaking, the goal is a marriage between the aesthetic of late-1990s productivity software and the power-user accessibility of late-2000s \*nix. This is a system by us, for us, based on the things we like.
 
-I (Andreas) regularly post raw hacking sessions and demos on [my YouTube channel](https://www.youtube.com/c/AndreasKling/).
+You can watch videos of the system being developed on YouTube:
 
-Sometimes I write about the system on [my github.io blog](https://awesomekling.github.io/).
-
-I'm also on [Patreon](https://www.patreon.com/serenityos) and [GitHub Sponsors](https://github.com/sponsors/awesomekling) if you would like to show some support that way.
+* [Andreas Kling's channel](https://youtube.com/andreaskling)
+* [Linus Groh's channel](https://youtube.com/linusgroh)
 
 ## Screenshot
 
@@ -150,6 +149,11 @@ Join our Discord server: [SerenityOS Discord](https://discord.gg/serenityos)
 * **Karol Kosek** - [krkk](https://github.com/krkk)
 * **Mustafa Quraish** - [mustafaquraish](https://github.com/mustafaquraish)
 * **David Tuin** - [davidot](https://github.com/davidot)
+* **Leon Albrecht** - [Hendiadyoin1](https://github.com/Hendiadyoin1)
+* **Tim Schumacher** - [timschumi](https://github.com/timschumi)
+* **Marcus Nilsson** - [metmo](https://github.com/metmo)
+* **Gegga Thor** - [Xexxa](https://github.com/Xexxa)
+* **kleines Filmröllchen** - [kleinesfilmroellchen](https://github.com/kleinesfilmroellchen)
 
 (And many more!) The people listed above have landed more than 100 commits in the project. :^)
 

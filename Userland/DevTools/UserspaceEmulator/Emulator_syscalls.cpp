@@ -52,7 +52,7 @@ u32 Emulator::virt_syscall(u32 function, u32 arg1, u32 arg2, u32 arg3)
     case SC_chdir:
         return virt$chdir(arg1, arg2);
     case SC_chmod:
-        return virt$chmod(arg1, arg2, arg3);
+        return virt$chmod(arg1);
     case SC_chown:
         return virt$chown(arg1);
     case SC_clock_gettime:
@@ -418,10 +418,15 @@ int Emulator::virt$dbgputstr(FlatPtr characters, int length)
     return 0;
 }
 
-int Emulator::virt$chmod(FlatPtr path_addr, size_t path_length, mode_t mode)
+int Emulator::virt$chmod(FlatPtr params_addr)
 {
-    auto path = mmu().copy_buffer_from_vm(path_addr, path_length);
-    return syscall(SC_chmod, path.data(), path.size(), mode);
+    Syscall::SC_chmod_params params;
+    mmu().copy_from_vm(&params, params_addr, sizeof(params));
+
+    auto path = mmu().copy_buffer_from_vm((FlatPtr)params.path.characters, params.path.length);
+    params.path.characters = (char const*)path.data();
+    params.path.length = path.size();
+    return syscall(SC_chmod, &params);
 }
 
 int Emulator::virt$chown(FlatPtr params_addr)
@@ -866,6 +871,10 @@ u32 Emulator::virt$mmap(u32 params_addr)
 {
     Syscall::SC_mmap_params params;
     mmu().copy_from_vm(&params, params_addr, sizeof(params));
+    params.alignment = params.alignment ? params.alignment : PAGE_SIZE;
+
+    if (params.size == 0)
+        return -EINVAL;
 
     u32 requested_size = round_up_to_power_of_two(params.size, PAGE_SIZE);
     FlatPtr final_address;
@@ -1533,7 +1542,9 @@ u32 Emulator::virt$allocate_tls(FlatPtr initial_data, size_t size)
     // TODO: This matches what Thread::make_thread_specific_region does. The kernel
     // ends up allocating one more page. Figure out if this is intentional.
     auto region_size = align_up_to(size, PAGE_SIZE) + PAGE_SIZE;
-    auto tcb_region = make<SimpleRegion>(0x20000000, region_size);
+    constexpr auto tls_location = VirtualAddress(0x20000000);
+    m_range_allocator.reserve_user_range(tls_location, region_size);
+    auto tcb_region = make<SimpleRegion>(tls_location.get(), region_size);
 
     size_t offset = 0;
     while (size - offset > 0) {

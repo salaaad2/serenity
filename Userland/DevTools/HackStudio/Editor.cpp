@@ -21,6 +21,7 @@
 #include <LibGUI/Application.h>
 #include <LibGUI/GMLAutocompleteProvider.h>
 #include <LibGUI/GMLSyntaxHighlighter.h>
+#include <LibGUI/GitCommitSyntaxHighlighter.h>
 #include <LibGUI/INISyntaxHighlighter.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/MessageBox.h>
@@ -40,11 +41,17 @@
 
 namespace HackStudio {
 
+ErrorOr<NonnullRefPtr<Editor>> Editor::try_create()
+{
+    NonnullRefPtr<Editor> editor = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) Editor()));
+    TRY(editor->initialize_documentation_tooltip());
+    TRY(editor->initialize_parameters_hint_tooltip());
+    return editor;
+}
+
 Editor::Editor()
 {
     set_document(CodeDocument::create());
-    initialize_documentation_tooltip();
-    initialize_parameters_hint_tooltip();
     m_evaluate_expression_action = GUI::Action::create("Evaluate expression", { Mod_Ctrl, Key_E }, [this](auto&) {
         VERIFY(is_program_running());
         auto dialog = EvaluateExpressionDialog::construct(window());
@@ -72,20 +79,22 @@ Editor::~Editor()
 {
 }
 
-void Editor::initialize_documentation_tooltip()
+ErrorOr<void> Editor::initialize_documentation_tooltip()
 {
     m_documentation_tooltip_window = GUI::Window::construct();
     m_documentation_tooltip_window->set_rect(0, 0, 500, 400);
     m_documentation_tooltip_window->set_window_type(GUI::WindowType::Tooltip);
-    m_documentation_page_view = m_documentation_tooltip_window->set_main_widget<Web::OutOfProcessWebView>();
+    m_documentation_page_view = TRY(m_documentation_tooltip_window->try_set_main_widget<Web::OutOfProcessWebView>());
+    return {};
 }
 
-void Editor::initialize_parameters_hint_tooltip()
+ErrorOr<void> Editor::initialize_parameters_hint_tooltip()
 {
     m_parameters_hint_tooltip_window = GUI::Window::construct();
     m_parameters_hint_tooltip_window->set_rect(0, 0, 280, 35);
     m_parameters_hint_tooltip_window->set_window_type(GUI::WindowType::Tooltip);
-    m_parameter_hint_page_view = m_parameters_hint_tooltip_window->set_main_widget<Web::OutOfProcessWebView>();
+    m_parameter_hint_page_view = TRY(m_parameters_hint_tooltip_window->try_set_main_widget<Web::OutOfProcessWebView>());
+    return {};
 }
 
 EditorWrapper& Editor::wrapper()
@@ -597,6 +606,9 @@ void Editor::set_syntax_highlighter_for(const CodeDocument& document)
         break;
     case Language::CSS:
         set_syntax_highlighter(make<Web::CSS::SyntaxHighlighter>());
+        break;
+    case Language::GitCommit:
+        set_syntax_highlighter(make<GUI::GitCommitSyntaxHighlighter>());
         break;
     case Language::GML:
         set_syntax_highlighter(make<GUI::GMLSyntaxHighlighter>());

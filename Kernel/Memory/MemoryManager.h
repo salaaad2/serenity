@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,7 @@
 
 #include <AK/Concepts.h>
 #include <AK/HashTable.h>
+#include <AK/IntrusiveRedBlackTree.h>
 #include <AK/NonnullOwnPtrVector.h>
 #include <AK/NonnullRefPtrVector.h>
 #include <Kernel/Forward.h>
@@ -26,16 +27,7 @@ struct KmallocGlobalData;
 
 namespace Kernel::Memory {
 
-constexpr bool page_round_up_would_wrap(FlatPtr x)
-{
-    return x > (explode_byte(0xFF) & ~0xFFF);
-}
-
-constexpr FlatPtr page_round_up(FlatPtr x)
-{
-    VERIFY(!page_round_up_would_wrap(x));
-    return (((FlatPtr)(x)) + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
-}
+ErrorOr<FlatPtr> page_round_up(FlatPtr x);
 
 constexpr FlatPtr page_round_down(FlatPtr x)
 {
@@ -137,7 +129,6 @@ private:
 };
 
 class MemoryManager {
-    AK_MAKE_ETERNAL
     friend class PageDirectory;
     friend class AnonymousVMObject;
     friend class Region;
@@ -185,6 +176,10 @@ public:
     void deallocate_physical_page(PhysicalAddress);
 
     ErrorOr<NonnullOwnPtr<Region>> allocate_contiguous_kernel_region(size_t, StringView name, Region::Access access, Region::Cacheable = Region::Cacheable::Yes);
+    ErrorOr<NonnullOwnPtr<Memory::Region>> allocate_dma_buffer_page(StringView name, Memory::Region::Access access, RefPtr<Memory::PhysicalPage>& dma_buffer_page);
+    ErrorOr<NonnullOwnPtr<Memory::Region>> allocate_dma_buffer_page(StringView name, Memory::Region::Access access);
+    ErrorOr<NonnullOwnPtr<Memory::Region>> allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access, NonnullRefPtrVector<Memory::PhysicalPage>& dma_buffer_pages);
+    ErrorOr<NonnullOwnPtr<Memory::Region>> allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access);
     ErrorOr<NonnullOwnPtr<Region>> allocate_kernel_region(size_t, StringView name, Region::Access access, AllocationStrategy strategy = AllocationStrategy::Reserve, Region::Cacheable = Region::Cacheable::Yes);
     ErrorOr<NonnullOwnPtr<Region>> allocate_kernel_region(PhysicalAddress, size_t, StringView name, Region::Access access, Region::Cacheable = Region::Cacheable::Yes);
     ErrorOr<NonnullOwnPtr<Region>> allocate_kernel_region_with_vmobject(VMObject&, size_t, StringView name, Region::Access access, Region::Cacheable = Region::Cacheable::Yes);
@@ -238,12 +233,14 @@ public:
     PageDirectory& kernel_page_directory() { return *m_kernel_page_directory; }
 
     Vector<UsedMemoryRange> const& used_memory_ranges() { return m_used_memory_ranges; }
-    bool is_allowed_to_mmap_to_userspace(PhysicalAddress, VirtualRange const&) const;
+    bool is_allowed_to_read_physical_memory_for_userspace(PhysicalAddress, size_t read_length) const;
 
     PhysicalPageEntry& get_physical_page_entry(PhysicalAddress);
     PhysicalAddress get_physical_address(PhysicalPage const&);
 
     void copy_physical_page(PhysicalPage&, u8 page_buffer[PAGE_SIZE]);
+
+    IterationDecision for_each_physical_memory_range(Function<IterationDecision(PhysicalMemoryRange const&)>);
 
 private:
     MemoryManager();
@@ -252,8 +249,8 @@ private:
     void initialize_physical_pages();
     void register_reserved_ranges();
 
-    void register_region(Region&);
-    void unregister_region(Region&);
+    void register_kernel_region(Region&);
+    void unregister_kernel_region(Region&);
 
     void protect_kernel_image();
     void parse_memory_map();
@@ -282,11 +279,7 @@ private:
         Yes,
         No
     };
-    enum class UnsafeIgnoreMissingPageTable {
-        Yes,
-        No
-    };
-    void release_pte(PageDirectory&, VirtualAddress, IsLastPTERelease, UnsafeIgnoreMissingPageTable = UnsafeIgnoreMissingPageTable::No);
+    void release_pte(PageDirectory&, VirtualAddress, IsLastPTERelease);
 
     RefPtr<PageDirectory> m_kernel_page_directory;
 
@@ -301,7 +294,7 @@ private:
     PhysicalPageEntry* m_physical_page_entries { nullptr };
     size_t m_physical_page_entries_count { 0 };
 
-    RedBlackTree<FlatPtr, Region*> m_kernel_regions;
+    IntrusiveRedBlackTree<&Region::m_tree_node> m_kernel_regions;
 
     Vector<UsedMemoryRange> m_used_memory_ranges;
     Vector<PhysicalMemoryRange> m_physical_memory_ranges;
@@ -341,17 +334,11 @@ inline bool PhysicalPage::is_lazy_committed_page() const
 
 inline ErrorOr<Memory::VirtualRange> expand_range_to_page_boundaries(FlatPtr address, size_t size)
 {
-    if (Memory::page_round_up_would_wrap(size))
-        return EINVAL;
-
     if ((address + size) < address)
         return EINVAL;
 
-    if (Memory::page_round_up_would_wrap(address + size))
-        return EINVAL;
-
     auto base = VirtualAddress { address }.page_base();
-    auto end = Memory::page_round_up(address + size);
+    auto end = TRY(Memory::page_round_up(address + size));
 
     return Memory::VirtualRange { base, end - base.get() };
 }

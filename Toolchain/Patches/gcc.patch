@@ -46,7 +46,7 @@ index a75b44ee4..6fab7c3ca 100644
 +
  ; This comment is to ensure we retain the blank line above.
 diff --git a/gcc/config.gcc b/gcc/config.gcc
-index 357b0bed0..151d93312 100644
+index 357b0bed0..8e96b74e5 100644
 --- a/gcc/config.gcc
 +++ b/gcc/config.gcc
 @@ -686,6 +686,13 @@ x86_cpus="generic intel"
@@ -63,7 +63,7 @@ index 357b0bed0..151d93312 100644
  *-*-darwin*)
    tmake_file="t-darwin "
    tm_file="${tm_file} darwin.h"
-@@ -1084,6 +1091,18 @@ case ${target} in
+@@ -1084,6 +1091,19 @@ case ${target} in
  esac
  
  case ${target} in
@@ -78,6 +78,7 @@ index 357b0bed0..151d93312 100644
 +    ;;
 +aarch64-*-serenity*)
 +    tm_file="${tm_file} dbxelf.h elfos.h aarch64/aarch64-elf.h glibc-stdint.h serenity.h"
++    tmake_file="${tmake_file} aarch64/t-aarch64"
 +    ;;
  aarch64*-*-elf | aarch64*-*-fuchsia* | aarch64*-*-rtems*)
  	tm_file="${tm_file} dbxelf.h elfos.h newlib-stdint.h"
@@ -223,10 +224,10 @@ index 000000000..dc2f5361e
 +  } while(0);
 diff --git a/gcc/config/serenity.opt b/gcc/config/serenity.opt
 new file mode 100644
-index 000000000..6ce2af2d7
+index 000000000..2756a5575
 --- /dev/null
 +++ b/gcc/config/serenity.opt
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,35 @@
 +; SerenityOS options.
 +
 +; Copyright (C) 2021 Gunnar Beutner <gunnar@beutner.name>
@@ -256,6 +257,9 @@ index 000000000..6ce2af2d7
 +Driver
 +
 +pthread
++Driver
++
++rdynamic
 +Driver
 +
 +; This comment is to ensure we retain the blank line above.
@@ -347,7 +351,7 @@ index 5095b6830..d19942eee 100644
      && defined(TARGET_DL_ITERATE_PHDR) \
      && defined(__linux__)
 diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
-index 326a279c5..6b76901dc 100755
+index 326a279c5..4379c25c8 100755
 --- a/libstdc++-v3/configure
 +++ b/libstdc++-v3/configure
 @@ -4219,15 +4219,7 @@ printf ("hello world\n");
@@ -367,7 +371,13 @@ index 326a279c5..6b76901dc 100755
  if test x$gcc_no_link = xyes; then
    # Setting cross_compile will disable run tests; it will
    # also disable AC_CHECK_FILE but that's generally
-@@ -29270,6 +29262,5986 @@ else
+@@ -29264,12 +29256,5990 @@ else
+ 
+     $as_echo "#define HAVE_ICONV 1" >>confdefs.h
+ 
+-    $as_echo "#define HAVE_MEMALIGN 1" >>confdefs.h
+-
+   else
  
  # Base decisions on target environment.
  case "${host}" in

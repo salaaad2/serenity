@@ -120,7 +120,7 @@ static bool validate_inode_mmap_prot(const Process& process, int prot, const Ino
 ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> user_params)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
     auto addr = (FlatPtr)params.addr;
@@ -132,20 +132,18 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> use
     auto offset = params.offset;
 
     if (prot & PROT_EXEC) {
-        REQUIRE_PROMISE(prot_exec);
+        TRY(require_promise(Pledge::prot_exec));
     }
 
     if (prot & MAP_FIXED || prot & MAP_FIXED_NOREPLACE) {
-        REQUIRE_PROMISE(map_fixed);
+        TRY(require_promise(Pledge::map_fixed));
     }
 
     if (alignment & ~PAGE_MASK)
         return EINVAL;
 
-    if (Memory::page_round_up_would_wrap(size))
-        return EINVAL;
-
-    if (!Memory::is_user_range(VirtualAddress(addr), Memory::page_round_up(size)))
+    size_t rounded_size = TRY(Memory::page_round_up(size));
+    if (!Memory::is_user_range(VirtualAddress(addr), rounded_size))
         return EFAULT;
 
     OwnPtr<KString> name;
@@ -188,7 +186,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> use
 
     auto range = TRY([&]() -> ErrorOr<Memory::VirtualRange> {
         if (map_randomized)
-            return address_space().page_directory().range_allocator().try_allocate_randomized(Memory::page_round_up(size), alignment);
+            return address_space().page_directory().range_allocator().try_allocate_randomized(rounded_size, alignment);
 
         // If MAP_FIXED is specified, existing mappings that intersect the requested range are removed.
         if (map_fixed)
@@ -208,9 +206,9 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> use
         auto strategy = map_noreserve ? AllocationStrategy::None : AllocationStrategy::Reserve;
         RefPtr<Memory::AnonymousVMObject> vmobject;
         if (flags & MAP_PURGEABLE) {
-            vmobject = TRY(Memory::AnonymousVMObject::try_create_purgeable_with_size(Memory::page_round_up(size), strategy));
+            vmobject = TRY(Memory::AnonymousVMObject::try_create_purgeable_with_size(rounded_size, strategy));
         } else {
-            vmobject = TRY(Memory::AnonymousVMObject::try_create_with_size(Memory::page_round_up(size), strategy));
+            vmobject = TRY(Memory::AnonymousVMObject::try_create_with_size(rounded_size, strategy));
         }
 
         region = TRY(address_space().allocate_region_with_vmobject(range, vmobject.release_nonnull(), 0, {}, prot, map_shared));
@@ -255,10 +253,10 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> use
 ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int prot)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
 
     if (prot & PROT_EXEC) {
-        REQUIRE_PROMISE(prot_exec);
+        TRY(require_promise(Pledge::prot_exec));
     }
 
     auto range_to_mprotect = TRY(Memory::expand_range_to_page_boundaries(addr.ptr(), size));
@@ -397,7 +395,7 @@ ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int p
 ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int advice)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
 
     auto range_to_madvise = TRY(Memory::expand_range_to_page_boundaries(address.ptr(), size));
 
@@ -428,7 +426,7 @@ ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int
 ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<const Syscall::SC_set_mmap_name_params*> user_params)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
     if (params.name.length > PATH_MAX)
@@ -452,7 +450,7 @@ ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<const Syscall::SC_set_mmap
 ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     TRY(address_space().unmap_mmap_range(addr.vaddr(), size));
     return 0;
 }
@@ -460,7 +458,7 @@ ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 ErrorOr<FlatPtr> Process::sys$mremap(Userspace<const Syscall::SC_mremap_params*> user_params)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
     auto old_range = TRY(Memory::expand_range_to_page_boundaries((FlatPtr)params.old_address, params.old_size));
@@ -497,7 +495,7 @@ ErrorOr<FlatPtr> Process::sys$mremap(Userspace<const Syscall::SC_mremap_params*>
 ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<const char*> initial_data, size_t size)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
 
     if (!size || size % PAGE_SIZE != 0)
         return EINVAL;
@@ -522,7 +520,7 @@ ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<const char*> initial_data, 
         return EINVAL;
 
     auto range = TRY(address_space().try_allocate_range({}, size));
-    auto* region = TRY(address_space().allocate_region(range, String("Master TLS"), PROT_READ | PROT_WRITE));
+    auto* region = TRY(address_space().allocate_region(range, "Master TLS"sv, PROT_READ | PROT_WRITE));
 
     m_master_tls_region = region->make_weak_ptr();
     m_master_tls_size = size;
@@ -587,15 +585,11 @@ ErrorOr<FlatPtr> Process::sys$msync(Userspace<void*> address, size_t size, int f
     if (address.ptr() % PAGE_SIZE != 0)
         return EINVAL;
 
-    if (Memory::page_round_up_would_wrap(size)) {
-        return EINVAL;
-    }
-
     // Note: This is not specified
-    size = Memory::page_round_up(size);
+    auto rounded_size = TRY(Memory::page_round_up(size));
 
     // FIXME: We probably want to sync all mappings in the address+size range.
-    auto* region = address_space().find_region_containing(Memory::VirtualRange { address.vaddr(), size });
+    auto* region = address_space().find_region_containing(Memory::VirtualRange { address.vaddr(), rounded_size });
     // All regions from address upto address+size shall be mapped
     if (!region)
         return ENOMEM;

@@ -15,14 +15,12 @@
 #    include <new>
 #    include <stdlib.h>
 
-#    define kcalloc calloc
 #    define kmalloc malloc
 #    define kmalloc_good_size malloc_good_size
-#    define kfree free
 
 inline void kfree_sized(void* ptr, size_t)
 {
-    kfree(ptr);
+    free(ptr);
 }
 #endif
 
@@ -36,17 +34,6 @@ inline size_t malloc_good_size(size_t size) { return size; }
 #    else
 #        include <malloc/malloc.h>
 #    endif
-#endif
-
-#ifdef KERNEL
-#    define AK_MAKE_ETERNAL                                               \
-    public:                                                               \
-        void* operator new(size_t size) { return kmalloc_eternal(size); } \
-        void operator delete(void*, size_t) { VERIFY_NOT_REACHED(); }     \
-                                                                          \
-    private:
-#else
-#    define AK_MAKE_ETERNAL
 #endif
 
 using std::nothrow;

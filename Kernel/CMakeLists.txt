@@ -19,6 +19,8 @@ set(KERNEL_HEAP_SOURCES
 
 set(KERNEL_SOURCES
     AddressSanitizer.cpp
+    Bus/PCI/Controller/HostBridge.cpp
+    Bus/PCI/Controller/MemoryBackedHostBridge.cpp
     Bus/PCI/Access.cpp
     Bus/PCI/API.cpp
     Bus/PCI/Device.cpp
@@ -97,6 +99,9 @@ set(KERNEL_SOURCES
     Storage/Partition/GUIDPartitionTable.cpp
     Storage/Partition/MBRPartitionTable.cpp
     Storage/Partition/PartitionTable.cpp
+    Storage/NVMe/NVMeController.cpp
+    Storage/NVMe/NVMeNameSpace.cpp
+    Storage/NVMe/NVMeQueue.cpp
     Storage/StorageDevice.cpp
     Storage/RamdiskController.cpp
     Storage/RamdiskDevice.cpp
@@ -153,10 +158,10 @@ set(KERNEL_SOURCES
     Memory/PhysicalRegion.cpp
     Memory/PhysicalZone.cpp
     Memory/PrivateInodeVMObject.cpp
-        Memory/ScopedAddressSpaceSwitcher.cpp
     Memory/Region.cpp
     Memory/RingBuffer.cpp
     Memory/ScatterGatherList.cpp
+    Memory/ScopedAddressSpaceSwitcher.cpp
     Memory/SharedInodeVMObject.cpp
     Memory/VMObject.cpp
     Memory/VirtualRange.cpp
@@ -164,17 +169,17 @@ set(KERNEL_SOURCES
     MiniStdLib.cpp
     Locking/LockRank.cpp
     Locking/Mutex.cpp
-    Net/E1000ENetworkAdapter.cpp
-    Net/E1000NetworkAdapter.cpp
+    Net/Intel/E1000ENetworkAdapter.cpp
+    Net/Intel/E1000NetworkAdapter.cpp
+    Net/NE2000/NetworkAdapter.cpp
+    Net/Realtek/RTL8139NetworkAdapter.cpp
+    Net/Realtek/RTL8168NetworkAdapter.cpp
     Net/IPv4Socket.cpp
     Net/LocalSocket.cpp
     Net/LoopbackAdapter.cpp
-    Net/NE2000NetworkAdapter.cpp
     Net/NetworkAdapter.cpp
     Net/NetworkTask.cpp
     Net/NetworkingManagement.cpp
-    Net/RTL8139NetworkAdapter.cpp
-    Net/RTL8168NetworkAdapter.cpp
     Net/Routing.cpp
     Net/Socket.cpp
     Net/TCPSocket.cpp
@@ -311,6 +316,13 @@ if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
         ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/SafeMem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/TrapFrame.cpp
     )
+
+    if("${SERENITY_ARCH}" STREQUAL "x86_64")
+        set(KERNEL_SOURCES
+            ${KERNEL_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/SyscallEntry.cpp
+        )
+    endif()
 endif()
 
 set(AK_SOURCES
@@ -510,7 +522,7 @@ endif()
 
 add_custom_command(
     TARGET Kernel POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E env CXXFILT=${SERENITY_CXXFILT} sh ${CMAKE_CURRENT_SOURCE_DIR}/mkmap.sh
+    COMMAND ${CMAKE_COMMAND} -E env NM=${CMAKE_NM} sh ${CMAKE_CURRENT_SOURCE_DIR}/mkmap.sh
     COMMAND ${CMAKE_COMMAND} -E env OBJCOPY=${CMAKE_OBJCOPY} sh ${CMAKE_CURRENT_SOURCE_DIR}/embedmap.sh
     COMMAND ${CMAKE_OBJCOPY} --only-keep-debug Kernel Kernel.debug
     COMMAND ${CMAKE_OBJCOPY} --strip-debug Kernel

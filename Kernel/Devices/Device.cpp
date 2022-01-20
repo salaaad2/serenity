@@ -16,7 +16,7 @@ namespace Kernel {
 NonnullRefPtr<SysFSDeviceComponent> SysFSDeviceComponent::must_create(Device const& device)
 {
     // FIXME: Handle allocation failure gracefully
-    auto device_name = MUST(KString::try_create(String::formatted("{}:{}", device.major(), device.minor())));
+    auto device_name = MUST(KString::formatted("{}:{}", device.major(), device.minor()));
     return adopt_ref_if_nonnull(new SysFSDeviceComponent(move(device_name), device)).release_nonnull();
 }
 SysFSDeviceComponent::SysFSDeviceComponent(NonnullOwnPtr<KString> major_minor_formatted_device_name, Device const& device)
@@ -131,7 +131,7 @@ void Device::after_inserting()
     });
 }
 
-void Device::before_removing()
+void Device::will_be_destroyed()
 {
     VERIFY(m_sysfs_component);
     SysFSComponentRegistry::the().devices_list().with_exclusive([&](auto& list) -> void {

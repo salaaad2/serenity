@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -85,13 +85,13 @@ StringView NumberFormat::resolve_currency_display()
         m_resolved_currency_display = currency();
         break;
     case NumberFormat::CurrencyDisplay::Symbol:
-        m_resolved_currency_display = Unicode::get_locale_currency_mapping(data_locale(), currency(), Unicode::Style::Short);
+        m_resolved_currency_display = Unicode::get_locale_short_currency_mapping(data_locale(), currency());
         break;
     case NumberFormat::CurrencyDisplay::NarrowSymbol:
-        m_resolved_currency_display = Unicode::get_locale_currency_mapping(data_locale(), currency(), Unicode::Style::Narrow);
+        m_resolved_currency_display = Unicode::get_locale_narrow_currency_mapping(data_locale(), currency());
         break;
     case NumberFormat::CurrencyDisplay::Name:
-        m_resolved_currency_display = Unicode::get_locale_currency_mapping(data_locale(), currency(), Unicode::Style::Numeric);
+        m_resolved_currency_display = Unicode::get_locale_numeric_currency_mapping(data_locale(), currency());
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -608,12 +608,19 @@ Vector<PatternPartition> partition_number_pattern(NumberFormat& number_format, d
         // a. Let n be an implementation- and locale-dependent (ILD) String value indicating the NaN value.
         formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::NaN).value_or("NaN"sv);
     }
-    // 3. Else if x is a non-finite Number, then
-    else if (!Value(number).is_finite_number()) {
-        // a. Let n be an ILD String value indicating infinity.
+    // 3. Else if x is +∞, then
+    else if (Value(number).is_positive_infinity()) {
+        // a. Let n be an ILD String value indicating positive infinity.
         formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Infinity).value_or("infinity"sv);
     }
-    // 4. Else,
+    // 4. Else if x is -∞, then
+    else if (Value(number).is_negative_infinity()) {
+        // a. Let n be an ILD String value indicating negative infinity.
+        // NOTE: The CLDR does not contain unique strings for negative infinity. The negative sign will
+        //       be inserted by the pattern returned from GetNumberFormatPattern.
+        formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Infinity).value_or("infinity"sv);
+    }
+    // 5. Else,
     else {
         // a. If numberFormat.[[Style]] is "percent", let x be 100 × x.
         if (number_format.style() == NumberFormat::Style::Percent)
@@ -637,18 +644,18 @@ Vector<PatternPartition> partition_number_pattern(NumberFormat& number_format, d
 
     Unicode::NumberFormat found_pattern {};
 
-    // 5. Let pattern be GetNumberFormatPattern(numberFormat, x).
+    // 6. Let pattern be GetNumberFormatPattern(numberFormat, x).
     auto pattern = get_number_format_pattern(number_format, number, found_pattern);
     if (!pattern.has_value())
         return {};
 
-    // 6. Let result be a new empty List.
+    // 7. Let result be a new empty List.
     Vector<PatternPartition> result;
 
-    // 7. Let patternParts be PartitionPattern(pattern).
+    // 8. Let patternParts be PartitionPattern(pattern).
     auto pattern_parts = pattern->visit([](auto const& p) { return partition_pattern(p); });
 
-    // 8. For each Record { [[Type]], [[Value]] } patternPart of patternParts, do
+    // 9. For each Record { [[Type]], [[Value]] } patternPart of patternParts, do
     for (auto& pattern_part : pattern_parts) {
         // a. Let p be patternPart.[[Type]].
         auto part = pattern_part.type;
@@ -729,99 +736,8 @@ Vector<PatternPartition> partition_number_pattern(NumberFormat& number_format, d
         }
     }
 
-    // 9. Return result.
+    // 10. Return result.
     return result;
-}
-
-static String replace_digits_for_number_format(NumberFormat& number_format, String formatted_string)
-{
-    // https://tc39.es/ecma402/#table-numbering-system-digits
-    static HashMap<StringView, AK::Array<u32, 10>> s_numbering_system_digits = {
-        { "adlm"sv, { 0x1e950, 0x1e951, 0x1e952, 0x1e953, 0x1e954, 0x1e955, 0x1e956, 0x1e957, 0x1e958, 0x1e959 } },
-        { "ahom"sv, { 0x11730, 0x11731, 0x11732, 0x11733, 0x11734, 0x11735, 0x11736, 0x11737, 0x11738, 0x11739 } },
-        { "arab"sv, { 0x660, 0x661, 0x662, 0x663, 0x664, 0x665, 0x666, 0x667, 0x668, 0x669 } },
-        { "arabext"sv, { 0x6f0, 0x6f1, 0x6f2, 0x6f3, 0x6f4, 0x6f5, 0x6f6, 0x6f7, 0x6f8, 0x6f9 } },
-        { "bali"sv, { 0x1b50, 0x1b51, 0x1b52, 0x1b53, 0x1b54, 0x1b55, 0x1b56, 0x1b57, 0x1b58, 0x1b59 } },
-        { "beng"sv, { 0x9e6, 0x9e7, 0x9e8, 0x9e9, 0x9ea, 0x9eb, 0x9ec, 0x9ed, 0x9ee, 0x9ef } },
-        { "bhks"sv, { 0x11c50, 0x11c51, 0x11c52, 0x11c53, 0x11c54, 0x11c55, 0x11c56, 0x11c57, 0x11c58, 0x11c59 } },
-        { "brah"sv, { 0x11066, 0x11067, 0x11068, 0x11069, 0x1106a, 0x1106b, 0x1106c, 0x1106d, 0x1106e, 0x1106f } },
-        { "cakm"sv, { 0x11136, 0x11137, 0x11138, 0x11139, 0x1113a, 0x1113b, 0x1113c, 0x1113d, 0x1113e, 0x1113f } },
-        { "cham"sv, { 0xaa50, 0xaa51, 0xaa52, 0xaa53, 0xaa54, 0xaa55, 0xaa56, 0xaa57, 0xaa58, 0xaa59 } },
-        { "deva"sv, { 0x966, 0x967, 0x968, 0x969, 0x96a, 0x96b, 0x96c, 0x96d, 0x96e, 0x96f } },
-        { "diak"sv, { 0x11950, 0x11951, 0x11952, 0x11953, 0x11954, 0x11955, 0x11956, 0x11957, 0x11958, 0x11959 } },
-        { "fullwide"sv, { 0xff10, 0xff11, 0xff12, 0xff13, 0xff14, 0xff15, 0xff16, 0xff17, 0xff18, 0xff19 } },
-        { "gong"sv, { 0x11da0, 0x11da1, 0x11da2, 0x11da3, 0x11da4, 0x11da5, 0x11da6, 0x11da7, 0x11da8, 0x11da9 } },
-        { "gonm"sv, { 0x11d50, 0x11d51, 0x11d52, 0x11d53, 0x11d54, 0x11d55, 0x11d56, 0x11d57, 0x11d58, 0x11d59 } },
-        { "gujr"sv, { 0xae6, 0xae7, 0xae8, 0xae9, 0xaea, 0xaeb, 0xaec, 0xaed, 0xaee, 0xaef } },
-        { "guru"sv, { 0xa66, 0xa67, 0xa68, 0xa69, 0xa6a, 0xa6b, 0xa6c, 0xa6d, 0xa6e, 0xa6f } },
-        { "hanidec"sv, { 0x3007, 0x4e00, 0x4e8c, 0x4e09, 0x56db, 0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d } },
-        { "hmng"sv, { 0x16b50, 0x16b51, 0x16b52, 0x16b53, 0x16b54, 0x16b55, 0x16b56, 0x16b57, 0x16b58, 0x16b59 } },
-        { "hmnp"sv, { 0x1e140, 0x1e141, 0x1e142, 0x1e143, 0x1e144, 0x1e145, 0x1e146, 0x1e147, 0x1e148, 0x1e149 } },
-        { "java"sv, { 0xa9d0, 0xa9d1, 0xa9d2, 0xa9d3, 0xa9d4, 0xa9d5, 0xa9d6, 0xa9d7, 0xa9d8, 0xa9d9 } },
-        { "kali"sv, { 0xa900, 0xa901, 0xa902, 0xa903, 0xa904, 0xa905, 0xa906, 0xa907, 0xa908, 0xa909 } },
-        { "khmr"sv, { 0x17e0, 0x17e1, 0x17e2, 0x17e3, 0x17e4, 0x17e5, 0x17e6, 0x17e7, 0x17e8, 0x17e9 } },
-        { "knda"sv, { 0xce6, 0xce7, 0xce8, 0xce9, 0xcea, 0xceb, 0xcec, 0xced, 0xcee, 0xcef } },
-        { "lana"sv, { 0x1a80, 0x1a81, 0x1a82, 0x1a83, 0x1a84, 0x1a85, 0x1a86, 0x1a87, 0x1a88, 0x1a89 } },
-        { "lanatham"sv, { 0x1a90, 0x1a91, 0x1a92, 0x1a93, 0x1a94, 0x1a95, 0x1a96, 0x1a97, 0x1a98, 0x1a99 } },
-        { "laoo"sv, { 0xed0, 0xed1, 0xed2, 0xed3, 0xed4, 0xed5, 0xed6, 0xed7, 0xed8, 0xed9 } },
-        { "latn"sv, { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39 } },
-        { "lepc"sv, { 0x1c40, 0x1c41, 0x1c42, 0x1c43, 0x1c44, 0x1c45, 0x1c46, 0x1c47, 0x1c48, 0x1c49 } },
-        { "limb"sv, { 0x1946, 0x1947, 0x1948, 0x1949, 0x194a, 0x194b, 0x194c, 0x194d, 0x194e, 0x194f } },
-        { "mathbold"sv, { 0x1d7ce, 0x1d7cf, 0x1d7d0, 0x1d7d1, 0x1d7d2, 0x1d7d3, 0x1d7d4, 0x1d7d5, 0x1d7d6, 0x1d7d7 } },
-        { "mathdbl"sv, { 0x1d7d8, 0x1d7d9, 0x1d7da, 0x1d7db, 0x1d7dc, 0x1d7dd, 0x1d7de, 0x1d7df, 0x1d7e0, 0x1d7e1 } },
-        { "mathmono"sv, { 0x1d7f6, 0x1d7f7, 0x1d7f8, 0x1d7f9, 0x1d7fa, 0x1d7fb, 0x1d7fc, 0x1d7fd, 0x1d7fe, 0x1d7ff } },
-        { "mathsanb"sv, { 0x1d7ec, 0x1d7ed, 0x1d7ee, 0x1d7ef, 0x1d7f0, 0x1d7f1, 0x1d7f2, 0x1d7f3, 0x1d7f4, 0x1d7f5 } },
-        { "mathsans"sv, { 0x1d7e2, 0x1d7e3, 0x1d7e4, 0x1d7e5, 0x1d7e6, 0x1d7e7, 0x1d7e8, 0x1d7e9, 0x1d7ea, 0x1d7eb } },
-        { "mlym"sv, { 0xd66, 0xd67, 0xd68, 0xd69, 0xd6a, 0xd6b, 0xd6c, 0xd6d, 0xd6e, 0xd6f } },
-        { "modi"sv, { 0x11650, 0x11651, 0x11652, 0x11653, 0x11654, 0x11655, 0x11656, 0x11657, 0x11658, 0x11659 } },
-        { "mong"sv, { 0x1810, 0x1811, 0x1812, 0x1813, 0x1814, 0x1815, 0x1816, 0x1817, 0x1818, 0x1819 } },
-        { "mroo"sv, { 0x16a60, 0x16a61, 0x16a62, 0x16a63, 0x16a64, 0x16a65, 0x16a66, 0x16a67, 0x16a68, 0x16a69 } },
-        { "mtei"sv, { 0xabf0, 0xabf1, 0xabf2, 0xabf3, 0xabf4, 0xabf5, 0xabf6, 0xabf7, 0xabf8, 0xabf9 } },
-        { "mymr"sv, { 0x1040, 0x1041, 0x1042, 0x1043, 0x1044, 0x1045, 0x1046, 0x1047, 0x1048, 0x1049 } },
-        { "mymrshan"sv, { 0x1090, 0x1091, 0x1092, 0x1093, 0x1094, 0x1095, 0x1096, 0x1097, 0x1098, 0x1099 } },
-        { "mymrtlng"sv, { 0xa9f0, 0xa9f1, 0xa9f2, 0xa9f3, 0xa9f4, 0xa9f5, 0xa9f6, 0xa9f7, 0xa9f8, 0xa9f9 } },
-        { "newa"sv, { 0x11450, 0x11451, 0x11452, 0x11453, 0x11454, 0x11455, 0x11456, 0x11457, 0x11458, 0x11459 } },
-        { "nkoo"sv, { 0x7c0, 0x7c1, 0x7c2, 0x7c3, 0x7c4, 0x7c5, 0x7c6, 0x7c7, 0x7c8, 0x7c9 } },
-        { "olck"sv, { 0x1c50, 0x1c51, 0x1c52, 0x1c53, 0x1c54, 0x1c55, 0x1c56, 0x1c57, 0x1c58, 0x1c59 } },
-        { "orya"sv, { 0xb66, 0xb67, 0xb68, 0xb69, 0xb6a, 0xb6b, 0xb6c, 0xb6d, 0xb6e, 0xb6f } },
-        { "osma"sv, { 0x104a0, 0x104a1, 0x104a2, 0x104a3, 0x104a4, 0x104a5, 0x104a6, 0x104a7, 0x104a8, 0x104a9 } },
-        { "rohg"sv, { 0x10d30, 0x10d31, 0x10d32, 0x10d33, 0x10d34, 0x10d35, 0x10d36, 0x10d37, 0x10d38, 0x10d39 } },
-        { "saur"sv, { 0xa8d0, 0xa8d1, 0xa8d2, 0xa8d3, 0xa8d4, 0xa8d5, 0xa8d6, 0xa8d7, 0xa8d8, 0xa8d9 } },
-        { "segment"sv, { 0x1fbf0, 0x1fbf1, 0x1fbf2, 0x1fbf3, 0x1fbf4, 0x1fbf5, 0x1fbf6, 0x1fbf7, 0x1fbf8, 0x1fbf9 } },
-        { "shrd"sv, { 0x111d0, 0x111d1, 0x111d2, 0x111d3, 0x111d4, 0x111d5, 0x111d6, 0x111d7, 0x111d8, 0x111d9 } },
-        { "sind"sv, { 0x112f0, 0x112f1, 0x112f2, 0x112f3, 0x112f4, 0x112f5, 0x112f6, 0x112f7, 0x112f8, 0x112f9 } },
-        { "sinh"sv, { 0xde6, 0xde7, 0xde8, 0xde9, 0xdea, 0xdeb, 0xdec, 0xded, 0xdee, 0xdef } },
-        { "sora"sv, { 0x110f0, 0x110f1, 0x110f2, 0x110f3, 0x110f4, 0x110f5, 0x110f6, 0x110f7, 0x110f8, 0x110f9 } },
-        { "sund"sv, { 0x1bb0, 0x1bb1, 0x1bb2, 0x1bb3, 0x1bb4, 0x1bb5, 0x1bb6, 0x1bb7, 0x1bb8, 0x1bb9 } },
-        { "takr"sv, { 0x116c0, 0x116c1, 0x116c2, 0x116c3, 0x116c4, 0x116c5, 0x116c6, 0x116c7, 0x116c8, 0x116c9 } },
-        { "talu"sv, { 0x19d0, 0x19d1, 0x19d2, 0x19d3, 0x19d4, 0x19d5, 0x19d6, 0x19d7, 0x19d8, 0x19d9 } },
-        { "tamldec"sv, { 0xbe6, 0xbe7, 0xbe8, 0xbe9, 0xbea, 0xbeb, 0xbec, 0xbed, 0xbee, 0xbef } },
-        { "telu"sv, { 0xc66, 0xc67, 0xc68, 0xc69, 0xc6a, 0xc6b, 0xc6c, 0xc6d, 0xc6e, 0xc6f } },
-        { "thai"sv, { 0xe50, 0xe51, 0xe52, 0xe53, 0xe54, 0xe55, 0xe56, 0xe57, 0xe58, 0xe59 } },
-        { "tibt"sv, { 0xf20, 0xf21, 0xf22, 0xf23, 0xf24, 0xf25, 0xf26, 0xf27, 0xf28, 0xf29 } },
-        { "tirh"sv, { 0x114d0, 0x114d1, 0x114d2, 0x114d3, 0x114d4, 0x114d5, 0x114d6, 0x114d7, 0x114d8, 0x114d9 } },
-        { "vaii"sv, { 0xa620, 0xa621, 0xa622, 0xa623, 0xa624, 0xa625, 0xa626, 0xa627, 0xa628, 0xa629 } },
-        { "wara"sv, { 0x118e0, 0x118e1, 0x118e2, 0x118e3, 0x118e4, 0x118e5, 0x118e6, 0x118e7, 0x118e8, 0x118e9 } },
-        { "wcho"sv, { 0x1e2f0, 0x1e2f1, 0x1e2f2, 0x1e2f3, 0x1e2f4, 0x1e2f5, 0x1e2f6, 0x1e2f7, 0x1e2f8, 0x1e2f9 } },
-    };
-
-    auto digits = s_numbering_system_digits.get(number_format.numbering_system());
-    if (!digits.has_value())
-        digits = s_numbering_system_digits.get("latn"sv);
-    VERIFY(digits.has_value());
-
-    StringBuilder builder;
-
-    for (auto& ch : formatted_string) {
-        if (is_ascii_digit(ch)) {
-            u32 digit = digits->at(parse_ascii_digit(ch));
-            builder.append_code_point(digit);
-        } else {
-            builder.append(ch);
-        }
-    }
-
-    return builder.build();
 }
 
 static Vector<StringView> separate_integer_into_groups(Unicode::NumberGroupings const& grouping_sizes, StringView integer)
@@ -897,7 +813,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
                 //     a. Let digits be a List whose 10 String valued elements are the UTF-16 string representations of the 10 digits specified in the "Digits" column of the matching row in Table 10.
                 //     b. Replace each digit in n with the value of digits[digit].
                 // 2. Else use an implementation dependent algorithm to map n to the appropriate representation of n in the given numbering system.
-                formatted_string = replace_digits_for_number_format(number_format, move(formatted_string));
+                formatted_string = Unicode::replace_digits_for_number_system(number_format.numbering_system(), formatted_string);
 
                 // 3. Let decimalSepIndex be ! StringIndexOf(n, ".", 0).
                 auto decimal_sep_index = formatted_string.find('.');
@@ -1018,7 +934,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
 
                 // FIXME: The spec does not say to do this, but all of major engines perform this replacement.
                 //        Without this, formatting with non-Latin numbering systems will produce non-localized results.
-                exponent_result.formatted_string = replace_digits_for_number_format(number_format, move(exponent_result.formatted_string));
+                exponent_result.formatted_string = Unicode::replace_digits_for_number_system(number_format.numbering_system(), exponent_result.formatted_string);
 
                 // 3. Append a new Record { [[Type]]: "exponentInteger", [[Value]]: exponentResult.[[FormattedString]] } as the last element of result.
                 result.append({ "exponentInteger"sv, move(exponent_result.formatted_string) });
@@ -1122,11 +1038,14 @@ RawFormatResult to_raw_precision(double number, int min_precision, int max_preci
 {
     RawFormatResult result {};
 
-    // 1. Let p be maxPrecision.
+    // 1. Set x to ℝ(x).
+    // FIXME: Support BigInt number formatting.
+
+    // 2. Let p be maxPrecision.
     int precision = max_precision;
     int exponent = 0;
 
-    // 2. If x = 0, then
+    // 3. If x = 0, then
     if (number == 0.0) {
         // a. Let m be the String consisting of p occurrences of the character "0".
         result.formatted_string = String::repeated('0', precision);
@@ -1137,31 +1056,28 @@ RawFormatResult to_raw_precision(double number, int min_precision, int max_preci
         // c. Let xFinal be 0.
         result.rounded_number = 0;
     }
-
-    // 3. Else,
+    // 4. Else,
     else {
         // FIXME: The result of these steps isn't entirely accurate for large values of 'p' (which
         //        defaults to 21, resulting in numbers on the order of 10^21). Either AK::format or
         //        our Number::toString AO (double_to_string in Value.cpp) will need to be improved
         //        to produce more accurate results.
 
-        // a. Let e be the base 10 logarithm of x rounded down to the nearest integer.
+        // a. Let e and n be integers such that 10^(p–1) ≤ n < 10^p and for which n × 10^(e–p+1) – x is as close to zero as possible.
+        //    If there are two such sets of e and n, pick the e and n for which n × 10^(e–p+1) is larger.
         exponent = log10floor(number);
 
         double power = pow(10, exponent - precision + 1);
-
-        // b. Let n be an integer such that 10^(p–1) ≤ n < 10^p and for which the exact mathematical value of n × 10^(e–p+1) – x
-        //    is as close to zero as possible. If there is more than one such n, pick the one for which n × 10^(e–p+1) is larger.
         double n = round(number / power);
 
-        // c. Let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
+        // b. Let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
         result.formatted_string = Value(n).to_string_without_side_effects();
 
-        // d. Let xFinal be n × 10^(e–p+1).
+        // c. Let xFinal be n × 10^(e–p+1).
         result.rounded_number = n * power;
     }
 
-    // 4. If e ≥ p–1, then
+    // 5. If e ≥ p–1, then
     if (exponent >= (precision - 1)) {
         // a. Let m be the string-concatenation of m and e–p+1 occurrences of the character "0".
         result.formatted_string = String::formatted(
@@ -1172,7 +1088,7 @@ RawFormatResult to_raw_precision(double number, int min_precision, int max_preci
         // b. Let int be e+1.
         result.digits = exponent + 1;
     }
-    // 5. Else if e ≥ 0, then
+    // 6. Else if e ≥ 0, then
     else if (exponent >= 0) {
         // a. Let m be the string-concatenation of the first e+1 characters of m, the character ".", and the remaining p–(e+1) characters of m.
         result.formatted_string = String::formatted(
@@ -1183,7 +1099,7 @@ RawFormatResult to_raw_precision(double number, int min_precision, int max_preci
         // b. Let int be e+1.
         result.digits = exponent + 1;
     }
-    // 6. Else,
+    // 7. Else,
     else {
         // a. Assert: e < 0.
         // b. Let m be the string-concatenation of the String value "0.", –(e+1) occurrences of the character "0", and m.
@@ -1196,15 +1112,16 @@ RawFormatResult to_raw_precision(double number, int min_precision, int max_preci
         result.digits = 1;
     }
 
-    // 7. If m contains the character ".", and maxPrecision > minPrecision, then
+    // 8. If m contains the character ".", and maxPrecision > minPrecision, then
     if (result.formatted_string.contains('.') && (max_precision > min_precision)) {
         // a. Let cut be maxPrecision – minPrecision.
         int cut = max_precision - min_precision;
 
+        // Steps 8b-8c are implemented by cut_trailing_zeroes.
         result.formatted_string = cut_trailing_zeroes(result.formatted_string, cut);
     }
 
-    // 8. Return the Record { [[FormattedString]]: m, [[RoundedNumber]]: xFinal, [[IntegerDigitsCount]]: int }.
+    // 9. Return the Record { [[FormattedString]]: m, [[RoundedNumber]]: xFinal, [[IntegerDigitsCount]]: int }.
     return result;
 }
 
@@ -1214,21 +1131,24 @@ RawFormatResult to_raw_fixed(double number, int min_fraction, int max_fraction)
 {
     RawFormatResult result {};
 
-    // 1. Let f be maxFraction.
+    // 1. Set x to ℝ(x).
+    // FIXME: Support BigInt number formatting.
+
+    // 2. Let f be maxFraction.
     int fraction = max_fraction;
 
     double power = pow(10, fraction);
 
-    // 2. Let n be an integer for which the exact mathematical value of n / 10^f – x is as close to zero as possible. If there are two such n, pick the larger n.
+    // 3. Let n be an integer for which the exact mathematical value of n / 10^f – x is as close to zero as possible. If there are two such n, pick the larger n.
     double n = round(number * power);
 
-    // 3. Let xFinal be n / 10^f.
+    // 4. Let xFinal be n / 10^f.
     result.rounded_number = n / power;
 
-    // 4. If n = 0, let m be the String "0". Otherwise, let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
+    // 5. If n = 0, let m be the String "0". Otherwise, let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
     result.formatted_string = n == 0.0 ? String("0"sv) : Value(n).to_string_without_side_effects();
 
-    // 5. If f ≠ 0, then
+    // 6. If f ≠ 0, then
     if (fraction != 0) {
         // a. Let k be the number of characters in m.
         auto decimals = result.formatted_string.length();
@@ -1255,17 +1175,18 @@ RawFormatResult to_raw_fixed(double number, int min_fraction, int max_fraction)
         // e. Let int be the number of characters in a.
         result.digits = a.length();
     }
-    // 6. Else, let int be the number of characters in m.
+    // 7. Else, let int be the number of characters in m.
     else {
         result.digits = result.formatted_string.length();
     }
 
-    // 7. Let cut be maxFraction – minFraction.
+    // 8. Let cut be maxFraction – minFraction.
     int cut = max_fraction - min_fraction;
 
+    // Steps 9-10 are implemented by cut_trailing_zeroes.
     result.formatted_string = cut_trailing_zeroes(result.formatted_string, cut);
 
-    // 10. Return the Record { [[FormattedString]]: m, [[RoundedNumber]]: xFinal, [[IntegerDigitsCount]]: int }.
+    // 11. Return the Record { [[FormattedString]]: m, [[RoundedNumber]]: xFinal, [[IntegerDigitsCount]]: int }.
     return result;
 }
 
@@ -1577,7 +1498,7 @@ int compute_exponent(NumberFormat& number_format, double number)
     int magnitude = log10floor(number);
 
     // 4. Let exponent be ComputeExponentForMagnitude(numberFormat, magnitude).
-    int exponent = compute_exponent_for_magniude(number_format, magnitude);
+    int exponent = compute_exponent_for_magnitude(number_format, magnitude);
 
     // 5. Let x be x × 10^(-exponent).
     number *= pow(10, -exponent);
@@ -1601,11 +1522,11 @@ int compute_exponent(NumberFormat& number_format, double number)
     }
 
     // 10. Return ComputeExponentForMagnitude(numberFormat, magnitude + 1).
-    return compute_exponent_for_magniude(number_format, magnitude + 1);
+    return compute_exponent_for_magnitude(number_format, magnitude + 1);
 }
 
 // 15.1.17 ComputeExponentForMagnitude ( numberFormat, magnitude ), https://tc39.es/ecma402/#sec-computeexponentformagnitude
-int compute_exponent_for_magniude(NumberFormat& number_format, int magnitude)
+int compute_exponent_for_magnitude(NumberFormat& number_format, int magnitude)
 {
     // 1. Let notation be numberFormat.[[Notation]].
     switch (number_format.notation()) {

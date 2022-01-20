@@ -35,23 +35,6 @@ Inode& TmpFS::root_inode()
     return *m_root_inode;
 }
 
-void TmpFS::register_inode(TmpFSInode& inode)
-{
-    MutexLocker locker(m_lock);
-    VERIFY(inode.identifier().fsid() == fsid());
-
-    auto index = inode.identifier().index();
-    m_inodes.set(index, inode);
-}
-
-void TmpFS::unregister_inode(InodeIdentifier identifier)
-{
-    MutexLocker locker(m_lock);
-    VERIFY(identifier.fsid() == fsid());
-
-    m_inodes.remove(identifier.index());
-}
-
 unsigned TmpFS::next_inode_index()
 {
     MutexLocker locker(m_lock);
@@ -59,21 +42,10 @@ unsigned TmpFS::next_inode_index()
     return m_next_inode_index++;
 }
 
-ErrorOr<NonnullRefPtr<Inode>> TmpFS::get_inode(InodeIdentifier identifier) const
-{
-    MutexLocker locker(m_lock, Mutex::Mode::Shared);
-    VERIFY(identifier.fsid() == fsid());
-
-    auto it = m_inodes.find(identifier.index());
-    if (it == m_inodes.end())
-        return ENOENT;
-    return it->value;
-}
-
-TmpFSInode::TmpFSInode(TmpFS& fs, const InodeMetadata& metadata, InodeIdentifier parent)
+TmpFSInode::TmpFSInode(TmpFS& fs, const InodeMetadata& metadata, WeakPtr<TmpFSInode> parent)
     : Inode(fs, fs.next_inode_index())
     , m_metadata(metadata)
-    , m_parent(parent)
+    , m_parent(move(parent))
 {
     m_metadata.inode = identifier();
 }
@@ -82,11 +54,9 @@ TmpFSInode::~TmpFSInode()
 {
 }
 
-ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMetadata const& metadata, InodeIdentifier parent)
+ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMetadata const& metadata, WeakPtr<TmpFSInode> parent)
 {
-    auto inode = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) TmpFSInode(fs, metadata, parent)));
-    fs.register_inode(inode);
-    return inode;
+    return adopt_nonnull_ref_or_enomem(new (nothrow) TmpFSInode(fs, metadata, move(parent)));
 }
 
 ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create_root(TmpFS& fs)
@@ -97,7 +67,7 @@ ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create_root(TmpFS& fs)
     metadata.ctime = now;
     metadata.mtime = now;
     metadata.mode = S_IFDIR | S_ISVTX | 0777;
-    return try_create(fs, metadata, { fs.fsid(), 1 });
+    return try_create(fs, metadata, {});
 }
 
 InodeMetadata TmpFSInode::metadata() const
@@ -115,7 +85,8 @@ ErrorOr<void> TmpFSInode::traverse_as_directory(Function<ErrorOr<void>(FileSyste
         return ENOTDIR;
 
     TRY(callback({ ".", identifier(), 0 }));
-    TRY(callback({ "..", m_parent, 0 }));
+    if (auto parent = m_parent.strong_ref())
+        TRY(callback({ "..", parent->identifier(), 0 }));
 
     for (auto& child : m_children) {
         TRY(callback({ child.name->view(), child.inode->identifier(), 0 }));
@@ -162,7 +133,7 @@ ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, const UserOrK
         if (m_content && static_cast<off_t>(m_content->capacity()) >= new_size) {
             m_content->set_size(new_size);
         } else {
-            // Grow the content buffer 2x the new sizeto accommodate repeating write() calls.
+            // Grow the content buffer 2x the new size to accommodate repeating write() calls.
             // Note that we're not actually committing physical memory to the buffer
             // until it's needed. We only grow VM here.
 
@@ -176,7 +147,7 @@ ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, const UserOrK
             m_content = move(tmp);
         }
         m_metadata.size = new_size;
-        notify_watchers();
+        set_metadata_dirty(true);
     }
 
     TRY(buffer.read(m_content->data() + offset, size)); // TODO: partial reads?
@@ -192,8 +163,11 @@ ErrorOr<NonnullRefPtr<Inode>> TmpFSInode::lookup(StringView name)
 
     if (name == ".")
         return *this;
-    if (name == "..")
-        return fs().get_inode(m_parent);
+    if (name == "..") {
+        if (auto parent = m_parent.strong_ref())
+            return parent.release_nonnull();
+        return ENOENT;
+    }
 
     auto* child = find_child_by_name(name);
     if (!child)
@@ -208,12 +182,6 @@ TmpFSInode::Child* TmpFSInode::find_child_by_name(StringView name)
             return &child;
     }
     return nullptr;
-}
-
-void TmpFSInode::notify_watchers()
-{
-    set_metadata_dirty(true);
-    set_metadata_dirty(false);
 }
 
 ErrorOr<void> TmpFSInode::flush_metadata()
@@ -232,7 +200,7 @@ ErrorOr<void> TmpFSInode::chmod(mode_t mode)
     MutexLocker locker(m_inode_lock);
 
     m_metadata.mode = mode;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
 }
 
@@ -242,7 +210,7 @@ ErrorOr<void> TmpFSInode::chown(UserID uid, GroupID gid)
 
     m_metadata.uid = uid;
     m_metadata.gid = gid;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
 }
 
@@ -264,7 +232,7 @@ ErrorOr<NonnullRefPtr<Inode>> TmpFSInode::create_child(StringView name, mode_t m
     metadata.ctime = now;
     metadata.mtime = now;
 
-    auto child = TRY(TmpFSInode::try_create(fs(), metadata, identifier()));
+    auto child = TRY(TmpFSInode::try_create(fs(), metadata, *this));
     TRY(add_child(*child, name, mode));
     return child;
 }
@@ -277,13 +245,19 @@ ErrorOr<void> TmpFSInode::add_child(Inode& child, StringView name, mode_t)
     if (name.length() > NAME_MAX)
         return ENAMETOOLONG;
 
+    MutexLocker locker(m_inode_lock);
+    for (auto const& existing_child : m_children) {
+        if (existing_child.name->view() == name)
+            return EEXIST;
+    }
+
     auto name_kstring = TRY(KString::try_create(name));
     // Balanced by `delete` in remove_child()
+
     auto* child_entry = new (nothrow) Child { move(name_kstring), static_cast<TmpFSInode&>(child) };
     if (!child_entry)
         return ENOMEM;
 
-    MutexLocker locker(m_inode_lock);
     m_children.append(*child_entry);
     did_add_child(child.identifier(), name);
     return {};
@@ -332,7 +306,7 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
     }
 
     m_metadata.size = size;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
 }
 
@@ -341,7 +315,7 @@ ErrorOr<void> TmpFSInode::set_atime(time_t time)
     MutexLocker locker(m_inode_lock);
 
     m_metadata.atime = time;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
 }
 
@@ -350,7 +324,7 @@ ErrorOr<void> TmpFSInode::set_ctime(time_t time)
     MutexLocker locker(m_inode_lock);
 
     m_metadata.ctime = time;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
 }
 
@@ -359,14 +333,8 @@ ErrorOr<void> TmpFSInode::set_mtime(time_t t)
     MutexLocker locker(m_inode_lock);
 
     m_metadata.mtime = t;
-    notify_watchers();
+    set_metadata_dirty(true);
     return {};
-}
-
-void TmpFSInode::one_ref_left()
-{
-    // Destroy ourselves.
-    fs().unregister_inode(identifier());
 }
 
 }

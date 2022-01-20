@@ -9,6 +9,7 @@ add_subdirectory(LanguageServers)
 add_subdirectory(LanguageClients)
 
 compile_gml(Dialogs/NewProjectDialog.gml Dialogs/NewProjectDialogGML.h new_project_dialog_gml)
+compile_gml(Dialogs/Git/GitCommitDialog.gml Dialogs/Git/GitCommitDialogGML.h git_commit_dialog_gml)
 
 set(SOURCES
     CodeDocument.cpp
@@ -23,6 +24,8 @@ set(SOURCES
     Debugger/EvaluateExpressionDialog.cpp
     Debugger/RegistersModel.cpp
     Debugger/VariablesModel.cpp
+    Dialogs/Git/GitCommitDialog.cpp
+    Dialogs/Git/GitCommitDialogGML.h
     Dialogs/NewProjectDialog.cpp
     Dialogs/NewProjectDialogGML.h
     Dialogs/ProjectTemplatesModel.cpp
@@ -40,6 +43,7 @@ set(SOURCES
     LanguageClient.cpp
     Locator.cpp
     Project.cpp
+    ProjectBuilder.cpp
     ProjectDeclarations.cpp
     ProjectFile.cpp
     ProjectTemplate.cpp
@@ -51,4 +55,5 @@ set(SOURCES
 
 serenity_app(HackStudio ICON app-hack-studio)
 target_link_libraries(HackStudio LibWeb LibMarkdown LibGUI LibCpp LibGfx LibCore LibVT LibDebug LibX86 LibDiff LibShell LibSymbolication LibRegex LibSQL LibCoredump LibMain)
+link_with_unicode_data(HackStudio)
 add_dependencies(HackStudio CppLanguageServer)

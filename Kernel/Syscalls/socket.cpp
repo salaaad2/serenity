@@ -14,9 +14,9 @@ namespace Kernel {
 #define REQUIRE_PROMISE_FOR_SOCKET_DOMAIN(domain) \
     do {                                          \
         if (domain == AF_INET)                    \
-            REQUIRE_PROMISE(inet);                \
+            TRY(require_promise(Pledge::inet));   \
         else if (domain == AF_LOCAL)              \
-            REQUIRE_PROMISE(unix);                \
+            TRY(require_promise(Pledge::unix));   \
     } while (0)
 
 void Process::setup_socket_fd(int fd, NonnullRefPtr<OpenFileDescription> description, int type)
@@ -76,7 +76,7 @@ ErrorOr<FlatPtr> Process::sys$listen(int sockfd, int backlog)
 ErrorOr<FlatPtr> Process::sys$accept4(Userspace<const Syscall::SC_accept4_params*> user_params)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(accept);
+    TRY(require_promise(Pledge::accept));
     auto params = TRY(copy_typed_from_user(user_params));
 
     int accepting_socket_fd = params.sockfd;
@@ -108,7 +108,7 @@ ErrorOr<FlatPtr> Process::sys$accept4(Userspace<const Syscall::SC_accept4_params
     VERIFY(accepted_socket);
 
     if (user_address) {
-        sockaddr_un address_buffer;
+        sockaddr_un address_buffer {};
         address_size = min(sizeof(sockaddr_un), static_cast<size_t>(address_size));
         accepted_socket->get_peer_address((sockaddr*)&address_buffer, &address_size);
         TRY(copy_to_user(user_address, &address_buffer, address_size));
@@ -146,7 +146,7 @@ ErrorOr<FlatPtr> Process::sys$connect(int sockfd, Userspace<const sockaddr*> use
 ErrorOr<FlatPtr> Process::sys$shutdown(int sockfd, int how)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     if (how & ~SHUT_RDWR)
         return EINVAL;
     auto description = TRY(fds().open_file_description(sockfd));
@@ -161,7 +161,7 @@ ErrorOr<FlatPtr> Process::sys$shutdown(int sockfd, int how)
 ErrorOr<FlatPtr> Process::sys$sendmsg(int sockfd, Userspace<const struct msghdr*> user_msg, int flags)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     auto msg = TRY(copy_typed_from_user(user_msg));
 
     if (msg.msg_iovlen != 1)
@@ -189,7 +189,7 @@ ErrorOr<FlatPtr> Process::sys$sendmsg(int sockfd, Userspace<const struct msghdr*
 ErrorOr<FlatPtr> Process::sys$recvmsg(int sockfd, Userspace<struct msghdr*> user_msg, int flags)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
 
     struct msghdr msg;
     TRY(copy_from_user(&msg, user_msg));
@@ -266,7 +266,7 @@ ErrorOr<void> Process::get_sock_or_peer_name(const Params& params)
     auto& socket = *description->socket();
     REQUIRE_PROMISE_FOR_SOCKET_DOMAIN(socket.domain());
 
-    sockaddr_un address_buffer;
+    sockaddr_un address_buffer {};
     addrlen_value = min(sizeof(sockaddr_un), static_cast<size_t>(addrlen_value));
     if constexpr (sockname)
         socket.get_local_address((sockaddr*)&address_buffer, &addrlen_value);

@@ -6,7 +6,6 @@
 
 #include <AK/Singleton.h>
 #include <AK/StdLibExtras.h>
-#include <AK/StringBuilder.h>
 #include <AK/Time.h>
 #include <AK/Types.h>
 #include <Kernel/API/Syscall.h>
@@ -43,19 +42,19 @@ static void create_signal_trampoline();
 
 RecursiveSpinlock g_profiling_lock;
 static Atomic<pid_t> next_pid;
-static Singleton<SpinlockProtected<Process::List>> s_processes;
+static Singleton<SpinlockProtected<Process::List>> s_all_instances;
 READONLY_AFTER_INIT Memory::Region* g_signal_trampoline_region;
 
-static Singleton<MutexProtected<String>> s_hostname;
+static Singleton<MutexProtected<OwnPtr<KString>>> s_hostname;
 
-MutexProtected<String>& hostname()
+MutexProtected<OwnPtr<KString>>& hostname()
 {
     return *s_hostname;
 }
 
-SpinlockProtected<Process::List>& processes()
+SpinlockProtected<Process::List>& Process::all_instances()
 {
-    return *s_processes;
+    return *s_all_instances;
 }
 
 ProcessID Process::allocate_pid()
@@ -74,20 +73,9 @@ UNMAP_AFTER_INIT void Process::initialize()
 
     // Note: This is called before scheduling is initialized, and before APs are booted.
     //       So we can "safely" bypass the lock here.
-    reinterpret_cast<String&>(hostname()) = "courage";
+    reinterpret_cast<OwnPtr<KString>&>(hostname()) = KString::must_create("courage"sv);
 
     create_signal_trampoline();
-}
-
-NonnullRefPtrVector<Process> Process::all_processes()
-{
-    NonnullRefPtrVector<Process> output;
-    processes().with([&](const auto& list) {
-        output.ensure_capacity(list.size_slow());
-        for (const auto& process : list)
-            output.append(NonnullRefPtr<Process>(process));
-    });
-    return output;
 }
 
 bool Process::in_group(GroupID gid) const
@@ -134,7 +122,7 @@ void Process::register_new(Process& process)
 {
     // Note: this is essentially the same like process->ref()
     RefPtr<Process> new_process = process;
-    processes().with([&](auto& list) {
+    all_instances().with([&](auto& list) {
         list.prepend(process);
     });
 }
@@ -163,7 +151,9 @@ ErrorOr<NonnullRefPtr<Process>> Process::try_create_user_process(RefPtr<Thread>&
     setup_description(1);
     setup_description(2);
 
-    if (auto result = process->exec(move(path_string), move(arguments), move(environment)); result.is_error()) {
+    Thread* new_main_thread = nullptr;
+    u32 prev_flags = 0;
+    if (auto result = process->exec(move(path_string), move(arguments), move(environment), new_main_thread, prev_flags); result.is_error()) {
         dbgln("Failed to exec {}: {}", path, result.error());
         first_thread = nullptr;
         return result.release_error();
@@ -279,26 +269,6 @@ Process::~Process()
     PerformanceManager::add_process_exit_event(*this);
 }
 
-bool Process::unref() const
-{
-    // NOTE: We need to obtain the process list lock before doing anything,
-    //       because otherwise someone might get in between us lowering the
-    //       refcount and acquiring the lock.
-    auto did_hit_zero = processes().with([&](auto& list) {
-        auto new_ref_count = deref_base();
-        if (new_ref_count > 0)
-            return false;
-
-        if (m_list_node.is_in_list())
-            list.remove(*const_cast<Process*>(this));
-        return true;
-    });
-
-    if (did_hit_zero)
-        delete this;
-    return did_hit_zero;
-}
-
 // Make sure the compiler doesn't "optimize away" this function:
 extern void signal_trampoline_dummy() __attribute__((used));
 void signal_trampoline_dummy()
@@ -401,7 +371,7 @@ void Process::crash(int signal, FlatPtr ip, bool out_of_memory)
 
 RefPtr<Process> Process::from_pid(ProcessID pid)
 {
-    return processes().with([&](const auto& list) -> RefPtr<Process> {
+    return all_instances().with([&](const auto& list) -> RefPtr<Process> {
         for (auto const& process : list) {
             if (process.pid() == pid)
                 return &process;
@@ -551,53 +521,42 @@ ErrorOr<void> Process::dump_core()
     return coredump->write();
 }
 
-bool Process::dump_perfcore()
+ErrorOr<void> Process::dump_perfcore()
 {
     VERIFY(is_dumpable());
     VERIFY(m_perf_event_buffer);
     dbgln("Generating perfcore for pid: {}", pid().value());
 
     // Try to generate a filename which isn't already used.
-    auto base_filename = String::formatted("{}_{}", name(), pid().value());
-    auto perfcore_filename = String::formatted("{}.profile", base_filename);
+    auto base_filename = TRY(KString::formatted("{}_{}", name(), pid().value()));
+    auto perfcore_filename = TRY(KString::formatted("{}.profile", base_filename));
     RefPtr<OpenFileDescription> description;
     for (size_t attempt = 1; attempt <= 10; ++attempt) {
-        auto description_or_error = VirtualFileSystem::the().open(perfcore_filename, O_CREAT | O_EXCL, 0400, current_directory(), UidAndGid { 0, 0 });
+        auto description_or_error = VirtualFileSystem::the().open(perfcore_filename->view(), O_CREAT | O_EXCL, 0400, current_directory(), UidAndGid { 0, 0 });
         if (!description_or_error.is_error()) {
             description = description_or_error.release_value();
             break;
         }
-        perfcore_filename = String::formatted("{}.{}.profile", base_filename, attempt);
+        perfcore_filename = TRY(KString::formatted("{}.{}.profile", base_filename, attempt));
     }
     if (!description) {
         dbgln("Failed to generate perfcore for pid {}: Could not generate filename for the perfcore file.", pid().value());
-        return false;
+        return EEXIST;
     }
 
-    auto builder_or_error = KBufferBuilder::try_create();
-    if (builder_or_error.is_error()) {
-        dbgln("Failed to generate perfcore for pid {}: Could not allocate KBufferBuilder.", pid());
-        return false;
-    }
-    auto builder = builder_or_error.release_value();
-    if (m_perf_event_buffer->to_json(builder).is_error()) {
-        dbgln("Failed to generate perfcore for pid {}: Could not serialize performance events to JSON.", pid().value());
-        return false;
-    }
+    auto builder = TRY(KBufferBuilder::try_create());
+    TRY(m_perf_event_buffer->to_json(builder));
 
     auto json = builder.build();
     if (!json) {
         dbgln("Failed to generate perfcore for pid {}: Could not allocate buffer.", pid().value());
-        return false;
+        return ENOMEM;
     }
     auto json_buffer = UserOrKernelBuffer::for_kernel_buffer(json->data());
-    if (description->write(json_buffer, json->size()).is_error()) {
-        dbgln("Failed to generate perfcore for pid {}: Could not write to perfcore file.", pid().value());
-        return false;
-    }
+    TRY(description->write(json_buffer, json->size()));
 
     dbgln("Wrote perfcore for pid {} to {}", pid().value(), perfcore_filename);
-    return true;
+    return {};
 }
 
 void Process::finalize()
@@ -617,7 +576,9 @@ void Process::finalize()
             }
         }
         if (m_perf_event_buffer) {
-            dump_perfcore();
+            auto result = dump_perfcore();
+            if (result.is_error())
+                critical_dmesgln("Failed to write perfcore: {}", result.error());
             TimeManagement::the().disable_profile_timer();
         }
     }
@@ -701,7 +662,7 @@ void Process::die()
         m_threads_for_coredump.append(thread);
     });
 
-    processes().with([&](const auto& list) {
+    all_instances().with([&](const auto& list) {
         for (auto it = list.begin(); it != list.end();) {
             auto& process = *it;
             ++it;
@@ -742,7 +703,7 @@ ErrorOr<void> Process::send_signal(u8 signal, Process* sender)
     // If the main thread has died, there may still be other threads:
     if (!receiver_thread) {
         // The first one should be good enough.
-        // Neither kill(2) nor kill(3) specify any selection precedure.
+        // Neither kill(2) nor kill(3) specify any selection procedure.
         for_each_thread([&receiver_thread](Thread& thread) -> IterationDecision {
             receiver_thread = &thread;
             return IterationDecision::Break;
@@ -820,11 +781,12 @@ void Process::tracer_trap(Thread& thread, const RegisterState& regs)
 
 bool Process::create_perf_events_buffer_if_needed()
 {
-    if (!m_perf_event_buffer) {
-        m_perf_event_buffer = PerformanceEventBuffer::try_create_with_size(4 * MiB);
-        m_perf_event_buffer->add_process(*this, ProcessEventType::Create);
-    }
-    return !!m_perf_event_buffer;
+    if (m_perf_event_buffer)
+        return true;
+    m_perf_event_buffer = PerformanceEventBuffer::try_create_with_size(4 * MiB);
+    if (!m_perf_event_buffer)
+        return false;
+    return !m_perf_event_buffer->add_process(*this, ProcessEventType::Create).is_error();
 }
 
 void Process::delete_perf_events_buffer()
@@ -894,26 +856,27 @@ static constexpr StringView to_string(Pledge promise)
     VERIFY_NOT_REACHED();
 }
 
-void Process::require_no_promises() const
+ErrorOr<void> Process::require_no_promises() const
 {
     if (!has_promises())
-        return;
+        return {};
     dbgln("Has made a promise");
-    Process::current().crash(SIGABRT, 0);
-    VERIFY_NOT_REACHED();
+    Thread::current()->set_promise_violation_pending(true);
+    return EPROMISEVIOLATION;
 }
 
-void Process::require_promise(Pledge promise)
+ErrorOr<void> Process::require_promise(Pledge promise)
 {
     if (!has_promises())
-        return;
+        return {};
 
     if (has_promised(promise))
-        return;
+        return {};
 
     dbgln("Has not pledged {}", to_string(promise));
+    Thread::current()->set_promise_violation_pending(true);
     (void)try_set_coredump_property("pledge_violation"sv, to_string(promise));
-    crash(SIGABRT, 0);
+    return EPROMISEVIOLATION;
 }
 
 }

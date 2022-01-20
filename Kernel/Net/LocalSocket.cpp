@@ -358,33 +358,35 @@ StringView LocalSocket::socket_path() const
 ErrorOr<NonnullOwnPtr<KString>> LocalSocket::pseudo_path(const OpenFileDescription& description) const
 {
     StringBuilder builder;
-    builder.append("socket:");
-    builder.append(socket_path());
+    TRY(builder.try_append("socket:"));
+    TRY(builder.try_append(socket_path()));
 
     switch (role(description)) {
     case Role::Listener:
-        builder.append(" (listening)");
+        TRY(builder.try_append(" (listening)"));
         break;
     case Role::Accepted:
-        builder.appendff(" (accepted from pid {})", origin_pid());
+        TRY(builder.try_appendff(" (accepted from pid {})", origin_pid()));
         break;
     case Role::Connected:
-        builder.appendff(" (connected to pid {})", acceptor_pid());
+        TRY(builder.try_appendff(" (connected to pid {})", acceptor_pid()));
         break;
     case Role::Connecting:
-        builder.append(" (connecting)");
+        TRY(builder.try_append(" (connecting)"));
         break;
     default:
         break;
     }
 
-    return KString::try_create(builder.to_string());
+    return KString::try_create(builder.string_view());
 }
 
 ErrorOr<void> LocalSocket::getsockopt(OpenFileDescription& description, int level, int option, Userspace<void*> value, Userspace<socklen_t*> value_size)
 {
     if (level != SOL_SOCKET)
         return Socket::getsockopt(description, level, option, value, value_size);
+
+    MutexLocker locker(mutex());
 
     socklen_t size;
     TRY(copy_from_user(&size, value_size.unsafe_userspace_ptr()));

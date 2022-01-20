@@ -47,8 +47,16 @@ void glBindTexture(GLenum target, GLuint texture)
     g_gl_context->gl_bind_texture(target, texture);
 }
 
-// Note: This is an _extremely_ misleading API name. This sets the active
-// texture unit, NOT the active texture itself...
+GLboolean glIsTexture(GLuint texture)
+{
+    return g_gl_context->gl_is_texture(texture);
+}
+
+void glActiveTextureARB(GLenum texture)
+{
+    glActiveTexture(texture);
+}
+
 void glActiveTexture(GLenum texture)
 {
     g_gl_context->gl_active_texture(texture);
@@ -65,6 +73,11 @@ void glTexParameterf(GLenum target, GLenum pname, GLfloat param)
 }
 
 void glTexEnvf(GLenum target, GLenum pname, GLfloat param)
+{
+    g_gl_context->gl_tex_env(target, pname, param);
+}
+
+void glTexEnvi(GLenum target, GLenum pname, GLint param)
 {
     g_gl_context->gl_tex_env(target, pname, param);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,6 +23,7 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
+#include <LibTimeZone/TimeZone.h>
 #include <LibUnicode/DateTimeFormat.h>
 
 using StringIndexType = u16;
@@ -55,11 +56,14 @@ constexpr auto s_calendar_symbols_list_index_type = "u8"sv;
 using CalendarIndexType = u8;
 constexpr auto s_calendar_index_type = "u8"sv;
 
-using TimeZoneIndexType = u16;
+using TimeZoneNamesIndexType = u16;
 constexpr auto s_time_zone_index_type = "u16"sv;
 
-using TimeZoneListIndexType = u8;
+using TimeZoneNamesListIndexType = u8;
 constexpr auto s_time_zone_list_index_type = "u8"sv;
+
+using TimeZoneFormatIndexType = u8;
+constexpr auto s_time_zone_format_index_type = "u8"sv;
 
 using DayPeriodIndexType = u8;
 constexpr auto s_day_period_index_type = "u8"sv;
@@ -376,35 +380,107 @@ struct AK::Traits<Calendar> : public GenericTraits<Calendar> {
     static unsigned hash(Calendar const& c) { return c.hash(); }
 };
 
-struct TimeZone {
+struct TimeZoneNames {
     unsigned hash() const
     {
-        return pair_int_hash(long_name, short_name);
+        auto hash = pair_int_hash(short_standard_name, long_standard_name);
+        hash = pair_int_hash(hash, short_daylight_name);
+        hash = pair_int_hash(hash, long_daylight_name);
+        hash = pair_int_hash(hash, short_generic_name);
+        hash = pair_int_hash(hash, long_generic_name);
+
+        return hash;
     }
 
-    bool operator==(TimeZone const& other) const
+    bool operator==(TimeZoneNames const& other) const
     {
-        return (long_name == other.long_name) && (short_name == other.short_name);
+        return (short_standard_name == other.short_standard_name)
+            && (long_standard_name == other.long_standard_name)
+            && (short_daylight_name == other.short_daylight_name)
+            && (long_daylight_name == other.long_daylight_name)
+            && (short_generic_name == other.short_generic_name)
+            && (long_generic_name == other.long_generic_name);
     }
 
-    StringIndexType long_name { 0 };
-    StringIndexType short_name { 0 };
+    StringIndexType short_standard_name { 0 };
+    StringIndexType long_standard_name { 0 };
+
+    StringIndexType short_daylight_name { 0 };
+    StringIndexType long_daylight_name { 0 };
+
+    StringIndexType short_generic_name { 0 };
+    StringIndexType long_generic_name { 0 };
 };
 
 template<>
-struct AK::Formatter<TimeZone> : Formatter<FormatString> {
-    ErrorOr<void> format(FormatBuilder& builder, TimeZone const& time_zone)
+struct AK::Formatter<TimeZoneNames> : Formatter<FormatString> {
+    ErrorOr<void> format(FormatBuilder& builder, TimeZoneNames const& time_zone)
     {
         return Formatter<FormatString>::format(builder,
-            "{{ {}, {} }}",
-            time_zone.long_name,
-            time_zone.short_name);
+            "{{ {}, {}, {}, {}, {}, {} }}",
+            time_zone.short_standard_name,
+            time_zone.long_standard_name,
+            time_zone.short_daylight_name,
+            time_zone.long_daylight_name,
+            time_zone.short_generic_name,
+            time_zone.long_generic_name);
     }
 };
 
 template<>
-struct AK::Traits<TimeZone> : public GenericTraits<TimeZone> {
-    static unsigned hash(TimeZone const& t) { return t.hash(); }
+struct AK::Traits<TimeZoneNames> : public GenericTraits<TimeZoneNames> {
+    static unsigned hash(TimeZoneNames const& t) { return t.hash(); }
+};
+
+struct TimeZoneFormat {
+    unsigned hash() const
+    {
+        auto hash = int_hash(symbol_ahead_sign);
+        hash = pair_int_hash(hash, symbol_ahead_separator);
+        hash = pair_int_hash(hash, symbol_behind_sign);
+        hash = pair_int_hash(hash, symbol_behind_separator);
+        hash = pair_int_hash(hash, gmt_format);
+        hash = pair_int_hash(hash, gmt_zero_format);
+        return hash;
+    }
+
+    bool operator==(TimeZoneFormat const& other) const
+    {
+        return (symbol_ahead_sign == other.symbol_ahead_sign)
+            && (symbol_ahead_separator == other.symbol_ahead_separator)
+            && (symbol_behind_sign == other.symbol_behind_sign)
+            && (symbol_behind_separator == other.symbol_behind_separator)
+            && (gmt_format == other.gmt_format)
+            && (gmt_zero_format == other.gmt_zero_format);
+    }
+
+    StringIndexType symbol_ahead_sign { 0 };
+    StringIndexType symbol_ahead_separator { 0 };
+
+    StringIndexType symbol_behind_sign { 0 };
+    StringIndexType symbol_behind_separator { 0 };
+
+    StringIndexType gmt_format { 0 };
+    StringIndexType gmt_zero_format { 0 };
+};
+
+template<>
+struct AK::Formatter<TimeZoneFormat> : Formatter<FormatString> {
+    ErrorOr<void> format(FormatBuilder& builder, TimeZoneFormat const& time_zone_format)
+    {
+        return Formatter<FormatString>::format(builder, "{{ {}, {}, {}, {}, {}, {} }}",
+            time_zone_format.symbol_ahead_sign,
+            time_zone_format.symbol_ahead_separator,
+            time_zone_format.symbol_behind_sign,
+            time_zone_format.symbol_behind_separator,
+            time_zone_format.gmt_format,
+            time_zone_format.gmt_zero_format);
+    }
+};
+
+template<>
+struct AK::Traits<TimeZoneFormat> : public GenericTraits<TimeZoneFormat> {
+    static unsigned hash(TimeZoneFormat const& t) { return t.hash(); }
 };
 
 struct DayPeriod {
@@ -445,7 +521,7 @@ struct AK::Traits<DayPeriod> : public GenericTraits<DayPeriod> {
     static unsigned hash(DayPeriod const& d) { return d.hash(); }
 };
 
-using TimeZoneList = Vector<TimeZoneIndexType>;
+using TimeZoneNamesList = Vector<TimeZoneNamesIndexType>;
 using DayPeriodList = Vector<DayPeriodIndexType>;
 using HourCycleList = Vector<Unicode::HourCycle>;
 
@@ -459,7 +535,10 @@ struct AK::Formatter<Unicode::HourCycle> : Formatter<FormatString> {
 
 struct Locale {
     HashMap<String, CalendarIndexType> calendars;
-    TimeZoneListIndexType time_zones { 0 };
+
+    TimeZoneNamesListIndexType time_zones { 0 };
+    TimeZoneFormatIndexType time_zone_formats { 0 };
+
     DayPeriodListIndexType day_periods { 0 };
 };
 
@@ -474,8 +553,9 @@ struct UnicodeLocaleData {
     UniqueStorage<CalendarSymbols, CalendarSymbolsIndexType> unique_calendar_symbols;
     UniqueStorage<CalendarSymbolsList, CalendarSymbolsListIndexType> unique_calendar_symbols_lists;
     UniqueStorage<Calendar, CalendarIndexType> unique_calendars;
-    UniqueStorage<TimeZone, TimeZoneIndexType> unique_time_zones;
-    UniqueStorage<TimeZoneList, TimeZoneListIndexType> unique_time_zone_lists;
+    UniqueStorage<TimeZoneNames, TimeZoneNamesIndexType> unique_time_zones;
+    UniqueStorage<TimeZoneNamesList, TimeZoneNamesListIndexType> unique_time_zone_lists;
+    UniqueStorage<TimeZoneFormat, TimeZoneFormatIndexType> unique_time_zone_formats;
     UniqueStorage<DayPeriod, DayPeriodIndexType> unique_day_periods;
     UniqueStorage<DayPeriodList, DayPeriodListIndexType> unique_day_period_lists;
     UniqueStorage<HourCycleList, HourCycleListIndexType> unique_hour_cycle_lists;
@@ -485,7 +565,7 @@ struct UnicodeLocaleData {
     HashMap<String, HourCycleListIndexType> hour_cycles;
     Vector<String> hour_cycle_regions;
 
-    HashMap<String, String> meta_zones;
+    HashMap<String, Vector<TimeZone::TimeZone>> meta_zones;
     Vector<String> time_zones { "UTC"sv };
 
     Vector<String> calendars;
@@ -584,11 +664,15 @@ static ErrorOr<void> parse_meta_zones(String core_path, UnicodeLocaleData& local
         auto const& meta_zone = mapping.as_object().get("_other"sv);
         auto const& golden_zone = mapping.as_object().get("_type"sv);
 
-        locale_data.meta_zones.set(meta_zone.as_string(), golden_zone.as_string());
+        if (auto time_zone = TimeZone::time_zone_from_string(golden_zone.as_string()); time_zone.has_value()) {
+            auto& golden_zones = locale_data.meta_zones.ensure(meta_zone.as_string());
+            golden_zones.append(*time_zone);
+        }
     });
 
     // UTC does not appear in metaZones.json. Define it for convenience so other parsers don't need to check for its existence.
-    locale_data.meta_zones.set("UTC"sv, "UTC"sv);
+    if (auto time_zone = TimeZone::time_zone_from_string("UTC"sv); time_zone.has_value())
+        locale_data.meta_zones.set("UTC"sv, { *time_zone });
 
     return {};
 };
@@ -821,13 +905,27 @@ static Optional<CalendarPattern> parse_date_time_pattern_raw(String pattern, Str
         }
 
         // Zone
-        else if (all_of(segment, is_any_of("zZOvVXx"))) {
+        else if (all_of(segment, is_any_of("zV"sv))) {
             builder.append("{timeZoneName}");
 
             if (segment.length() < 4)
                 format.time_zone_name = CalendarPatternStyle::Short;
             else
                 format.time_zone_name = CalendarPatternStyle::Long;
+        } else if (all_of(segment, is_any_of("ZOXx"sv))) {
+            builder.append("{timeZoneName}");
+
+            if (segment.length() < 4)
+                format.time_zone_name = CalendarPatternStyle::ShortOffset;
+            else
+                format.time_zone_name = CalendarPatternStyle::LongOffset;
+        } else if (all_of(segment, is_char('v'))) {
+            builder.append("{timeZoneName}");
+
+            if (segment.length() < 4)
+                format.time_zone_name = CalendarPatternStyle::ShortGeneric;
+            else
+                format.time_zone_name = CalendarPatternStyle::LongGeneric;
         }
 
         // Non-patterns
@@ -1327,50 +1425,87 @@ static ErrorOr<void> parse_time_zone_names(String locale_time_zone_names_path, U
     auto const& dates_object = locale_object.as_object().get("dates"sv);
     auto const& time_zone_names_object = dates_object.as_object().get("timeZoneNames"sv);
     auto const& meta_zone_object = time_zone_names_object.as_object().get("metazone"sv);
+    auto const& hour_format_string = time_zone_names_object.as_object().get("hourFormat"sv);
+    auto const& gmt_format_string = time_zone_names_object.as_object().get("gmtFormat"sv);
+    auto const& gmt_zero_format_string = time_zone_names_object.as_object().get("gmtZeroFormat"sv);
 
     if (meta_zone_object.is_null())
         return {};
 
-    auto parse_name = [&](StringView type, JsonObject const& meta_zone_object) -> Optional<StringIndexType> {
+    auto parse_name = [&](StringView type, JsonObject const& meta_zone_object, StringView key) -> Optional<StringIndexType> {
         auto const& names = meta_zone_object.get(type);
         if (!names.is_object())
             return {};
 
-        auto const& daylight = names.as_object().get("daylight"sv);
-        if (daylight.is_string())
-            return locale_data.unique_strings.ensure(daylight.as_string());
-
-        auto const& standard = names.as_object().get("standard"sv);
-        if (standard.is_string())
-            return locale_data.unique_strings.ensure(standard.as_string());
+        auto const& name = names.as_object().get(key);
+        if (name.is_string())
+            return locale_data.unique_strings.ensure(name.as_string());
 
         return {};
     };
 
-    TimeZoneList time_zones;
+    auto parse_hour_format = [&](auto const& format, auto& time_zone_formats) {
+        auto hour_formats = format.split_view(';');
 
-    auto parse_time_zone = [&](StringView meta_zone, JsonObject const& meta_zone_object) {
-        auto const& golden_zone = locale_data.meta_zones.find(meta_zone)->value;
-        TimeZone time_zone {};
+        auto hour_format_ahead_start = hour_formats[0].find('H').value();
+        auto separator_ahead_start = hour_formats[0].find_last('H').value() + 1;
+        auto separator_ahead_end = hour_formats[0].find('m').value();
 
-        if (auto long_name = parse_name("long"sv, meta_zone_object); long_name.has_value())
-            time_zone.long_name = long_name.value();
-        if (auto short_name = parse_name("short"sv, meta_zone_object); short_name.has_value())
-            time_zone.short_name = short_name.value();
+        auto hour_format_behind_start = hour_formats[1].find('H').value();
+        auto separator_behind_start = hour_formats[1].find_last('H').value() + 1;
+        auto separator_behind_end = hour_formats[1].find('m').value();
 
-        auto time_zone_index = locale_data.time_zones.find_first_index(golden_zone).value();
-        time_zones[time_zone_index] = locale_data.unique_time_zones.ensure(move(time_zone));
+        auto symbol_ahead_sign = hour_formats[0].substring_view(0, hour_format_ahead_start);
+        auto symbol_ahead_separator = hour_formats[0].substring_view(separator_ahead_start, separator_ahead_end - separator_ahead_start);
+
+        auto symbol_behind_sign = hour_formats[1].substring_view(0, hour_format_behind_start);
+        auto symbol_behind_separator = hour_formats[1].substring_view(separator_behind_start, separator_behind_end - separator_behind_start);
+
+        time_zone_formats.symbol_ahead_sign = locale_data.unique_strings.ensure(symbol_ahead_sign);
+        time_zone_formats.symbol_ahead_separator = locale_data.unique_strings.ensure(symbol_ahead_separator);
+        time_zone_formats.symbol_behind_sign = locale_data.unique_strings.ensure(symbol_behind_sign);
+        time_zone_formats.symbol_behind_separator = locale_data.unique_strings.ensure(symbol_behind_separator);
     };
 
-    meta_zone_object.as_object().for_each_member([&](auto const& meta_zone, JsonValue const&) {
-        auto const& golden_zone = locale_data.meta_zones.find(meta_zone)->value;
+    TimeZoneNamesList time_zones;
 
-        if (!locale_data.time_zones.contains_slow(golden_zone))
-            locale_data.time_zones.append(golden_zone);
-    });
+    TimeZoneFormat time_zone_formats {};
+    parse_hour_format(hour_format_string.as_string(), time_zone_formats);
+    time_zone_formats.gmt_format = locale_data.unique_strings.ensure(gmt_format_string.as_string());
+    time_zone_formats.gmt_zero_format = locale_data.unique_strings.ensure(gmt_zero_format_string.as_string());
 
-    time_zones.resize(locale_data.time_zones.size());
-    quick_sort(locale_data.time_zones);
+    auto parse_time_zone = [&](StringView meta_zone, JsonObject const& meta_zone_object) {
+        auto golden_zones = locale_data.meta_zones.find(meta_zone);
+        if (golden_zones == locale_data.meta_zones.end())
+            return;
+
+        TimeZoneNames time_zone_names {};
+
+        if (auto name = parse_name("long"sv, meta_zone_object, "standard"sv); name.has_value())
+            time_zone_names.long_standard_name = name.value();
+        if (auto name = parse_name("short"sv, meta_zone_object, "standard"sv); name.has_value())
+            time_zone_names.short_standard_name = name.value();
+
+        if (auto name = parse_name("long"sv, meta_zone_object, "daylight"sv); name.has_value())
+            time_zone_names.long_daylight_name = name.value();
+        if (auto name = parse_name("short"sv, meta_zone_object, "daylight"sv); name.has_value())
+            time_zone_names.short_daylight_name = name.value();
+
+        if (auto name = parse_name("long"sv, meta_zone_object, "generic"sv); name.has_value())
+            time_zone_names.long_generic_name = name.value();
+        if (auto name = parse_name("short"sv, meta_zone_object, "generic"sv); name.has_value())
+            time_zone_names.short_generic_name = name.value();
+
+        auto time_zone_index = locale_data.unique_time_zones.ensure(move(time_zone_names));
+
+        for (auto golden_zone : golden_zones->value) {
+            auto time_zone = to_underlying(golden_zone);
+            if (time_zone >= time_zones.size())
+                time_zones.resize(time_zone + 1);
+
+            time_zones[time_zone] = time_zone_index;
+        }
+    };
 
     meta_zone_object.as_object().for_each_member([&](auto const& meta_zone, JsonValue const& value) {
         parse_time_zone(meta_zone, value.as_object());
@@ -1383,6 +1518,8 @@ static ErrorOr<void> parse_time_zone_names(String locale_time_zone_names_path, U
     parse_time_zone("UTC"sv, utc_object.as_object());
 
     locale.time_zones = locale_data.unique_time_zone_lists.ensure(move(time_zones));
+    locale.time_zone_formats = locale_data.unique_time_zone_formats.ensure(move(time_zone_formats));
+
     return {};
 }
 
@@ -1507,7 +1644,6 @@ namespace Unicode {
 
     generate_enum(generator, format_identifier, "Calendar"sv, {}, locale_data.calendars, locale_data.calendar_aliases);
     generate_enum(generator, format_identifier, "HourCycleRegion"sv, {}, locale_data.hour_cycle_regions);
-    generate_enum(generator, format_identifier, "TimeZone"sv, {}, locale_data.time_zones);
 
     generator.append(R"~~~(
 }
@@ -1540,11 +1676,12 @@ static void generate_unicode_locale_implementation(Core::File& file, UnicodeLoca
 #include <AK/BinarySearch.h>
 #include <AK/Optional.h>
 #include <AK/StringView.h>
+#include <LibTimeZone/TimeZone.h>
 #include <LibUnicode/DateTimeFormat.h>
 #include <LibUnicode/Locale.h>
 #include <LibUnicode/UnicodeDateTimeFormat.h>
 
-namespace Unicode::Detail {
+namespace Unicode {
 )~~~");
 
     locale_data.unique_strings.generate(generator);
@@ -1554,32 +1691,32 @@ template <typename SourceType, typename TargetType>
 static void convert_calendar_fields(SourceType const& source, TargetType& target)
 {
     if (source.era != -1)
-        target.era = static_cast<Unicode::CalendarPatternStyle>(source.era);
+        target.era = static_cast<CalendarPatternStyle>(source.era);
     if (source.year != -1)
-        target.year = static_cast<Unicode::CalendarPatternStyle>(source.year);
+        target.year = static_cast<CalendarPatternStyle>(source.year);
     if (source.month != -1)
-        target.month = static_cast<Unicode::CalendarPatternStyle>(source.month);
+        target.month = static_cast<CalendarPatternStyle>(source.month);
     if (source.weekday != -1)
-        target.weekday = static_cast<Unicode::CalendarPatternStyle>(source.weekday);
+        target.weekday = static_cast<CalendarPatternStyle>(source.weekday);
     if (source.day != -1)
-        target.day = static_cast<Unicode::CalendarPatternStyle>(source.day);
+        target.day = static_cast<CalendarPatternStyle>(source.day);
     if (source.day_period != -1)
-        target.day_period = static_cast<Unicode::CalendarPatternStyle>(source.day_period);
+        target.day_period = static_cast<CalendarPatternStyle>(source.day_period);
     if (source.hour != -1)
-        target.hour = static_cast<Unicode::CalendarPatternStyle>(source.hour);
+        target.hour = static_cast<CalendarPatternStyle>(source.hour);
     if (source.minute != -1)
-        target.minute = static_cast<Unicode::CalendarPatternStyle>(source.minute);
+        target.minute = static_cast<CalendarPatternStyle>(source.minute);
     if (source.second != -1)
-        target.second = static_cast<Unicode::CalendarPatternStyle>(source.second);
+        target.second = static_cast<CalendarPatternStyle>(source.second);
     if (source.fractional_second_digits != -1)
         target.fractional_second_digits = static_cast<u8>(source.fractional_second_digits);
     if (source.time_zone_name != -1)
-        target.time_zone_name = static_cast<Unicode::CalendarPatternStyle>(source.time_zone_name);
+        target.time_zone_name = static_cast<CalendarPatternStyle>(source.time_zone_name);
 }
 
-struct CalendarPattern {
-    Unicode::CalendarPattern to_unicode_calendar_pattern() const {
-        Unicode::CalendarPattern calendar_pattern {};
+struct CalendarPatternImpl {
+    CalendarPattern to_unicode_calendar_pattern() const {
+        CalendarPattern calendar_pattern {};
 
         calendar_pattern.skeleton = s_string_list[skeleton];
         calendar_pattern.pattern = s_string_list[pattern];
@@ -1607,12 +1744,12 @@ struct CalendarPattern {
     i8 time_zone_name { -1 };
 };
 
-struct CalendarRangePattern {
-    Unicode::CalendarRangePattern to_unicode_calendar_range_pattern() const {
-        Unicode::CalendarRangePattern calendar_range_pattern {};
+struct CalendarRangePatternImpl {
+    CalendarRangePattern to_unicode_calendar_range_pattern() const {
+        CalendarRangePattern calendar_range_pattern {};
 
         if (field != -1)
-            calendar_range_pattern.field = static_cast<Unicode::CalendarRangePattern::Field>(field);
+            calendar_range_pattern.field = static_cast<CalendarRangePattern::Field>(field);
         calendar_range_pattern.start_range = s_string_list[start_range];
         calendar_range_pattern.separator = s_string_list[separator];
         calendar_range_pattern.end_range = s_string_list[end_range];
@@ -1641,15 +1778,15 @@ struct CalendarRangePattern {
 };
 )~~~");
 
-    locale_data.unique_patterns.generate(generator, "CalendarPattern"sv, "s_calendar_patterns"sv, 10);
+    locale_data.unique_patterns.generate(generator, "CalendarPatternImpl"sv, "s_calendar_patterns"sv, 10);
     locale_data.unique_pattern_lists.generate(generator, s_calendar_pattern_index_type, "s_calendar_pattern_lists"sv);
-    locale_data.unique_range_patterns.generate(generator, "CalendarRangePattern"sv, "s_calendar_range_patterns"sv, 10);
+    locale_data.unique_range_patterns.generate(generator, "CalendarRangePatternImpl"sv, "s_calendar_range_patterns"sv, 10);
     locale_data.unique_range_pattern_lists.generate(generator, s_calendar_range_pattern_index_type, "s_calendar_range_pattern_lists"sv);
 
     generator.append(R"~~~(
-struct CalendarFormat {
-    Unicode::CalendarFormat to_unicode_calendar_format() const {
-        Unicode::CalendarFormat calendar_format {};
+struct CalendarFormatImpl {
+    CalendarFormat to_unicode_calendar_format() const {
+        CalendarFormat calendar_format {};
 
         calendar_format.full_format = s_calendar_patterns[full_format].to_unicode_calendar_pattern();
         calendar_format.long_format = s_calendar_patterns[long_format].to_unicode_calendar_pattern();
@@ -1684,9 +1821,39 @@ struct CalendarData {
     @calendar_symbols_list_index_type@ symbols { 0 };
 };
 
-struct TimeZoneData {
-    @string_index_type@ long_name { 0 };
-    @string_index_type@ short_name { 0 };
+struct TimeZoneNames {
+    @string_index_type@ short_standard_name { 0 };
+    @string_index_type@ long_standard_name { 0 };
+
+    @string_index_type@ short_daylight_name { 0 };
+    @string_index_type@ long_daylight_name { 0 };
+
+    @string_index_type@ short_generic_name { 0 };
+    @string_index_type@ long_generic_name { 0 };
+};
+
+struct TimeZoneFormatImpl {
+    TimeZoneFormat to_time_zone_format() const {
+        TimeZoneFormat time_zone_format {};
+
+        time_zone_format.symbol_ahead_sign = s_string_list[symbol_ahead_sign];
+        time_zone_format.symbol_ahead_separator = s_string_list[symbol_ahead_separator];
+        time_zone_format.symbol_behind_sign = s_string_list[symbol_behind_sign];
+        time_zone_format.symbol_behind_separator = s_string_list[symbol_behind_separator];
+        time_zone_format.gmt_format = s_string_list[gmt_format];
+        time_zone_format.gmt_zero_format = s_string_list[gmt_zero_format];
+
+        return time_zone_format;
+    }
+
+    @string_index_type@ symbol_ahead_sign { 0 };
+    @string_index_type@ symbol_ahead_separator { 0 };
+
+    @string_index_type@ symbol_behind_sign { 0 };
+    @string_index_type@ symbol_behind_separator { 0 };
+
+    @string_index_type@ gmt_format { 0 };
+    @string_index_type@ gmt_zero_format { 0 };
 };
 
 struct DayPeriodData {
@@ -1696,13 +1863,14 @@ struct DayPeriodData {
 };
 )~~~");
 
-    locale_data.unique_formats.generate(generator, "CalendarFormat"sv, "s_calendar_formats"sv, 10);
+    locale_data.unique_formats.generate(generator, "CalendarFormatImpl"sv, "s_calendar_formats"sv, 10);
     locale_data.unique_symbol_lists.generate(generator, s_string_index_type, "s_symbol_lists"sv);
     locale_data.unique_calendar_symbols.generate(generator, "CalendarSymbols"sv, "s_calendar_symbols"sv, 10);
     locale_data.unique_calendar_symbols_lists.generate(generator, s_calendar_symbols_index_type, "s_calendar_symbol_lists"sv);
     locale_data.unique_calendars.generate(generator, "CalendarData"sv, "s_calendars"sv, 10);
-    locale_data.unique_time_zones.generate(generator, "TimeZoneData"sv, "s_time_zones"sv, 30);
+    locale_data.unique_time_zones.generate(generator, "TimeZoneNames"sv, "s_time_zones"sv, 30);
     locale_data.unique_time_zone_lists.generate(generator, s_time_zone_index_type, "s_time_zone_lists"sv);
+    locale_data.unique_time_zone_formats.generate(generator, "TimeZoneFormatImpl"sv, "s_time_zone_formats"sv, 30);
     locale_data.unique_day_periods.generate(generator, "DayPeriodData"sv, "s_day_periods"sv, 30);
     locale_data.unique_day_period_lists.generate(generator, s_day_period_index_type, "s_day_period_lists"sv);
     locale_data.unique_hour_cycle_lists.generate(generator, "u8"sv, "s_hour_cycle_lists"sv);
@@ -1750,8 +1918,9 @@ static constexpr Array<@type@, @size@> @name@ { {)~~~");
     auto locales = locale_data.locales.keys();
     quick_sort(locales);
 
-    generate_mapping(generator, locale_data.locales, s_calendar_index_type, "s_locale_calendars"sv, "s_calendars_{}", [&](auto const& name, auto const& value) { append_calendars(name, value.calendars); });
+    generate_mapping(generator, locale_data.locales, s_calendar_index_type, "s_locale_calendars"sv, "s_calendars_{}", format_identifier, [&](auto const& name, auto const& value) { append_calendars(name, value.calendars); });
     append_mapping(locales, locale_data.locales, s_time_zone_index_type, "s_locale_time_zones"sv, [](auto const& locale) { return locale.time_zones; });
+    append_mapping(locales, locale_data.locales, s_time_zone_format_index_type, "s_locale_time_zone_formats"sv, [](auto const& locale) { return locale.time_zone_formats; });
     append_mapping(locales, locale_data.locales, s_day_period_index_type, "s_locale_day_periods"sv, [](auto const& locale) { return locale.day_periods; });
     append_mapping(locale_data.hour_cycle_regions, locale_data.hour_cycles, s_hour_cycle_list_index_type, "s_hour_cycles"sv, [](auto const& hour_cycles) { return hour_cycles; });
     generator.append("\n");
@@ -1770,11 +1939,9 @@ static constexpr Array<@type@, @size@> @name@ { {)~~~");
 
     append_from_string("Calendar"sv, "calendar"sv, locale_data.calendars, locale_data.calendar_aliases);
     append_from_string("HourCycleRegion"sv, "hour_cycle_region"sv, locale_data.hour_cycle_regions);
-    append_from_string("TimeZone"sv, "time_zone"sv, locale_data.time_zones);
 
     generator.append(R"~~~(
-Vector<Unicode::HourCycle> get_regional_hour_cycles(StringView region) asm("unicode_get_regional_hour_cycles");
-Vector<Unicode::HourCycle> get_regional_hour_cycles(StringView region)
+Vector<HourCycle> get_regional_hour_cycles(StringView region)
 {
     auto region_value = hour_cycle_region_from_string(region);
     if (!region_value.has_value())
@@ -1785,11 +1952,11 @@ Vector<Unicode::HourCycle> get_regional_hour_cycles(StringView region)
     auto regional_hour_cycles_index = s_hour_cycles.at(region_index);
     auto const& regional_hour_cycles = s_hour_cycle_lists.at(regional_hour_cycles_index);
 
-    Vector<Unicode::HourCycle> hour_cycles;
+    Vector<HourCycle> hour_cycles;
     hour_cycles.ensure_capacity(regional_hour_cycles.size());
 
     for (auto hour_cycle : regional_hour_cycles)
-        hour_cycles.unchecked_append(static_cast<Unicode::HourCycle>(hour_cycle));
+        hour_cycles.unchecked_append(static_cast<HourCycle>(hour_cycle));
 
     return hour_cycles;
 }
@@ -1813,8 +1980,7 @@ static CalendarData const* find_calendar_data(StringView locale, StringView cale
     return &s_calendars[calendar_index];
 }
 
-Optional<Unicode::CalendarFormat> get_calendar_date_format(StringView locale, StringView calendar) asm("unicode_get_calendar_date_format");
-Optional<Unicode::CalendarFormat> get_calendar_date_format(StringView locale, StringView calendar)
+Optional<CalendarFormat> get_calendar_date_format(StringView locale, StringView calendar)
 {
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& formats = s_calendar_formats.at(data->date_formats);
@@ -1823,8 +1989,7 @@ Optional<Unicode::CalendarFormat> get_calendar_date_format(StringView locale, St
     return {};
 }
 
-Optional<Unicode::CalendarFormat> get_calendar_time_format(StringView locale, StringView calendar) asm("unicode_get_calendar_time_format");
-Optional<Unicode::CalendarFormat> get_calendar_time_format(StringView locale, StringView calendar)
+Optional<CalendarFormat> get_calendar_time_format(StringView locale, StringView calendar)
 {
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& formats = s_calendar_formats.at(data->time_formats);
@@ -1833,8 +1998,7 @@ Optional<Unicode::CalendarFormat> get_calendar_time_format(StringView locale, St
     return {};
 }
 
-Optional<Unicode::CalendarFormat> get_calendar_date_time_format(StringView locale, StringView calendar) asm("unicode_get_calendar_date_time_format");
-Optional<Unicode::CalendarFormat> get_calendar_date_time_format(StringView locale, StringView calendar)
+Optional<CalendarFormat> get_calendar_date_time_format(StringView locale, StringView calendar)
 {
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& formats = s_calendar_formats.at(data->date_time_formats);
@@ -1843,10 +2007,9 @@ Optional<Unicode::CalendarFormat> get_calendar_date_time_format(StringView local
     return {};
 }
 
-Vector<Unicode::CalendarPattern> get_calendar_available_formats(StringView locale, StringView calendar) asm("unicode_get_calendar_available_formats");
-Vector<Unicode::CalendarPattern> get_calendar_available_formats(StringView locale, StringView calendar)
+Vector<CalendarPattern> get_calendar_available_formats(StringView locale, StringView calendar)
 {
-    Vector<Unicode::CalendarPattern> result {};
+    Vector<CalendarPattern> result {};
 
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& available_formats = s_calendar_pattern_lists.at(data->available_formats);
@@ -1859,8 +2022,7 @@ Vector<Unicode::CalendarPattern> get_calendar_available_formats(StringView local
     return result;
 }
 
-Optional<Unicode::CalendarRangePattern> get_calendar_default_range_format(StringView locale, StringView calendar) asm("unicode_get_calendar_default_range_format");
-Optional<Unicode::CalendarRangePattern> get_calendar_default_range_format(StringView locale, StringView calendar)
+Optional<CalendarRangePattern> get_calendar_default_range_format(StringView locale, StringView calendar)
 {
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& pattern = s_calendar_range_patterns[data->default_range_format];
@@ -1870,10 +2032,9 @@ Optional<Unicode::CalendarRangePattern> get_calendar_default_range_format(String
     return {};
 }
 
-Vector<Unicode::CalendarRangePattern> get_calendar_range_formats(StringView locale, StringView calendar, StringView skeleton) asm("unicode_get_calendar_range_formats");
-Vector<Unicode::CalendarRangePattern> get_calendar_range_formats(StringView locale, StringView calendar, StringView skeleton)
+Vector<CalendarRangePattern> get_calendar_range_formats(StringView locale, StringView calendar, StringView skeleton)
 {
-    Vector<Unicode::CalendarRangePattern> result {};
+    Vector<CalendarRangePattern> result {};
 
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& range_formats = s_calendar_range_pattern_lists.at(data->range_formats);
@@ -1889,10 +2050,9 @@ Vector<Unicode::CalendarRangePattern> get_calendar_range_formats(StringView loca
     return result;
 }
 
-Vector<Unicode::CalendarRangePattern> get_calendar_range12_formats(StringView locale, StringView calendar, StringView skeleton) asm("unicode_get_calendar_range12_formats");
-Vector<Unicode::CalendarRangePattern> get_calendar_range12_formats(StringView locale, StringView calendar, StringView skeleton)
+Vector<CalendarRangePattern> get_calendar_range12_formats(StringView locale, StringView calendar, StringView skeleton)
 {
-    Vector<Unicode::CalendarRangePattern> result {};
+    Vector<CalendarRangePattern> result {};
 
     if (auto const* data = find_calendar_data(locale, calendar); data != nullptr) {
         auto const& range12_formats = s_calendar_range_pattern_lists.at(data->range12_formats);
@@ -1939,7 +2099,6 @@ static Span<@string_index_type@ const> find_calendar_symbols(StringView locale, 
     return {};
 }
 
-Optional<StringView> get_calendar_era_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Era value) asm("unicode_get_calendar_era_symbol");
 Optional<StringView> get_calendar_era_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Era value)
 {
     auto symbols = find_calendar_symbols(locale, calendar, CalendarSymbol::Era, style);
@@ -1950,7 +2109,6 @@ Optional<StringView> get_calendar_era_symbol(StringView locale, StringView calen
     return {};
 }
 
-Optional<StringView> get_calendar_month_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Month value) asm("unicode_get_calendar_month_symbol");
 Optional<StringView> get_calendar_month_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Month value)
 {
     auto symbols = find_calendar_symbols(locale, calendar, CalendarSymbol::Month, style);
@@ -1961,7 +2119,6 @@ Optional<StringView> get_calendar_month_symbol(StringView locale, StringView cal
     return {};
 }
 
-Optional<StringView> get_calendar_weekday_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Weekday value) asm("unicode_get_calendar_weekday_symbol");
 Optional<StringView> get_calendar_weekday_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, Weekday value)
 {
     auto symbols = find_calendar_symbols(locale, calendar, CalendarSymbol::Weekday, style);
@@ -1972,7 +2129,6 @@ Optional<StringView> get_calendar_weekday_symbol(StringView locale, StringView c
     return {};
 }
 
-Optional<StringView> get_calendar_day_period_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, DayPeriod value) asm("unicode_get_calendar_day_period_symbol");
 Optional<StringView> get_calendar_day_period_symbol(StringView locale, StringView calendar, CalendarPatternStyle style, DayPeriod value)
 {
     auto symbols = find_calendar_symbols(locale, calendar, CalendarSymbol::DayPeriod, style);
@@ -1983,7 +2139,6 @@ Optional<StringView> get_calendar_day_period_symbol(StringView locale, StringVie
     return {};
 }
 
-Optional<StringView> get_calendar_day_period_symbol_for_hour(StringView locale, StringView calendar, CalendarPatternStyle style, u8 hour) asm("unicode_get_calendar_day_period_symbol_for_hour");
 Optional<StringView> get_calendar_day_period_symbol_for_hour(StringView locale, StringView calendar, CalendarPatternStyle style, u8 hour)
 {
     auto locale_value = locale_from_string(locale);
@@ -1996,28 +2151,47 @@ Optional<StringView> get_calendar_day_period_symbol_for_hour(StringView locale, 
     auto day_periods = s_day_period_lists[day_periods_index];
 
     for (auto day_period_index : day_periods) {
-        auto const& day_period = s_day_periods[day_period_index];
+        auto day_period = s_day_periods[day_period_index];
+        auto h = hour;
 
-        if ((day_period.begin <= hour) && (hour < day_period.end)) {
-            auto period = static_cast<Unicode::DayPeriod>(day_period.day_period);
-            return Detail::get_calendar_day_period_symbol(locale, calendar, style, period);
+        if (day_period.begin > day_period.end) {
+            day_period.end += 24;
+            h += 24;
+        }
+
+        if ((day_period.begin <= h) && (h < day_period.end)) {
+            auto period = static_cast<DayPeriod>(day_period.day_period);
+            return get_calendar_day_period_symbol(locale, calendar, style, period);
         }
     }
 
     // Fallback to fixed periods if the locale does not have flexible day periods.
     // TR-35 states that the meaning of AM and PM does not change with locale.
     if (hour < 12)
-        return Detail::get_calendar_day_period_symbol(locale, calendar, style, Unicode::DayPeriod::AM);
-    return Detail::get_calendar_day_period_symbol(locale, calendar, style, Unicode::DayPeriod::PM);
+        return get_calendar_day_period_symbol(locale, calendar, style, DayPeriod::AM);
+    return get_calendar_day_period_symbol(locale, calendar, style, DayPeriod::PM);
 }
 
-static TimeZoneData const* find_time_zone_data(StringView locale, StringView time_zone)
+Optional<TimeZoneFormat> get_time_zone_format(StringView locale)
+{
+    auto locale_value = locale_from_string(locale);
+    if (!locale_value.has_value())
+        return {};
+
+    auto locale_index = to_underlying(*locale_value) - 1; // Subtract 1 because 0 == Locale::None.
+    auto time_zone_format_index = s_locale_time_zone_formats.at(locale_index);
+
+    auto const& time_zone_format = s_time_zone_formats.at(time_zone_format_index);
+    return time_zone_format.to_time_zone_format();
+}
+
+static TimeZoneNames const* find_time_zone_names(StringView locale, StringView time_zone)
 {
     auto locale_value = locale_from_string(locale);
     if (!locale_value.has_value())
         return nullptr;
 
-    auto time_zone_value = time_zone_from_string(time_zone);
+    auto time_zone_value = ::TimeZone::time_zone_from_string(time_zone);
     if (!time_zone_value.has_value())
         return nullptr;
 
@@ -2026,31 +2200,37 @@ static TimeZoneData const* find_time_zone_data(StringView locale, StringView tim
 
     auto time_zone_list_index = s_locale_time_zones.at(locale_index);
     auto const& time_zone_list = s_time_zone_lists.at(time_zone_list_index);
+    if (time_zone_list.size() <= time_zone_index)
+        return nullptr;
 
     time_zone_index = time_zone_list.at(time_zone_index);
     return &s_time_zones[time_zone_index];
 }
 
-Optional<StringView> get_time_zone_name(StringView locale, StringView time_zone, CalendarPatternStyle style) asm("unicode_get_time_zone_name");
-Optional<StringView> get_time_zone_name(StringView locale, StringView time_zone, CalendarPatternStyle style)
+Optional<StringView> get_time_zone_name(StringView locale, StringView time_zone, CalendarPatternStyle style, TimeZone::InDST in_dst)
 {
-    if (auto const* data = find_time_zone_data(locale, time_zone); data != nullptr) {
-        @string_index_type@ time_zone_index = 0;
+    if (auto const* data = find_time_zone_names(locale, time_zone); data != nullptr) {
+        size_t name_index = 0;
 
         switch (style) {
-        case CalendarPatternStyle::Long:
-            time_zone_index = data->long_name;
-            break;
         case CalendarPatternStyle::Short:
-            time_zone_index = data->short_name;
+            name_index = (in_dst == TimeZone::InDST::No) ? data->short_standard_name : data->short_daylight_name;
             break;
-
+        case CalendarPatternStyle::Long:
+            name_index = (in_dst == TimeZone::InDST::No) ? data->long_standard_name : data->long_daylight_name;
+            break;
+        case CalendarPatternStyle::ShortGeneric:
+            name_index = data->short_generic_name;
+            break;
+        case CalendarPatternStyle::LongGeneric:
+            name_index = data->long_generic_name;
+            break;
         default:
             VERIFY_NOT_REACHED();
         }
 
-        if (time_zone_index != 0)
-            return s_string_list[time_zone_index];
+        if (name_index != 0)
+            return s_string_list[name_index];
     }
 
     return {};

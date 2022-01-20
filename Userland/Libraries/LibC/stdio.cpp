@@ -11,6 +11,7 @@
 #include <AK/ScopedValueRollback.h>
 #include <AK/StdLibExtras.h>
 #include <AK/String.h>
+#include <LibC/bits/mutex_locker.h>
 #include <LibC/bits/stdio_file_implementation.h>
 #include <assert.h>
 #include <errno.h>
@@ -26,6 +27,15 @@
 #include <syscall.h>
 #include <unistd.h>
 
+static constinit pthread_mutex_t s_open_streams_lock = __PTHREAD_MUTEX_INITIALIZER;
+
+// The list of open files is initialized in __stdio_init.
+// We cannot rely on global constructors to initialize it, because it must
+// be initialized before other global constructors run. Similarly, we cannot
+// allow global destructors to destruct it.
+alignas(FILE::List) static u8 s_open_streams_storage[sizeof(FILE::List)];
+static FILE::List* const s_open_streams = reinterpret_cast<FILE::List*>(s_open_streams_storage);
+
 FILE::~FILE()
 {
     bool already_closed = m_fd == -1;
@@ -34,9 +44,13 @@ FILE::~FILE()
 
 FILE* FILE::create(int fd, int mode)
 {
-    void* file = calloc(1, sizeof(FILE));
-    new (file) FILE(fd, mode);
-    return (FILE*)file;
+    void* file_location = calloc(1, sizeof(FILE));
+    if (file_location == nullptr)
+        return nullptr;
+    auto* file = new (file_location) FILE(fd, mode);
+    LibC::MutexLocker locker(s_open_streams_lock);
+    s_open_streams->append(*file);
+    return file;
 }
 
 bool FILE::close()
@@ -63,8 +77,9 @@ bool FILE::flush()
     }
     if (m_mode & O_RDONLY) {
         // When open for reading, just drop the buffered data.
-        VERIFY(m_buffer.buffered_size() <= NumericLimits<off_t>::max());
-        off_t had_buffered = m_buffer.buffered_size();
+        if constexpr (sizeof(size_t) >= sizeof(off_t))
+            VERIFY(m_buffer.buffered_size() <= NumericLimits<off_t>::max());
+        off_t had_buffered = static_cast<off_t>(m_buffer.buffered_size());
         m_buffer.drop();
         // Attempt to reset the underlying file position to what the user
         // expects.
@@ -516,10 +531,14 @@ FILE* stderr = reinterpret_cast<FILE*>(&default_streams[2]);
 
 void __stdio_init()
 {
+    new (s_open_streams) FILE::List();
     new (stdin) FILE(0, O_RDONLY);
     new (stdout) FILE(1, O_WRONLY);
     new (stderr) FILE(2, O_WRONLY);
     stderr->setbuf(nullptr, _IONBF, 0);
+    s_open_streams->append(*stdin);
+    s_open_streams->append(*stdout);
+    s_open_streams->append(*stderr);
     __stdio_is_initialized = true;
 }
 
@@ -567,8 +586,13 @@ int feof(FILE* stream)
 int fflush(FILE* stream)
 {
     if (!stream) {
-        dbgln("FIXME: fflush(nullptr) should flush all open streams");
-        return 0;
+        int rc = 0;
+        LibC::MutexLocker locker(s_open_streams_lock);
+        for (auto& file : *s_open_streams) {
+            ScopedFileLock lock(&file);
+            rc = file.flush() ? rc : EOF;
+        }
+        return rc;
     }
     ScopedFileLock lock(stream);
     return stream->flush() ? 0 : EOF;
@@ -1069,6 +1093,10 @@ int fclose(FILE* stream)
     }
     ScopedValueRollback errno_restorer(errno);
 
+    {
+        LibC::MutexLocker locker(s_open_streams_lock);
+        s_open_streams->remove(*stream);
+    }
     stream->~FILE();
     if (!is_default_stream(stream))
         free(stream);
@@ -1228,15 +1256,17 @@ int vscanf(const char* fmt, va_list ap)
 }
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/flockfile.html
-void flockfile([[maybe_unused]] FILE* filehandle)
+void flockfile(FILE* filehandle)
 {
-    dbgln("FIXME: Implement flockfile()");
+    VERIFY(filehandle);
+    filehandle->lock();
 }
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/funlockfile.html
-void funlockfile([[maybe_unused]] FILE* filehandle)
+void funlockfile(FILE* filehandle)
 {
-    dbgln("FIXME: Implement funlockfile()");
+    VERIFY(filehandle);
+    filehandle->unlock();
 }
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/tmpfile.html

@@ -1,6 +1,8 @@
 ## Name
 
-TextEditor - SerenityOS text editor
+![Icon](/res/icons/16x16/app-text-editor.png) TextEditor - SerenityOS text editor
+
+[Open](file:///bin/TextEditor)
 
 ## Synopsis
 

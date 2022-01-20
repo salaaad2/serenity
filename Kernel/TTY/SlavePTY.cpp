@@ -26,10 +26,11 @@ bool SlavePTY::unref() const
         if (deref_base())
             return false;
         m_list_node.remove();
+        const_cast<SlavePTY&>(*this).revoke_weak_ptrs();
         return true;
     });
     if (did_hit_zero) {
-        const_cast<SlavePTY&>(*this).before_removing();
+        const_cast<SlavePTY&>(*this).will_be_destroyed();
         delete this;
     }
     return did_hit_zero;

@@ -9,7 +9,6 @@
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtrVector.h>
 #include <AK/Optional.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <Kernel/KString.h>
 
@@ -42,7 +41,6 @@ enum class AHCIResetMode {
 };
 
 class CommandLine {
-    AK_MAKE_ETERNAL;
 
 public:
     static void early_initialize(const char* cmd_line);
@@ -53,7 +51,13 @@ public:
         No,
     };
 
-    [[nodiscard]] const String& string() const { return m_string; }
+    enum class FrameBufferDevices {
+        Enabled,
+        ConsoleOnly,
+        BootloaderOnly
+    };
+
+    [[nodiscard]] StringView string() const { return m_string->view(); }
     Optional<StringView> lookup(StringView key) const;
     [[nodiscard]] bool contains(StringView key) const;
 
@@ -66,7 +70,7 @@ public:
     [[nodiscard]] bool is_vmmouse_enabled() const;
     [[nodiscard]] PCIAccessLevel pci_access_level() const;
     [[nodiscard]] bool is_legacy_time_enabled() const;
-    [[nodiscard]] bool are_framebuffer_devices_enabled() const;
+    [[nodiscard]] FrameBufferDevices are_framebuffer_devices_enabled() const;
     [[nodiscard]] bool is_force_pio() const;
     [[nodiscard]] AcpiFeatureLevel acpi_feature_level() const;
     [[nodiscard]] StringView system_mode() const;
@@ -84,12 +88,12 @@ public:
     [[nodiscard]] size_t switch_to_tty() const;
 
 private:
-    CommandLine(const String&);
+    CommandLine(StringView);
 
     void add_arguments(const Vector<StringView>& args);
-    void build_commandline(const String& cmdline_from_bootloader);
+    static NonnullOwnPtr<KString> build_commandline(StringView cmdline_from_bootloader);
 
-    String m_string;
+    NonnullOwnPtr<KString> m_string;
     HashMap<StringView, StringView> m_params;
 };
 

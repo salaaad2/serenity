@@ -39,24 +39,26 @@ jobs:
       # sudo apt-get update -qq
       - name: "Install Ubuntu dependencies"
         # These packages are already part of the ubuntu-20.04 image:
-        # cmake clang-format-11 gcc-10 g++-10 libstdc++-10-dev libgmp-dev npm shellcheck
+        # cmake clang-format-11 libgmp-dev npm shellcheck
         # Packages below aren't.
         #
         # We add the canonical-server/server-backports PPA to get updated QEMU releases without having to manage
         #    yet another cache in github actions
+        # We add the ubuntu-toolchain-r/test PPA to get gcc-11 on 20.04
         run: |
           sudo add-apt-repository ppa:canonical-server/server-backports
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install libmpfr-dev libmpc-dev ninja-build e2fsprogs qemu-utils qemu-system-i386 ccache unzip
+          sudo apt-get install -y ccache e2fsprogs gcc-11 g++-11 libstdc++-11-dev libmpfr-dev libmpc-dev ninja-build qemu-utils qemu-system-i386 unzip
       - name: Install JS dependencies
-        run: sudo npm install -g prettier@2.4.1
+        run: sudo npm install -g prettier@2.5.1
       - name: Install Python dependencies
         # The setup-python action set default python to python3.x. Note that we are not using system python here.
         run: |
           python -m pip install --upgrade pip
           pip install flake8 requests
       - name: Check versions
-        run: set +e; g++ --version; g++-10 --version; clang-format --version; clang-format-11 --version; prettier --version; python --version; python3 --version; ninja --version; flake8 --version; ccache --version; qemu-system-i386 --version
+        run: set +e; g++ --version; g++-11 --version; clang-format --version; clang-format-11 --version; prettier --version; python --version; python3 --version; ninja --version; flake8 --version; ccache --version; qemu-system-i386 --version
 
       # === PREPARE FOR BUILDING ===
 
@@ -71,8 +73,8 @@ jobs:
           # *and* as actual output variable, in this order.
           message("  set-output name=time::${current_date}")
           message("::set-output name=time::${current_date}")
-          message("  set-output name=libc_headers::${{ hashFiles('Userland/Libraries/LibC/**/*.h', 'Userland/Libraries/LibPthread/**/*.h', 'Toolchain/Patches/*[!llvm].patch', 'Toolchain/BuildIt.sh') }}")
-          message("::set-output name=libc_headers::${{ hashFiles('Userland/Libraries/LibC/**/*.h', 'Userland/Libraries/LibPthread/**/*.h', 'Toolchain/Patches/*[!llvm].patch', 'Toolchain/BuildIt.sh') }}")
+          message("  set-output name=libc_headers::${{ hashFiles('Userland/Libraries/LibC/**/*.h', 'Userland/Libraries/LibPthread/**/*.h', 'Toolchain/Patches/[!llvm]*.patch', 'Toolchain/BuildIt.sh') }}")
+          message("::set-output name=libc_headers::${{ hashFiles('Userland/Libraries/LibC/**/*.h', 'Userland/Libraries/LibPthread/**/*.h', 'Toolchain/Patches/[!llvm]*.patch', 'Toolchain/BuildIt.sh') }}")
 
       - name: Toolchain cache
         # TODO: Change the version to the released version when https://github.com/actions/cache/pull/489 (or 571) is merged.
@@ -118,8 +120,15 @@ jobs:
           ccache -s
       - name: Create build directory
         run: |
+          mkdir -p ${{ github.workspace }}/Build/${{ matrix.arch }}/TZDB
           mkdir -p ${{ github.workspace }}/Build/${{ matrix.arch }}/UCD
           mkdir -p ${{ github.workspace }}/Build/${{ matrix.arch }}/CLDR
+      - name: TimeZoneData cache
+        # TODO: Change the version to the released version when https://github.com/actions/cache/pull/489 (or 571) is merged.
+        uses: actions/cache@03e00da99d75a2204924908e1cca7902cafce66b
+        with:
+          path: ${{ github.workspace }}/Build/${{ matrix.arch }}/TZDB
+          key: TimeZoneData-${{ hashFiles('Meta/CMake/time_zone_data.cmake') }}
       - name: UnicodeData cache
         # TODO: Change the version to the released version when https://github.com/actions/cache/pull/489 (or 571) is merged.
         uses: actions/cache@03e00da99d75a2204924908e1cca7902cafce66b
@@ -140,8 +149,8 @@ jobs:
             -DSERENITY_ARCH=${{ matrix.arch }} \
             -DSERENITY_TOOLCHAIN=GNU \
             -DBUILD_LAGOM=ON \
-            -DCMAKE_C_COMPILER=gcc-10 \
-            -DCMAKE_CXX_COMPILER=g++-10 \
+            -DCMAKE_C_COMPILER=gcc-11 \
+            -DCMAKE_CXX_COMPILER=g++-11 \
             -DENABLE_ALL_DEBUG_FACILITIES=ON \
             -DENABLE_PCI_IDS_DOWNLOAD=OFF \
             -DENABLE_USB_IDS_DOWNLOAD=OFF
@@ -155,8 +164,8 @@ jobs:
             -DENABLE_COMPILETIME_HEADER_CHECK=ON \
             -DSERENITY_ARCH=${{ matrix.arch }} \
             -DSERENITY_TOOLCHAIN=GNU \
-            -DCMAKE_C_COMPILER=gcc-10 \
-            -DCMAKE_CXX_COMPILER=g++-10 \
+            -DCMAKE_C_COMPILER=gcc-11 \
+            -DCMAKE_CXX_COMPILER=g++-11 \
             -DENABLE_UNDEFINED_SANITIZER=ON \
             -DENABLE_PCI_IDS_DOWNLOAD=OFF \
             -DENABLE_USB_IDS_DOWNLOAD=OFF
@@ -171,6 +180,8 @@ jobs:
         run: ccache -s
       - name: Lint (Phase 2/2)
         working-directory: ${{ github.workspace }}/Meta
+        env:
+          SERENITY_ARCH: ${{ matrix.arch }}
         run: ./check-symbols.sh
 
       - name: Create Serenity Rootfs

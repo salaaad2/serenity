@@ -271,7 +271,12 @@ UNMAP_AFTER_INIT bool APIC::init_bsp()
     }
 
     if (kernel_command_line().is_smp_enabled()) {
-        auto madt = Memory::map_typed<ACPI::Structures::MADT>(madt_address.value());
+        auto madt_or_error = Memory::map_typed<ACPI::Structures::MADT>(madt_address.value());
+        if (madt_or_error.is_error()) {
+            dbgln("APIC: Failed to map MADT table");
+            return false;
+        }
+        auto madt = madt_or_error.release_value();
         size_t entry_index = 0;
         size_t entries_length = madt->h.length - sizeof(ACPI::Structures::MADT);
         auto* madt_entry = madt->entries;
@@ -334,7 +339,7 @@ UNMAP_AFTER_INIT void APIC::setup_ap_boot_environment()
     // * aps_to_enable u32 values for ap_cpu_init_processor_info_array
     constexpr u64 apic_startup_region_base = 0x8000;
     VERIFY(apic_startup_region_base + apic_ap_start_size < USER_RANGE_BASE);
-    auto apic_startup_region = create_identity_mapped_region(PhysicalAddress(apic_startup_region_base), Memory::page_round_up(apic_ap_start_size + (2 * aps_to_enable * sizeof(u32))));
+    auto apic_startup_region = create_identity_mapped_region(PhysicalAddress(apic_startup_region_base), Memory::page_round_up(apic_ap_start_size + (2 * aps_to_enable * sizeof(u32))).release_value_but_fixme_should_propagate_errors());
     memcpy(apic_startup_region->vaddr().as_ptr(), reinterpret_cast<const void*>(apic_ap_start), apic_ap_start_size);
 
     // Allocate enough stacks for all APs

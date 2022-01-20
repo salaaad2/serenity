@@ -78,6 +78,8 @@ ErrorOr<void> Socket::queue_connection_from(NonnullRefPtr<Socket> peer)
 
 ErrorOr<void> Socket::setsockopt(int level, int option, Userspace<const void*> user_value, socklen_t user_value_size)
 {
+    MutexLocker locker(mutex());
+
     if (level != SOL_SOCKET)
         return ENOPROTOOPT;
     VERIFY(level == SOL_SOCKET);
@@ -133,6 +135,8 @@ ErrorOr<void> Socket::setsockopt(int level, int option, Userspace<const void*> u
 
 ErrorOr<void> Socket::getsockopt(OpenFileDescription&, int level, int option, Userspace<void*> value, Userspace<socklen_t*> value_size)
 {
+    MutexLocker locker(mutex());
+
     socklen_t size;
     TRY(copy_from_user(&size, value_size.unsafe_userspace_ptr()));
 
@@ -227,7 +231,7 @@ ErrorOr<void> Socket::getsockopt(OpenFileDescription&, int level, int option, Us
         return copy_to_user(value_size, &size);
     }
     default:
-        dbgln("setsockopt({}) at SOL_SOCKET not implemented.", option);
+        dbgln("getsockopt({}) at SOL_SOCKET not implemented.", option);
         return ENOPROTOOPT;
     }
 }

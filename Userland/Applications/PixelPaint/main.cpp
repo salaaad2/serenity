@@ -35,6 +35,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/tmp/portal/clipboard", "rw"));
     TRY(Core::System::unveil("/tmp/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/portal/image", "rw"));
+    TRY(Core::System::unveil("/etc/FileIconProvider.ini", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     auto app_icon = GUI::Icon::default_icon("app-pixel-paint");
@@ -44,17 +45,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->resize(800, 510);
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    auto& main_widget = window->set_main_widget<PixelPaint::MainWidget>();
+    auto main_widget = TRY(window->try_set_main_widget<PixelPaint::MainWidget>());
 
-    main_widget.initialize_menubar(*window);
+    main_widget->initialize_menubar(*window);
 
     window->on_close_request = [&]() -> GUI::Window::CloseRequestDecision {
-        if (main_widget.request_close())
+        if (main_widget->request_close())
             return GUI::Window::CloseRequestDecision::Close;
         return GUI::Window::CloseRequestDecision::StayOpen;
     };
 
-    auto& statusbar = *main_widget.find_descendant_of_type_named<GUI::Statusbar>("statusbar");
+    auto& statusbar = *main_widget->find_descendant_of_type_named<GUI::Statusbar>("statusbar");
 
     app->on_action_enter = [&statusbar](GUI::Action& action) {
         auto text = action.status_tip();
@@ -76,9 +77,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 GUI::MessageBox::show_error(window, String::formatted("Opening \"{}\" failed: {}", *response.chosen_file, strerror(response.error)));
             return 1;
         }
-        main_widget.open_image_fd(*response.fd, *response.chosen_file);
+        main_widget->open_image_fd(*response.fd, *response.chosen_file);
     } else {
-        main_widget.create_default_image();
+        main_widget->create_default_image();
     }
 
     return app->exec();

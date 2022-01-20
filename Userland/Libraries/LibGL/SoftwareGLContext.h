@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Stephan Unverwerth <s.unverwerth@serenityos.org>
+ * Copyright (c) 2021-2022, Jesse Buhagiar <jooster669@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -22,12 +23,14 @@
 #include <LibGfx/Vector3.h>
 #include <LibSoftGPU/Clipper.h>
 #include <LibSoftGPU/Device.h>
+#include <LibSoftGPU/Light/Light.h>
 #include <LibSoftGPU/Vertex.h>
 
 namespace GL {
 
 struct ContextParameter {
     GLenum type;
+    bool is_capability { false };
     u8 count { 1 };
     union {
         bool boolean_value;
@@ -36,6 +39,11 @@ struct ContextParameter {
         GLdouble double_value;
         GLdouble double_list[4];
     } value;
+};
+
+enum Face {
+    Front = 0,
+    Back = 1,
 };
 
 class SoftwareGLContext : public GLContext {
@@ -92,12 +100,15 @@ public:
     virtual void gl_tex_sub_image_2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* data) override;
     virtual void gl_tex_parameter(GLenum target, GLenum pname, GLfloat param) override;
     virtual void gl_tex_coord(GLfloat s, GLfloat t, GLfloat r, GLfloat q) override;
+    virtual void gl_multi_tex_coord(GLenum target, GLfloat s, GLfloat t, GLfloat r, GLfloat q) override;
     virtual void gl_tex_env(GLenum target, GLenum pname, GLfloat param) override;
     virtual void gl_bind_texture(GLenum target, GLuint texture) override;
+    virtual GLboolean gl_is_texture(GLuint texture) override;
     virtual void gl_active_texture(GLenum texture) override;
     virtual void gl_depth_mask(GLboolean flag) override;
     virtual void gl_enable_client_state(GLenum cap) override;
     virtual void gl_disable_client_state(GLenum cap) override;
+    virtual void gl_client_active_texture(GLenum target) override;
     virtual void gl_vertex_pointer(GLint size, GLenum type, GLsizei stride, const void* pointer) override;
     virtual void gl_color_pointer(GLint size, GLenum type, GLsizei stride, const void* pointer) override;
     virtual void gl_tex_coord_pointer(GLint size, GLenum type, GLsizei stride, const void* pointer) override;
@@ -119,11 +130,11 @@ public:
     virtual void gl_pixel_storei(GLenum pname, GLint param) override;
     virtual void gl_scissor(GLint x, GLint y, GLsizei width, GLsizei height) override;
     virtual void gl_stencil_func_separate(GLenum face, GLenum func, GLint ref, GLuint mask) override;
+    virtual void gl_stencil_mask_separate(GLenum face, GLuint mask) override;
     virtual void gl_stencil_op_separate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) override;
     virtual void gl_normal(GLfloat nx, GLfloat ny, GLfloat nz) override;
     virtual void gl_normal_pointer(GLenum type, GLsizei stride, void const* pointer) override;
     virtual void gl_raster_pos(GLfloat x, GLfloat y, GLfloat z, GLfloat w) override;
-    virtual void gl_materialv(GLenum face, GLenum pname, GLfloat const* params) override;
     virtual void gl_line_width(GLfloat width) override;
     virtual void gl_push_attrib(GLbitfield mask) override;
     virtual void gl_pop_attrib() override;
@@ -132,16 +143,24 @@ public:
     virtual void gl_copy_tex_image_2d(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border) override;
     virtual void gl_get_tex_parameter_integerv(GLenum target, GLint level, GLenum pname, GLint* params) override;
     virtual void gl_rect(GLdouble x1, GLdouble y1, GLdouble x2, GLdouble y2) override;
-    virtual void gl_tex_gen(GLenum coord, GLenum pname, GLdouble param) override;
+    virtual void gl_tex_gen(GLenum coord, GLenum pname, GLint param) override;
     virtual void gl_tex_gen_floatv(GLenum coord, GLenum pname, GLfloat const* params) override;
-
+    virtual void gl_lightf(GLenum light, GLenum pname, GLfloat param) override;
+    virtual void gl_lightfv(GLenum light, GLenum pname, GLfloat const* params) override;
+    virtual void gl_materialf(GLenum face, GLenum pname, GLfloat param) override;
+    virtual void gl_materialfv(GLenum face, GLenum pname, GLfloat const* params) override;
+    virtual void gl_color_material(GLenum face, GLenum mode) override;
     virtual void present() override;
 
 private:
     void sync_device_config();
     void sync_device_sampler_config();
+    void sync_device_texcoord_config();
+    void sync_light_state();
+    void sync_stencil_configuration();
 
-private:
+    void build_extension_string();
+
     template<typename T>
     T* store_in_listing(T value)
     {
@@ -178,12 +197,14 @@ private:
     // FIXME: implement multi-texturing: the texture matrix stack should live inside a texture unit
     Vector<FloatMatrix4x4> m_texture_matrix_stack;
 
+    Gfx::IntRect m_viewport;
+
     FloatVector4 m_clear_color { 0.0f, 0.0f, 0.0f, 0.0f };
     double m_clear_depth { 1.0 };
-    GLint m_clear_stencil { 0 };
+    u8 m_clear_stencil { 0 };
 
     FloatVector4 m_current_vertex_color = { 1.0f, 1.0f, 1.0f, 1.0f };
-    FloatVector4 m_current_vertex_tex_coord = { 0.0f, 0.0f, 0.0f, 1.0f };
+    Vector<FloatVector4> m_current_vertex_tex_coord;
     FloatVector3 m_current_vertex_normal = { 0.0f, 0.0f, 1.0f };
 
     Vector<SoftGPU::Vertex> m_vertex_list;
@@ -206,25 +227,26 @@ private:
     GLclampf m_alpha_test_ref_value = 0;
 
     bool m_dither_enabled { true };
+    bool m_normalize { false };
 
     // Stencil configuration
     bool m_stencil_test_enabled { false };
+    bool m_stencil_configuration_dirty { true };
 
     struct StencilFunctionOptions {
         GLenum func { GL_ALWAYS };
         GLint reference_value { 0 };
         GLuint mask { NumericLimits<GLuint>::max() };
     };
-    StencilFunctionOptions m_stencil_backfacing_func;
-    StencilFunctionOptions m_stencil_frontfacing_func;
+    Array<StencilFunctionOptions, 2u> m_stencil_function;
 
     struct StencilOperationOptions {
         GLenum op_fail { GL_KEEP };
         GLenum op_depth_fail { GL_KEEP };
         GLenum op_pass { GL_KEEP };
+        GLuint write_mask { NumericLimits<GLuint>::max() };
     };
-    StencilOperationOptions m_stencil_backfacing_op;
-    StencilOperationOptions m_stencil_frontfacing_op;
+    Array<StencilOperationOptions, 2u> m_stencil_operation;
 
     GLenum m_current_read_buffer = GL_BACK;
     GLenum m_current_draw_buffer = GL_BACK;
@@ -232,19 +254,37 @@ private:
     // Client side arrays
     bool m_client_side_vertex_array_enabled = false;
     bool m_client_side_color_array_enabled = false;
-    bool m_client_side_texture_coord_array_enabled = false;
+    Vector<bool> m_client_side_texture_coord_array_enabled;
+    size_t m_client_active_texture = 0;
 
     NonnullRefPtr<Gfx::Bitmap> m_frontbuffer;
 
     // Texture objects
     TextureNameAllocator m_name_allocator;
     HashMap<GLuint, RefPtr<Texture>> m_allocated_textures;
-    Vector<TextureUnit, 32> m_texture_units;
+    Vector<TextureUnit> m_texture_units;
     TextureUnit* m_active_texture_unit;
+    size_t m_active_texture_unit_index { 0 };
+
+    // Texture coordinate generation state
+    struct TextureCoordinateGeneration {
+        bool enabled { false };
+        GLenum generation_mode { GL_EYE_LINEAR };
+        FloatVector4 object_plane_coefficients { 0.0f, 0.0f, 0.0f, 0.0f };
+        FloatVector4 eye_plane_coefficients { 0.0f, 0.0f, 0.0f, 0.0f };
+    };
+    Vector<Array<TextureCoordinateGeneration, 4>> m_texture_coordinate_generation;
+    bool m_texcoord_generation_dirty { true };
+
+    ALWAYS_INLINE TextureCoordinateGeneration& texture_coordinate_generation(size_t texture_unit, GLenum capability)
+    {
+        return m_texture_coordinate_generation[texture_unit][capability - GL_TEXTURE_GEN_S];
+    }
 
     SoftGPU::Device m_rasterizer;
     SoftGPU::DeviceInfo const m_device_info;
     bool m_sampler_config_is_dirty { true };
+    bool m_light_state_is_dirty { true };
 
     struct Listing {
 
@@ -309,10 +349,10 @@ private:
             decltype(&SoftwareGLContext::gl_polygon_offset),
             decltype(&SoftwareGLContext::gl_scissor),
             decltype(&SoftwareGLContext::gl_stencil_func_separate),
+            decltype(&SoftwareGLContext::gl_stencil_mask_separate),
             decltype(&SoftwareGLContext::gl_stencil_op_separate),
             decltype(&SoftwareGLContext::gl_normal),
             decltype(&SoftwareGLContext::gl_raster_pos),
-            decltype(&SoftwareGLContext::gl_materialv),
             decltype(&SoftwareGLContext::gl_line_width),
             decltype(&SoftwareGLContext::gl_push_attrib),
             decltype(&SoftwareGLContext::gl_pop_attrib),
@@ -321,7 +361,15 @@ private:
             decltype(&SoftwareGLContext::gl_copy_tex_image_2d),
             decltype(&SoftwareGLContext::gl_rect),
             decltype(&SoftwareGLContext::gl_tex_gen),
-            decltype(&SoftwareGLContext::gl_tex_gen_floatv)>;
+            decltype(&SoftwareGLContext::gl_tex_gen_floatv),
+            decltype(&SoftwareGLContext::gl_fogf),
+            decltype(&SoftwareGLContext::gl_fogfv),
+            decltype(&SoftwareGLContext::gl_fogi),
+            decltype(&SoftwareGLContext::gl_lightf),
+            decltype(&SoftwareGLContext::gl_lightfv),
+            decltype(&SoftwareGLContext::gl_materialf),
+            decltype(&SoftwareGLContext::gl_materialfv),
+            decltype(&SoftwareGLContext::gl_color_material)>;
 
         using ExtraSavedArguments = Variant<
             FloatMatrix4x4>;
@@ -352,29 +400,26 @@ private:
 
     VertexAttribPointer m_client_vertex_pointer;
     VertexAttribPointer m_client_color_pointer;
-    VertexAttribPointer m_client_tex_coord_pointer;
+    Vector<VertexAttribPointer> m_client_tex_coord_pointer;
 
     u8 m_pack_alignment { 4 };
     GLsizei m_unpack_row_length { 0 };
     u8 m_unpack_alignment { 4 };
 
-    struct RasterPosition {
-        FloatVector3 window_coordinates { 0.0f, 0.0f, 0.0f };
-        float clip_coordinate_value { 1.0f };
-        float eye_coordinate_distance { 0.0f };
-        bool valid { true };
-        FloatVector4 color_rgba { 1.0f, 1.0f, 1.0f, 1.0f };
-        float color_index { 1.0f };
-        FloatVector4 texture_coordinates { 0.0f, 0.0f, 0.0f, 1.0f };
-    };
-    RasterPosition m_current_raster_position;
-
     float m_line_width { 1.0f };
 
     // Lighting configuration
     bool m_lighting_enabled { false };
-    FloatVector4 m_light_model_ambient { 0.2f, 0.2f, 0.2f, 1.0f };
-    GLfloat m_light_model_two_side { 0.0f };
+    Vector<SoftGPU::Light> m_light_states;
+    Array<SoftGPU::Material, 2u> m_material_states;
+
+    // Color material
+    bool m_color_material_enabled { false };
+    GLenum m_color_material_face { GL_FRONT_AND_BACK };
+    GLenum m_color_material_mode { GL_AMBIENT_AND_DIFFUSE };
+
+    // GL Extension string
+    String m_extensions;
 };
 
 }

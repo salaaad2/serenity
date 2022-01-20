@@ -5,34 +5,17 @@
  */
 
 #include "DisassemblyModel.h"
+#include "Gradient.h"
 #include "Profile.h"
 #include <LibCore/MappedFile.h>
 #include <LibDebug/DebugInfo.h>
 #include <LibELF/Image.h>
-#include <LibGUI/Painter.h>
 #include <LibSymbolication/Symbolication.h>
 #include <LibX86/Disassembler.h>
 #include <LibX86/ELFSymbolProvider.h>
 #include <stdio.h>
 
 namespace Profiler {
-
-static const Gfx::Bitmap& heat_gradient()
-{
-    static RefPtr<Gfx::Bitmap> bitmap;
-    if (!bitmap) {
-        bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, { 101, 1 }).release_value_but_fixme_should_propagate_errors();
-        GUI::Painter painter(*bitmap);
-        painter.fill_rect_with_gradient(Orientation::Horizontal, bitmap->rect(), Color::from_rgb(0xffc080), Color::from_rgb(0xff3000));
-    }
-    return *bitmap;
-}
-
-static Color color_for_percent(int percent)
-{
-    VERIFY(percent >= 0 && percent <= 100);
-    return heat_gradient().get_pixel(percent, 0);
-}
 
 static Optional<MappedObject> s_kernel_binary;
 
@@ -54,8 +37,8 @@ DisassemblyModel::DisassemblyModel(Profile& profile, ProfileNode& node)
     , m_node(node)
 {
     FlatPtr base_address = 0;
-    const Debug::DebugInfo* debug_info;
-    const ELF::Image* elf;
+    Debug::DebugInfo const* debug_info;
+    ELF::Image const* elf;
     if (auto maybe_kernel_base = Symbolication::kernel_base(); maybe_kernel_base.has_value() && m_node.address() >= *maybe_kernel_base) {
         if (!g_kernel_debuginfo_object.has_value())
             return;
@@ -107,7 +90,7 @@ DisassemblyModel::DisassemblyModel(Profile& profile, ProfileNode& node)
     auto view = symbol.value().raw_data().substring_view(symbol_offset_from_function_start);
 
     X86::ELFSymbolProvider symbol_provider(*elf, base_address);
-    X86::SimpleInstructionStream stream((const u8*)view.characters_without_null_termination(), view.length());
+    X86::SimpleInstructionStream stream((u8 const*)view.characters_without_null_termination(), view.length());
     X86::Disassembler disassembler(stream);
 
     size_t offset_into_symbol = 0;
@@ -143,7 +126,7 @@ DisassemblyModel::~DisassemblyModel()
 {
 }
 
-int DisassemblyModel::row_count(const GUI::ModelIndex&) const
+int DisassemblyModel::row_count(GUI::ModelIndex const&) const
 {
     return m_instructions.size();
 }
@@ -172,7 +155,7 @@ struct ColorPair {
     Color foreground;
 };
 
-static Optional<ColorPair> color_pair_for(const InstructionData& insn)
+static Optional<ColorPair> color_pair_for(InstructionData const& insn)
 {
     if (insn.percent == 0)
         return {};
@@ -186,7 +169,7 @@ static Optional<ColorPair> color_pair_for(const InstructionData& insn)
     return ColorPair { background, foreground };
 }
 
-GUI::Variant DisassemblyModel::data(const GUI::ModelIndex& index, GUI::ModelRole role) const
+GUI::Variant DisassemblyModel::data(GUI::ModelIndex const& index, GUI::ModelRole role) const
 {
     auto const& insn = m_instructions[index.row()];
 

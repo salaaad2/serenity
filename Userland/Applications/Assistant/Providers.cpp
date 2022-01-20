@@ -98,11 +98,11 @@ void CalculatorProvider::query(String const& query, Function<void(NonnullRefPtrV
     if (parser.has_errors())
         return;
 
-    interpreter->run(interpreter->global_object(), *program);
-    if (interpreter->exception())
+    auto completion = interpreter->run(interpreter->global_object(), *program);
+    if (completion.is_error())
         return;
 
-    auto result = interpreter->vm().last_value();
+    auto result = completion.release_value();
     String calculation;
     if (!result.is_number()) {
         calculation = "0";
@@ -164,7 +164,7 @@ void FileProvider::build_filesystem_cache()
     m_work_queue.enqueue("/");
 
     (void)Threading::BackgroundAction<int>::construct(
-        [this](auto&) {
+        [this, strong_ref = NonnullRefPtr(*this)](auto&) {
             String slash = "/";
             auto timer = Core::ElapsedTimer::start_new();
             while (!m_work_queue.is_empty()) {

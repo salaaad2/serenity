@@ -7,7 +7,6 @@
 
 #include <AK/NonnullRefPtrVector.h>
 #include <AK/Singleton.h>
-#include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <Kernel/API/InodeWatcherEvent.h>
 #include <Kernel/FileSystem/Custody.h>
@@ -203,7 +202,7 @@ void Inode::set_metadata_dirty(bool metadata_dirty)
     }
 }
 
-void Inode::did_add_child(InodeIdentifier const&, String const& name)
+void Inode::did_add_child(InodeIdentifier, StringView name)
 {
     MutexLocker locker(m_inode_lock);
 
@@ -212,7 +211,7 @@ void Inode::did_add_child(InodeIdentifier const&, String const& name)
     }
 }
 
-void Inode::did_remove_child(InodeIdentifier const&, String const& name)
+void Inode::did_remove_child(InodeIdentifier, StringView name)
 {
     MutexLocker locker(m_inode_lock);
 

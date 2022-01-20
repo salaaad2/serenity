@@ -11,6 +11,9 @@
 
 namespace Gfx {
 template<typename T>
+class Vector3;
+
+template<typename T>
 class Vector4 final {
 public:
     constexpr Vector4() = default;
@@ -60,6 +63,11 @@ public:
         return Vector4(m_x - other.m_x, m_y - other.m_y, m_z - other.m_z, m_w - other.m_w);
     }
 
+    constexpr Vector4 operator-() const
+    {
+        return Vector4(-m_x, -m_y, -m_z, -m_w);
+    }
+
     constexpr Vector4 operator*(const Vector4& other) const
     {
         return Vector4(m_x * other.m_x, m_y * other.m_y, m_z * other.m_z, m_w * other.m_w);
@@ -70,12 +78,14 @@ public:
         return Vector4(m_x / other.m_x, m_y / other.m_y, m_z / other.m_z, m_w / other.m_w);
     }
 
-    constexpr Vector4 operator*(T f) const
+    template<typename U>
+    constexpr Vector4 operator*(U f) const
     {
         return Vector4(m_x * f, m_y * f, m_z * f, m_w * f);
     }
 
-    constexpr Vector4 operator/(T f) const
+    template<typename U>
+    constexpr Vector4 operator/(U f) const
     {
         return Vector4(m_x / f, m_y / f, m_z / f, m_w / f);
     }
@@ -122,6 +132,11 @@ public:
     constexpr T length() const
     {
         return AK::sqrt(m_x * m_x + m_y * m_y + m_z * m_z + m_w * m_w);
+    }
+
+    constexpr Vector3<T> xyz() const
+    {
+        return Vector3<T>(m_x, m_y, m_z);
     }
 
     String to_string() const

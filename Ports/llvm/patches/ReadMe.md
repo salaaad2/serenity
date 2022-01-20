@@ -1,15 +1,5 @@
 # Patches for LLVM on SerenityOS
 
-## `build-crt.patch`
-
-This patch lets us use LLVM's `crtbegin.o`/`crtend.o` implementation.
-
-### Status
-- [ ] Local?
-- [x] Should be merged to upstream?
-- [ ] Resolves issue(s) with our side of things
-- [ ] Hack
-
 ## `insert-ifdef-serenity.patch`
 
 This patch adds several defines in order to omit things not supported by SerenityOS.
@@ -42,3 +32,14 @@ stack-smashing protection and building position-independent executables by defau
 - [x] Should be merged to upstream?
 - [ ] Resolves issue(s) with our side of things
 - [ ] Hack
+
+## `llvm-backport-objcopy-update-section.patch`
+
+Backports support for `llvm-objcopy --update-section` used by our toolchain from reviews.llvm.org/D112116.
+
+### Status
+- [ ] Local?
+- [ ] Should be merged to upstream?
+- [ ] Resolves issues(s) with our side of things
+- [ ] Hack
+

@@ -37,6 +37,15 @@ public:
 #endif
     }
 
+    bool is_cr3_initialized() const
+    {
+#if ARCH(X86_64)
+        return m_pml4t;
+#else
+        return m_directory_table;
+#endif
+    }
+
     VirtualRangeAllocator& range_allocator() { return m_range_allocator; }
     VirtualRangeAllocator const& range_allocator() const { return m_range_allocator; }
 
@@ -64,7 +73,6 @@ private:
 #else
     RefPtr<PhysicalPage> m_directory_pages[4];
 #endif
-    HashMap<FlatPtr, NonnullRefPtr<PhysicalPage>> m_page_tables;
     RecursiveSpinlock m_lock;
 };
 

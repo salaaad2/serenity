@@ -7,21 +7,24 @@
 #pragma once
 
 #include "UndoGlyph.h"
+#include <LibConfig/Listener.h>
 #include <LibGUI/ActionGroup.h>
+#include <LibGUI/GlyphMapWidget.h>
 #include <LibGUI/UndoStack.h>
 #include <LibGUI/Widget.h>
 #include <LibGfx/BitmapFont.h>
 
 class GlyphEditorWidget;
-class GlyphMapWidget;
 
-class FontEditorWidget final : public GUI::Widget {
+class FontEditorWidget final
+    : public GUI::Widget
+    , public Config::Listener {
     C_OBJECT(FontEditorWidget)
 public:
     virtual ~FontEditorWidget() override;
 
     bool open_file(String const&);
-    bool save_as(String const&);
+    bool save_file(String const&);
     bool request_close();
     void update_title();
 
@@ -40,16 +43,26 @@ private:
 
     virtual void drop_event(GUI::DropEvent&) override;
 
+    virtual void config_i32_did_change(String const& domain, String const& group, String const& key, i32 value) override;
+    virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override;
+
     void undo();
     void redo();
     void did_modify_font();
     void did_resize_glyph_editor();
     void update_statusbar();
     void update_preview();
+    void set_scale(i32);
+    void set_scale_and_save(i32);
+
+    void copy_selected_glyphs();
+    void cut_selected_glyphs();
+    void paste_glyphs();
+    void delete_selected_glyphs();
 
     RefPtr<Gfx::BitmapFont> m_edited_font;
 
-    RefPtr<GlyphMapWidget> m_glyph_map_widget;
+    RefPtr<GUI::GlyphMapWidget> m_glyph_map_widget;
     RefPtr<GlyphEditorWidget> m_glyph_editor_widget;
 
     RefPtr<GUI::Action> m_new_action;

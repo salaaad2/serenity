@@ -8,20 +8,18 @@
 
 #include <AK/Error.h>
 #include <AK/IntrusiveList.h>
-#include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
-#include <AK/String.h>
 #include <Kernel/Forward.h>
 #include <Kernel/KString.h>
+#include <Kernel/Library/ListedRefCounted.h>
+#include <Kernel/Locking/MutexProtected.h>
 
 namespace Kernel {
 
 // FIXME: Custody needs some locking.
 
-class Custody : public RefCountedBase {
+class Custody : public ListedRefCounted<Custody, LockType::Mutex> {
 public:
-    bool unref() const;
-
     static ErrorOr<NonnullRefPtr<Custody>> try_create(Custody* parent, StringView name, Inode&, int mount_flags);
 
     ~Custody();
@@ -32,7 +30,6 @@ public:
     Inode const& inode() const { return *m_inode; }
     StringView name() const { return m_name->view(); }
     ErrorOr<NonnullOwnPtr<KString>> try_serialize_absolute_path() const;
-    String absolute_path() const;
 
     int mount_flags() const { return m_mount_flags; }
     bool is_readonly() const;
@@ -49,6 +46,7 @@ private:
 
 public:
     using AllCustodiesList = IntrusiveList<&Custody::m_all_custodies_list_node>;
+    static MutexProtected<Custody::AllCustodiesList>& all_instances();
 };
 
 }

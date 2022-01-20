@@ -85,14 +85,13 @@ public:
     {
         Matrix division;
         for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < N; ++j) {
+            for (size_t j = 0; j < N; ++j)
                 division.m_elements[i][j] = m_elements[i][j] / divisor;
-            }
         }
         return division;
     }
 
-    constexpr Matrix adjugate() const
+    [[nodiscard]] constexpr Matrix adjugate() const
     {
         if constexpr (N == 1)
             return Matrix(1);
@@ -107,7 +106,7 @@ public:
         return adjugate;
     }
 
-    constexpr T determinant() const
+    [[nodiscard]] constexpr T determinant() const
     {
         if constexpr (N == 1) {
             return m_elements[0][0];
@@ -122,7 +121,7 @@ public:
         }
     }
 
-    constexpr T first_minor(size_t skip_row, size_t skip_column) const
+    [[nodiscard]] constexpr T first_minor(size_t skip_row, size_t skip_column) const
     {
         static_assert(N > 1);
         VERIFY(skip_row < N);
@@ -145,7 +144,7 @@ public:
         return first_minor.determinant();
     }
 
-    constexpr static Matrix identity()
+    [[nodiscard]] constexpr static Matrix identity()
     {
         Matrix result;
         for (size_t i = 0; i < N; ++i) {
@@ -159,20 +158,17 @@ public:
         return result;
     }
 
-    constexpr Matrix inverse() const
+    [[nodiscard]] constexpr Matrix inverse() const
     {
-        auto det = determinant();
-        VERIFY(det != 0);
-        return adjugate() / det;
+        return adjugate() / determinant();
     }
 
-    constexpr Matrix transpose() const
+    [[nodiscard]] constexpr Matrix transpose() const
     {
         Matrix result;
         for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < N; ++j) {
+            for (size_t j = 0; j < N; ++j)
                 result.m_elements[i][j] = m_elements[j][i];
-            }
         }
         return result;
     }

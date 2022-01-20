@@ -46,13 +46,13 @@ ValueSlider::ValueSlider(Gfx::Orientation orientation, String suffix)
 
     m_textbox->on_up_pressed = [&]() {
         if (value() < max())
-            AbstractSlider::set_value(value() + 1);
+            AbstractSlider::increase_slider_by(1);
         m_textbox->set_text(formatted_value());
     };
 
     m_textbox->on_down_pressed = [&]() {
         if (value() > min())
-            AbstractSlider::set_value(value() - 1);
+            AbstractSlider::decrease_slider_by(1);
         m_textbox->set_text(formatted_value());
     };
 
@@ -81,7 +81,11 @@ void ValueSlider::paint_event(PaintEvent& event)
     GUI::Painter painter(*this);
     painter.add_clip_rect(event.rect());
 
-    painter.fill_rect_with_gradient(m_orientation, bar_rect(), palette().active_window_border1(), palette().active_window_border2());
+    if (is_enabled())
+        painter.fill_rect_with_gradient(m_orientation, bar_rect(), palette().active_window_border1(), palette().active_window_border2());
+    else
+        painter.fill_rect_with_gradient(m_orientation, bar_rect(), palette().inactive_window_border1(), palette().inactive_window_border2());
+
     auto unfilled_rect = bar_rect();
     unfilled_rect.set_left(knob_rect().right());
     painter.fill_rect(unfilled_rect, palette().base());
@@ -159,9 +163,9 @@ void ValueSlider::leave_event(Core::Event&)
 void ValueSlider::mousewheel_event(MouseEvent& event)
 {
     if (event.wheel_delta() < 0)
-        set_value(value() + 1);
+        increase_slider_by(1);
     else
-        set_value(value() - 1);
+        decrease_slider_by(1);
 }
 
 void ValueSlider::mousemove_event(MouseEvent& event)

@@ -37,11 +37,16 @@ class IDEController;
 class IDEChannel : public RefCounted<IDEChannel>
     , public IRQHandler {
     friend class IDEController;
-    AK_MAKE_ETERNAL
+
 public:
     enum class ChannelType : u8 {
         Primary,
         Secondary
+    };
+
+    enum class DeviceType : u8 {
+        Master,
+        Slave,
     };
 
     struct IOAddressGroup {
@@ -127,7 +132,7 @@ protected:
     StringView channel_type_string() const;
 
     void try_disambiguate_error();
-    bool wait_until_not_busy(bool slave, size_t milliseconds_timeout);
+    bool select_device_and_wait_until_not_busy(DeviceType, size_t milliseconds_timeout);
     bool wait_until_not_busy(size_t milliseconds_timeout);
 
     void start_request(AsyncBlockDeviceRequest&, bool, u16);

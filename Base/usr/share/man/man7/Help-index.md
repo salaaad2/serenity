@@ -1,8 +1,8 @@
-![Help icon](file:///res/icons/32x32/app-help.png)
+![Help icon](/res/icons/32x32/app-help.png)
 
 ## Welcome to the SerenityOS on-line help system!
 
-This is **Help**, the built-in documentation viewer for the SerenityOS desktop environment. If you prefer a command-line interface, the [man](../man1/man.md) command offers a text-only view of the same library.
+This is **Help**, the built-in documentation viewer for the SerenityOS desktop environment. If you prefer a command-line interface, the [man](help://man/1/man) command offers a text-only view of the same library.
 
 ---
 

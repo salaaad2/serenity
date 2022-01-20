@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -197,6 +197,32 @@ ThrowCompletionOr<Realm*> get_function_realm(GlobalObject& global_object, Functi
 
     // 5. Return the current Realm Record.
     return vm.current_realm();
+}
+
+// 8.5.2.1 InitializeBoundName ( name, value, environment ), https://tc39.es/ecma262/#sec-initializeboundname
+ThrowCompletionOr<void> initialize_bound_name(GlobalObject& global_object, FlyString const& name, Value value, Environment* environment)
+{
+    auto& vm = global_object.vm();
+
+    // 1. If environment is not undefined, then
+    if (environment) {
+        // a. Perform environment.InitializeBinding(name, value).
+        MUST(environment->initialize_binding(global_object, name, value));
+
+        // b. Return NormalCompletion(undefined).
+        return {};
+    }
+    // 2. Else,
+    else {
+        // a. Let lhs be ResolveBinding(name).
+        // NOTE: Although the spec pretends resolve_binding cannot fail it can just not in this case.
+        auto lhs = MUST(vm.resolve_binding(name));
+
+        // b. Return ? PutValue(lhs, value).
+        return TRY(lhs.put_value(global_object, value));
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // 10.1.6.2 IsCompatiblePropertyDescriptor ( Extensible, Desc, Current ), https://tc39.es/ecma262/#sec-iscompatiblepropertydescriptor
@@ -419,8 +445,11 @@ FunctionEnvironment* new_function_environment(ECMAScriptFunctionObject& function
     return env;
 }
 
+// 9.2.1.1 NewPrivateEnvironment ( outerPrivEnv ), https://tc39.es/ecma262/#sec-newprivateenvironment
 PrivateEnvironment* new_private_environment(VM& vm, PrivateEnvironment* outer)
 {
+    // 1. Let names be a new empty List.
+    // 2. Return the PrivateEnvironment Record { [[OuterPrivateEnvironment]]: outerPrivEnv, [[Names]]: names }.
     return vm.heap().allocate<PrivateEnvironment>(vm.current_realm()->global_object(), outer);
 }
 
@@ -535,7 +564,7 @@ ThrowCompletionOr<Value> perform_eval(Value x, GlobalObject& caller_realm, Calle
 
     TemporaryChange scope_change_strict(vm.running_execution_context().is_strict_mode, strict_eval);
 
-    Value eval_result;
+    Optional<Value> eval_result;
 
     if (auto* bytecode_interpreter = Bytecode::Interpreter::current()) {
         auto executable = JS::Bytecode::Generator::generate(program);
@@ -543,16 +572,16 @@ ThrowCompletionOr<Value> perform_eval(Value x, GlobalObject& caller_realm, Calle
         if (JS::Bytecode::g_dump_bytecode)
             executable.dump();
         eval_result = TRY(bytecode_interpreter->run(executable));
+        // Turn potentially empty JS::Value from the bytecode interpreter into an empty Optional
+        if (eval_result.has_value() && eval_result->is_empty())
+            eval_result = {};
     } else {
         auto& ast_interpreter = vm.interpreter();
         // FIXME: We need to use evaluate_statements() here because Program::execute() calls global_declaration_instantiation() when it shouldn't
-        eval_result = program->evaluate_statements(ast_interpreter, caller_realm);
+        eval_result = TRY(program->evaluate_statements(ast_interpreter, caller_realm));
     }
 
-    if (auto* exception = vm.exception())
-        return throw_completion(exception->value());
-    else
-        return eval_result.value_or(js_undefined());
+    return eval_result.value_or(js_undefined());
 }
 
 // 19.2.1.3 EvalDeclarationInstantiation ( body, varEnv, lexEnv, privateEnv, strict ), https://tc39.es/ecma262/#sec-evaldeclarationinstantiation
@@ -602,9 +631,11 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, GlobalObject& glo
             return IterationDecision::Continue;
 
         if (global_var_environment) {
-            auto function_definable = global_var_environment->can_declare_global_function(function.name());
-            if (vm.exception())
+            auto function_definable_or_error = global_var_environment->can_declare_global_function(function.name());
+            if (function_definable_or_error.is_error())
                 return IterationDecision::Break;
+            auto function_definable = function_definable_or_error.release_value();
+
             if (!function_definable) {
                 vm.throw_exception<TypeError>(global_object, ErrorType::CannotDeclareGlobalFunction, function.name());
                 return IterationDecision::Break;
@@ -635,17 +666,20 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, GlobalObject& glo
             if (global_var_environment) {
                 if (global_var_environment->has_lexical_declaration(function_name))
                     return IterationDecision::Continue;
-                auto var_definable = global_var_environment->can_declare_global_var(function_name);
-                if (vm.exception())
+
+                auto var_definable_or_error = global_var_environment->can_declare_global_var(function_name);
+                if (var_definable_or_error.is_error())
                     return IterationDecision::Break;
+                auto var_definable = var_definable_or_error.release_value();
+
                 if (!var_definable)
                     return IterationDecision::Continue;
             }
 
             if (!declared_function_names.contains(function_name) && !hoisted_functions.contains(function_name)) {
                 if (global_var_environment) {
-                    global_var_environment->create_global_var_binding(function_name, true);
-                    if (vm.exception())
+                    auto result = global_var_environment->create_global_var_binding(function_name, true);
+                    if (result.is_error())
                         return IterationDecision::Break;
                 } else {
                     if (!MUST(variable_environment->has_binding(function_name))) {
@@ -672,9 +706,10 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, GlobalObject& glo
         declaration.for_each_bound_name([&](auto const& name) {
             if (!declared_function_names.contains(name)) {
                 if (global_var_environment) {
-                    auto variable_definable = global_var_environment->can_declare_global_var(name);
-                    if (vm.exception())
+                    auto variable_definable_or_error = global_var_environment->can_declare_global_var(name);
+                    if (variable_definable_or_error.is_error())
                         return IterationDecision::Break;
+                    auto variable_definable = variable_definable_or_error.release_value();
                     if (!variable_definable) {
                         vm.throw_exception<TypeError>(global_object, ErrorType::CannotDeclareGlobalVariable, name);
                         return IterationDecision::Break;
@@ -713,11 +748,9 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, GlobalObject& glo
         return throw_completion(exception->value());
 
     for (auto& declaration : functions_to_initialize) {
-        auto* function = ECMAScriptFunctionObject::create(global_object, declaration.name(), declaration.body(), declaration.parameters(), declaration.function_length(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object());
+        auto* function = ECMAScriptFunctionObject::create(global_object, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object());
         if (global_var_environment) {
-            global_var_environment->create_global_function_binding(declaration.name(), function, true);
-            if (auto* exception = vm.exception())
-                return throw_completion(exception->value());
+            TRY(global_var_environment->create_global_function_binding(declaration.name(), function, true));
         } else {
             auto binding_exists = MUST(variable_environment->has_binding(declaration.name()));
 
@@ -732,9 +765,7 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, GlobalObject& glo
 
     for (auto& var_name : declared_var_names) {
         if (global_var_environment) {
-            global_var_environment->create_global_var_binding(var_name, true);
-            if (auto* exception = vm.exception())
-                return throw_completion(exception->value());
+            TRY(global_var_environment->create_global_var_binding(var_name, true));
         } else {
             auto binding_exists = MUST(variable_environment->has_binding(var_name));
 

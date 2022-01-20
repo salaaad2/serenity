@@ -19,6 +19,7 @@
 #include <Kernel/Arch/x86/PageDirectory.h>
 #include <Kernel/Arch/x86/TSS.h>
 #include <Kernel/Forward.h>
+#include <Kernel/KString.h>
 
 #include <AK/Platform.h>
 VALIDATE_IS_X86()
@@ -30,6 +31,10 @@ struct ProcessorMessage;
 struct ProcessorMessageEntry;
 
 #if ARCH(X86_64)
+#    define MSR_EFER 0xc0000080
+#    define MSR_STAR 0xc0000081
+#    define MSR_LSTAR 0xc0000082
+#    define MSR_SFMASK 0xc0000084
 #    define MSR_FS_BASE 0xc0000100
 #    define MSR_GS_BASE 0xc0000101
 #endif
@@ -58,8 +63,13 @@ class Processor {
 
     Processor* m_self;
 
+#if ARCH(X86_64)
+    // Saved user stack for the syscall instruction.
+    void* m_user_stack;
+#endif
+
     DescriptorTablePointer m_gdtr;
-    Descriptor m_gdt[256];
+    alignas(Descriptor) Descriptor m_gdt[256];
     u32 m_gdt_length;
 
     u32 m_cpu;
@@ -114,7 +124,7 @@ class Processor {
     void cpu_detect();
     void cpu_setup();
 
-    String features_string() const;
+    NonnullOwnPtr<KString> features_string() const;
 
 public:
     Processor() = default;
@@ -170,8 +180,6 @@ public:
     void flush_gdt();
     const DescriptorTablePointer& get_gdtr();
 
-    static size_t processor_count() { return processors().size(); }
-
     template<IteratorFunction<Processor&> Callback>
     static inline IterationDecision for_each(Callback callback)
     {
@@ -204,6 +212,17 @@ public:
     u64 time_spent_idle() const;
 
     static bool is_smp_enabled();
+
+#if ARCH(X86_64)
+    static constexpr u64 user_stack_offset()
+    {
+        return __builtin_offsetof(Processor, m_user_stack);
+    }
+    static constexpr u64 kernel_stack_offset()
+    {
+        return __builtin_offsetof(Processor, m_tss) + __builtin_offsetof(TSS, rsp0l);
+    }
+#endif
 
     ALWAYS_INLINE static Processor& current()
     {
@@ -379,7 +398,7 @@ public:
     NEVER_INLINE void switch_context(Thread*& from_thread, Thread*& to_thread);
     [[noreturn]] static void assume_context(Thread& thread, FlatPtr flags);
     FlatPtr init_context(Thread& thread, bool leave_crit);
-    static Vector<FlatPtr> capture_stack_trace(Thread& thread, size_t max_frames = 0);
+    static ErrorOr<Vector<FlatPtr, 32>> capture_stack_trace(Thread& thread, size_t max_frames = 0);
 
     static StringView platform_string();
 };

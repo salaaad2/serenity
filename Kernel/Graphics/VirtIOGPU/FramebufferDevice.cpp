@@ -164,13 +164,14 @@ ErrorOr<void> FramebufferDevice::create_framebuffer()
     // Allocate frame buffer for both front and back
     auto& info = display_info();
     m_buffer_size = calculate_framebuffer_size(info.rect.width, info.rect.height);
-    m_framebuffer = TRY(MM.allocate_kernel_region(m_buffer_size * 2, String::formatted("VirtGPU FrameBuffer #{}", m_scanout.value()), Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow));
+    auto region_name = TRY(KString::formatted("VirtGPU FrameBuffer #{}", m_scanout.value()));
+    m_framebuffer = TRY(MM.allocate_kernel_region(m_buffer_size * 2, region_name->view(), Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow));
     auto write_sink_page = MM.allocate_user_physical_page(Memory::MemoryManager::ShouldZeroFill::No).release_nonnull();
     auto num_needed_pages = m_framebuffer->vmobject().page_count();
 
     NonnullRefPtrVector<Memory::PhysicalPage> pages;
     for (auto i = 0u; i < num_needed_pages; ++i) {
-        pages.append(write_sink_page);
+        TRY(pages.try_append(write_sink_page));
     }
     m_framebuffer_sink_vmobject = TRY(Memory::AnonymousVMObject::try_create_with_physical_pages(pages.span()));
 
@@ -257,7 +258,7 @@ void FramebufferDevice::set_buffer(int buffer_index)
 
 ErrorOr<Memory::Region*> FramebufferDevice::mmap(Process& process, OpenFileDescription&, Memory::VirtualRange const& range, u64 offset, int prot, bool shared)
 {
-    REQUIRE_PROMISE(video);
+    TRY(process.require_promise(Pledge::video));
     if (!shared)
         return ENODEV;
     if (offset != 0 || !m_framebuffer)

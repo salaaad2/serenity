@@ -27,6 +27,7 @@
 #include <LibJS/Runtime/BooleanObject.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
+#include <LibJS/Runtime/DatePrototype.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/FunctionObject.h>
@@ -70,6 +71,7 @@
 
 RefPtr<JS::VM> vm;
 Vector<String> repl_statements;
+JS::Handle<JS::Value> last_value = JS::make_handle(JS::js_undefined());
 
 class ReplObject final : public JS::GlobalObject {
     JS_OBJECT(ReplObject, JS::GlobalObject);
@@ -85,6 +87,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(load_file);
     JS_DECLARE_NATIVE_FUNCTION(save_to_file);
     JS_DECLARE_NATIVE_FUNCTION(load_json);
+    JS_DECLARE_NATIVE_FUNCTION(last_value_getter);
 };
 
 class ScriptObject final : public JS::GlobalObject {
@@ -311,7 +314,7 @@ static void print_function(JS::Object const& object, HashTable<JS::Object*>&)
 static void print_date(JS::Object const& object, HashTable<JS::Object*>&)
 {
     print_type("Date");
-    js_out(" \033[34;1m{}\033[0m", static_cast<JS::Date const&>(object).string());
+    js_out(" \033[34;1m{}\033[0m", JS::to_date_string(static_cast<JS::Date const&>(object).date_value()));
 }
 
 static void print_error(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
@@ -601,6 +604,10 @@ static void print_intl_display_names(JS::Object const& object, HashTable<JS::Obj
     print_value(js_string(object.vm(), display_names.style_string()), seen_objects);
     js_out("\n  fallback: ");
     print_value(js_string(object.vm(), display_names.fallback_string()), seen_objects);
+    if (display_names.has_language_display()) {
+        js_out("\n  languageDisplay: ");
+        print_value(js_string(object.vm(), display_names.language_display_string()), seen_objects);
+    }
 }
 
 static void print_intl_locale(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
@@ -795,7 +802,6 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
         if (prototype_or_error.has_value() && prototype_or_error.value() == object.global_object().error_prototype())
             return print_error(object, seen_objects);
         vm->clear_exception();
-        vm->stop_unwind();
 
         if (is<JS::RegExpObject>(object))
             return print_regexp_object(object, seen_objects);
@@ -916,6 +922,8 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
     if (s_dump_ast)
         program->dump(0);
 
+    auto result = JS::ThrowCompletionOr<JS::Value> { JS::js_undefined() };
+
     if (parser.has_errors()) {
         auto error = parser.errors()[0];
         if (!s_disable_source_location_hints) {
@@ -923,7 +931,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             if (!hint.is_empty())
                 js_outln("{}", hint);
         }
-        vm->throw_exception<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+        result = vm->throw_completion<JS::SyntaxError>(interpreter.global_object(), error.to_string());
     } else {
         if (JS::Bytecode::g_dump_bytecode || s_run_bytecode) {
             auto executable = JS::Bytecode::Generator::generate(*program);
@@ -939,15 +947,12 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
 
             if (s_run_bytecode) {
                 JS::Bytecode::Interpreter bytecode_interpreter(interpreter.global_object(), interpreter.realm());
-                auto result = bytecode_interpreter.run(executable);
-                // Since all the error handling code uses vm.exception() we just rethrow any exception we got here.
-                if (result.is_error())
-                    vm->throw_exception(interpreter.global_object(), result.throw_completion().value());
+                result = bytecode_interpreter.run(executable);
             } else {
                 return true;
             }
         } else {
-            interpreter.run(interpreter.global_object(), *program);
+            result = interpreter.run(interpreter.global_object(), *program);
         }
     }
 
@@ -983,15 +988,18 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
         }
     };
 
-    if (vm->exception()) {
+    if (!result.is_error())
+        last_value = JS::make_handle(result.value());
+
+    if (result.is_error()) {
         handle_exception();
         return false;
-    }
-    if (s_print_last_result)
-        print(vm->last_value());
-    if (vm->exception()) {
-        handle_exception();
-        return false;
+    } else if (s_print_last_result) {
+        print(result.value());
+        if (vm->exception()) {
+            handle_exception();
+            return false;
+        }
     }
     return true;
 }
@@ -1011,7 +1019,7 @@ static JS::ThrowCompletionOr<JS::Value> load_file_impl(JS::VM& vm, JS::GlobalObj
         return vm.throw_completion<JS::SyntaxError>(global_object, error.to_string());
     }
     // FIXME: Use eval()-like semantics and execute in current scope?
-    vm.interpreter().run(global_object, *program);
+    TRY(vm.interpreter().run(global_object, *program));
     return JS::js_undefined();
 }
 
@@ -1038,6 +1046,24 @@ void ReplObject::initialize_global_object()
     define_native_function("load", load_file, 1, attr);
     define_native_function("save", save_to_file, 1, attr);
     define_native_function("loadJSON", load_json, 1, attr);
+
+    define_native_accessor(
+        "_",
+        [](JS::VM&, JS::GlobalObject&) {
+            return last_value.value();
+        },
+        [](JS::VM& vm, JS::GlobalObject& global_object) -> JS::ThrowCompletionOr<JS::Value> {
+            VERIFY(is<ReplObject>(global_object));
+            outln("Disable writing last value to '_'");
+
+            // We must delete first otherwise this setter gets called recursively.
+            TRY(global_object.internal_delete(JS::PropertyKey { "_" }));
+
+            auto value = vm.argument(0);
+            TRY(global_object.internal_set(JS::PropertyKey { "_" }, value, &global_object));
+            return value;
+        },
+        attr);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::save_to_file)
@@ -1195,7 +1221,7 @@ private:
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
 #ifdef __serenity__
-    TRY(Core::System::pledge("stdio rpath wpath cpath tty sigaction prot_exec"));
+    TRY(Core::System::pledge("stdio rpath wpath cpath tty sigaction"));
 #endif
 
     bool gc_on_every_allocation = false;
@@ -1260,7 +1286,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 #ifdef JS_TRACK_ZOMBIE_CELLS
         interpreter->heap().set_zombify_dead_cells(zombify_dead_cells);
 #endif
-        interpreter->vm().set_underscore_is_last_value(true);
 
         auto& global_environment = interpreter->realm().global_environment();
 
@@ -1426,14 +1451,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
             switch (mode) {
             case CompleteProperty: {
-                Optional<JS::Value> maybe_value;
-                auto maybe_variable = vm->resolve_binding(variable_name, &global_environment);
-                if (vm->exception())
-                    break;
-                maybe_value = TRY_OR_DISCARD(maybe_variable.get_value(interpreter->global_object()));
-                VERIFY(!maybe_value->is_empty());
+                auto reference_or_error = vm->resolve_binding(variable_name, &global_environment);
+                if (reference_or_error.is_error())
+                    return {};
+                auto value_or_error = reference_or_error.value().get_value(interpreter->global_object());
+                if (value_or_error.is_error())
+                    return {};
+                auto variable = value_or_error.value();
+                VERIFY(!variable.is_empty());
 
-                auto variable = *maybe_value;
                 if (!variable.is_object())
                     break;
 

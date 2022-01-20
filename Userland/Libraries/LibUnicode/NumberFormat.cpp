@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/CharacterTypes.h>
 #include <AK/Utf8View.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/Locale.h>
 #include <LibUnicode/NumberFormat.h>
-#include <LibUnicode/UnicodeSymbols.h>
 
 #if ENABLE_UNICODE_DATA
 #    include <LibUnicode/UnicodeData.h>
@@ -16,34 +16,49 @@
 
 namespace Unicode {
 
-Optional<StringView> get_number_system_symbol(StringView locale, StringView system, NumericSymbol symbol)
+Optional<NumberSystem> __attribute__((weak)) number_system_from_string(StringView) { return {}; }
+Optional<StringView> __attribute__((weak)) get_number_system_symbol(StringView, StringView, NumericSymbol) { return {}; }
+Optional<NumberGroupings> __attribute__((weak)) get_number_system_groupings(StringView, StringView) { return {}; }
+Optional<NumberFormat> __attribute__((weak)) get_standard_number_system_format(StringView, StringView, StandardNumberFormatType) { return {}; }
+Vector<NumberFormat> __attribute__((weak)) get_compact_number_system_formats(StringView, StringView, CompactNumberFormatType) { return {}; }
+Vector<NumberFormat> __attribute__((weak)) get_unit_formats(StringView, StringView, Style) { return {}; }
+
+Optional<StringView> get_default_number_system(StringView locale)
 {
-    static auto const& symbols = Detail::Symbols::ensure_loaded();
-    return symbols.get_number_system_symbol(locale, system, symbol);
+    if (auto systems = get_locale_key_mapping(locale, "nu"sv); systems.has_value()) {
+        auto index = systems->find(',');
+        return index.has_value() ? systems->substring_view(0, *index) : *systems;
+    }
+
+    return {};
 }
 
-Optional<NumberGroupings> get_number_system_groupings(StringView locale, StringView system)
+Optional<Span<u32 const>> __attribute__((weak)) get_digits_for_number_system(StringView)
 {
-    static auto const& symbols = Detail::Symbols::ensure_loaded();
-    return symbols.get_number_system_groupings(locale, system);
+    // Fall back to "latn" digits when Unicode data generation is disabled.
+    constexpr Array<u32, 10> digits { { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39 } };
+    return digits.span();
 }
 
-Optional<NumberFormat> get_standard_number_system_format(StringView locale, StringView system, StandardNumberFormatType type)
+String replace_digits_for_number_system(StringView system, StringView number)
 {
-    static auto const& symbols = Detail::Symbols::ensure_loaded();
-    return symbols.get_standard_number_system_format(locale, system, type);
-}
+    auto digits = get_digits_for_number_system(system);
+    if (!digits.has_value())
+        digits = get_digits_for_number_system("latn"sv);
+    VERIFY(digits.has_value());
 
-Vector<NumberFormat> get_compact_number_system_formats(StringView locale, StringView system, CompactNumberFormatType type)
-{
-    static auto const& symbols = Detail::Symbols::ensure_loaded();
-    return symbols.get_compact_number_system_formats(locale, system, type);
-}
+    StringBuilder builder;
 
-Vector<NumberFormat> get_unit_formats(StringView locale, StringView unit, Style style)
-{
-    static auto const& symbols = Detail::Symbols::ensure_loaded();
-    return symbols.get_unit_formats(locale, unit, style);
+    for (auto ch : number) {
+        if (is_ascii_digit(ch)) {
+            u32 digit = digits->at(parse_ascii_digit(ch));
+            builder.append_code_point(digit);
+        } else {
+            builder.append(ch);
+        }
+    }
+
+    return builder.build();
 }
 
 Optional<NumberFormat> select_pattern_with_plurality(Vector<NumberFormat> const& formats, double number)

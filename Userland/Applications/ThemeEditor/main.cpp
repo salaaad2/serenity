@@ -2,6 +2,8 @@
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Jakob-Niklas See <git@nwex.de>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021, Antonio Di Stefano <tonio9681@gmail.com>
+ * Copyright (c) 2022, Filiph Sandström <filiph.sandstrom@filfatstudios.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,6 +14,7 @@
 #include <LibCore/ConfigFile.h>
 #include <LibCore/System.h>
 #include <LibFileSystemAccessClient/Client.h>
+#include <LibGUI/ActionGroup.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
@@ -26,6 +29,7 @@
 #include <LibGUI/SpinBox.h>
 #include <LibGUI/TextBox.h>
 #include <LibGUI/Window.h>
+#include <LibGfx/Filters/ColorBlindnessFilter.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
 
@@ -33,6 +37,58 @@ class ColorRoleModel final : public GUI::ItemListModel<Gfx::ColorRole> {
 public:
     explicit ColorRoleModel(const Vector<Gfx::ColorRole>& data)
         : ItemListModel<Gfx::ColorRole>(data)
+    {
+    }
+
+    virtual GUI::Variant data(GUI::ModelIndex const& index, GUI::ModelRole role) const override
+    {
+        if (role == GUI::ModelRole::Display)
+            return Gfx::to_string(m_data[(size_t)index.row()]);
+        if (role == GUI::ModelRole::Custom)
+            return m_data[(size_t)index.row()];
+
+        return ItemListModel::data(index, role);
+    }
+};
+
+struct AlignmentValue {
+    String title;
+    Gfx::TextAlignment setting_value;
+};
+
+class AlignmentModel final : public GUI::Model {
+
+public:
+    AlignmentModel()
+    {
+        m_alignments.empend("Center", Gfx::TextAlignment::Center);
+        m_alignments.empend("Left", Gfx::TextAlignment::CenterLeft);
+        m_alignments.empend("Right", Gfx::TextAlignment::CenterRight);
+    }
+
+    virtual ~AlignmentModel() = default;
+
+    virtual int row_count(GUI::ModelIndex const& = GUI::ModelIndex()) const override { return 3; }
+    virtual int column_count(GUI::ModelIndex const& = GUI::ModelIndex()) const override { return 2; }
+
+    virtual GUI::Variant data(GUI::ModelIndex const& index, GUI::ModelRole role) const override
+    {
+        if (role == GUI::ModelRole::Display)
+            return m_alignments[index.row()].title;
+        if (role == GUI::ModelRole::Custom)
+            return m_alignments[index.row()].setting_value;
+
+        return {};
+    }
+
+private:
+    Vector<AlignmentValue> m_alignments;
+};
+
+class AlignmentRoleModel final : public GUI::ItemListModel<Gfx::AlignmentRole> {
+public:
+    explicit AlignmentRoleModel(Vector<Gfx::AlignmentRole> const& data)
+        : ItemListModel<Gfx::AlignmentRole>(data)
     {
     }
 
@@ -142,6 +198,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     ENUMERATE_COLOR_ROLES(__ENUMERATE_COLOR_ROLE)
 #undef __ENUMERATE_COLOR_ROLE
 
+    Vector<Gfx::AlignmentRole> alignment_roles;
+#define __ENUMERATE_ALIGNMENT_ROLE(role) alignment_roles.append(Gfx::AlignmentRole::role);
+    ENUMERATE_ALIGNMENT_ROLES(__ENUMERATE_ALIGNMENT_ROLE)
+#undef __ENUMERATE_ALIGNMENT_ROLE
+
     Vector<Gfx::FlagRole> flag_roles;
 #define __ENUMERATE_FLAG_ROLE(role) flag_roles.append(Gfx::FlagRole::role);
     ENUMERATE_FLAG_ROLES(__ENUMERATE_FLAG_ROLE)
@@ -164,10 +225,16 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                                ->add<ThemeEditor::PreviewWidget>(startup_preview_palette);
     auto& color_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("color_combo_box");
     auto& color_input = *main_widget->find_descendant_of_type_named<GUI::ColorInput>("color_input");
+
+    auto& alignment_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("alignment_combo_box");
+    auto& alignment_input = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("alignment_input");
+
     auto& flag_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("flag_combo_box");
     auto& flag_input = *main_widget->find_descendant_of_type_named<GUI::CheckBox>("flag_input");
+
     auto& metric_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("metric_combo_box");
     auto& metric_input = *main_widget->find_descendant_of_type_named<GUI::SpinBox>("metric_input");
+
     auto& path_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("path_combo_box");
     auto& path_input = *main_widget->find_descendant_of_type_named<GUI::TextBox>("path_input");
     auto& path_picker_button = *main_widget->find_descendant_of_type_named<GUI::Button>("path_picker_button");
@@ -186,6 +253,24 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         preview_widget.set_preview_palette(preview_palette);
     };
     color_input.set_color(startup_preview_palette.color(Gfx::ColorRole::Window));
+
+    alignment_combo_box.set_model(adopt_ref(*new AlignmentRoleModel(alignment_roles)));
+    alignment_combo_box.on_change = [&](auto&, auto& index) {
+        auto role = index.model()->data(index, GUI::ModelRole::Custom).to_alignment_role();
+        alignment_input.set_selected_index((size_t)preview_widget.preview_palette().alignment(role), GUI::AllowCallback::No);
+    };
+    alignment_combo_box.set_selected_index((size_t)Gfx::AlignmentRole::TitleAlignment - 1);
+
+    alignment_input.set_only_allow_values_from_model(true);
+    alignment_input.set_model(adopt_ref(*new AlignmentModel()));
+    alignment_input.set_selected_index((size_t)startup_preview_palette.alignment(Gfx::AlignmentRole::TitleAlignment));
+    alignment_input.on_change = [&](auto&, auto& index) {
+        auto role = alignment_combo_box.model()->index(alignment_combo_box.selected_index()).data(GUI::ModelRole::Custom).to_alignment_role();
+        auto preview_palette = preview_widget.preview_palette();
+
+        preview_palette.set_alignment(role, index.data(GUI::ModelRole::Custom).to_text_alignment(Gfx::TextAlignment::CenterLeft));
+        preview_widget.set_preview_palette(preview_palette);
+    };
 
     flag_combo_box.set_model(adopt_ref(*new FlagRoleModel(flag_roles)));
     flag_combo_box.on_change = [&](auto&, auto& index) {
@@ -315,6 +400,67 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(file_menu->try_add_separator());
     TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) { app->quit(); })));
+
+    auto accessibility_menu = TRY(window->try_add_menu("&Accessibility"));
+
+    auto default_accessibility_action = GUI::Action::create_checkable("Default - non-impaired", { Mod_AltGr, Key_1 }, [&](auto&) {
+        preview_widget.set_color_filter(nullptr);
+    });
+    default_accessibility_action->set_checked(true);
+
+    auto pratanopia_accessibility_action = GUI::Action::create_checkable("Protanopia", { Mod_AltGr, Key_2 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_protanopia());
+    });
+
+    auto pratanomaly_accessibility_action = GUI::Action::create_checkable("Protanomaly", { Mod_AltGr, Key_3 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_protanomaly());
+    });
+
+    auto tritanopia_accessibility_action = GUI::Action::create_checkable("Tritanopia", { Mod_AltGr, Key_4 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_tritanopia());
+    });
+
+    auto tritanomaly_accessibility_action = GUI::Action::create_checkable("Tritanomaly", { Mod_AltGr, Key_5 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_tritanomaly());
+    });
+
+    auto deuteranopia_accessibility_action = GUI::Action::create_checkable("Deuteranopia", { Mod_AltGr, Key_6 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranopia());
+    });
+
+    auto deuteranomaly_accessibility_action = GUI::Action::create_checkable("Deuteranomaly", { Mod_AltGr, Key_7 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranomaly());
+    });
+
+    auto achromatopsia_accessibility_action = GUI::Action::create_checkable("Achromatopsia", { Mod_AltGr, Key_8 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_achromatopsia());
+    });
+
+    auto achromatomaly_accessibility_action = GUI::Action::create_checkable("Achromatomaly", { Mod_AltGr, Key_9 }, [&](auto&) {
+        preview_widget.set_color_filter(Gfx::ColorBlindnessFilter::create_achromatomaly());
+    });
+
+    auto preview_type_action_group = make<GUI::ActionGroup>();
+    preview_type_action_group->set_exclusive(true);
+    preview_type_action_group->add_action(*default_accessibility_action);
+    preview_type_action_group->add_action(*pratanopia_accessibility_action);
+    preview_type_action_group->add_action(*pratanomaly_accessibility_action);
+    preview_type_action_group->add_action(*tritanopia_accessibility_action);
+    preview_type_action_group->add_action(*tritanomaly_accessibility_action);
+    preview_type_action_group->add_action(*deuteranopia_accessibility_action);
+    preview_type_action_group->add_action(*deuteranomaly_accessibility_action);
+    preview_type_action_group->add_action(*achromatopsia_accessibility_action);
+    preview_type_action_group->add_action(*achromatomaly_accessibility_action);
+
+    TRY(accessibility_menu->try_add_action(default_accessibility_action));
+    TRY(accessibility_menu->try_add_action(pratanopia_accessibility_action));
+    TRY(accessibility_menu->try_add_action(pratanomaly_accessibility_action));
+    TRY(accessibility_menu->try_add_action(tritanopia_accessibility_action));
+    TRY(accessibility_menu->try_add_action(tritanomaly_accessibility_action));
+    TRY(accessibility_menu->try_add_action(deuteranopia_accessibility_action));
+    TRY(accessibility_menu->try_add_action(deuteranomaly_accessibility_action));
+    TRY(accessibility_menu->try_add_action(achromatopsia_accessibility_action));
+    TRY(accessibility_menu->try_add_action(achromatomaly_accessibility_action));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Theme Editor", app_icon, window)));

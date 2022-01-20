@@ -11,7 +11,9 @@ set(SOURCES
     EventLoop.cpp
     FileWatcher.cpp
     File.cpp
+    FilePermissionsMask.cpp
     GetPassword.cpp
+    Group.cpp
     IODevice.cpp
     LocalServer.cpp
     LocalSocket.cpp
@@ -32,6 +34,7 @@ set(SOURCES
     System.cpp
     TCPServer.cpp
     TCPSocket.cpp
+    TempFile.cpp
     Timer.cpp
     UDPServer.cpp
     UDPSocket.cpp

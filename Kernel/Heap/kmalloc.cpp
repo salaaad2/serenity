@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-/*
- * Really really *really* Q&D malloc() and free() implementations
- * just to get going. Don't ever let anyone see this shit. :^)
- */
-
 #include <AK/Assertions.h>
 #include <AK/Types.h>
 #include <Kernel/Debug.h>
@@ -28,8 +23,10 @@ static constexpr size_t CHUNK_SIZE = 32;
 static constexpr size_t CHUNK_SIZE = 64;
 #endif
 
-#define POOL_SIZE (2 * MiB)
-#define ETERNAL_RANGE_SIZE (4 * MiB)
+static constexpr size_t INITIAL_KMALLOC_MEMORY_SIZE = 2 * MiB;
+
+// Treat the heap as logically separate from .bss
+__attribute__((section(".heap"))) static u8 initial_kmalloc_memory[INITIAL_KMALLOC_MEMORY_SIZE];
 
 namespace std {
 const nothrow_t nothrow;
@@ -44,6 +41,7 @@ struct KmallocSubheap {
     }
 
     IntrusiveListNode<KmallocSubheap> list_node;
+    using List = IntrusiveList<&KmallocSubheap::list_node>;
     Heap<CHUNK_SIZE, KMALLOC_SCRUB_BYTE, KFREE_SCRUB_BYTE> allocator;
 };
 
@@ -82,6 +80,7 @@ public:
     }
 
     IntrusiveListNode<KmallocSlabBlock> list_node;
+    using List = IntrusiveList<&KmallocSlabBlock::list_node>;
 
 private:
     struct FreelistEntry {
@@ -138,8 +137,8 @@ public:
 private:
     size_t m_slab_size { 0 };
 
-    IntrusiveList<&KmallocSlabBlock::list_node> m_usable_blocks;
-    IntrusiveList<&KmallocSlabBlock::list_node> m_full_blocks;
+    KmallocSlabBlock::List m_usable_blocks;
+    KmallocSlabBlock::List m_full_blocks;
 };
 
 struct KmallocGlobalData {
@@ -182,6 +181,7 @@ struct KmallocGlobalData {
     void deallocate(void* ptr, size_t size)
     {
         VERIFY(!expansion_in_progress);
+        VERIFY(is_valid_kmalloc_address(VirtualAddress { ptr }));
 
         for (auto& slabheap : slabheaps) {
             if (size <= slabheap.slab_size())
@@ -226,7 +226,11 @@ struct KmallocGlobalData {
         if (padded_allocation_request.has_overflow()) {
             PANIC("Integer overflow during kmalloc heap expansion");
         }
-        size_t new_subheap_size = max(minimum_subheap_size, Memory::page_round_up(padded_allocation_request.value()));
+        auto rounded_allocation_request = Memory::page_round_up(padded_allocation_request.value());
+        if (rounded_allocation_request.is_error()) {
+            PANIC("Integer overflow computing pages for kmalloc heap expansion");
+        }
+        size_t new_subheap_size = max(minimum_subheap_size, rounded_allocation_request.value());
 
         dbgln("Unable to allocate {}, expanding kmalloc heap", allocation_request);
 
@@ -263,8 +267,6 @@ struct KmallocGlobalData {
             pte->set_present(true);
         }
 
-        MM.flush_tlb(&MM.kernel_page_directory(), new_subheap_base, new_subheap_size / PAGE_SIZE);
-
         add_subheap(new_subheap_base.as_ptr(), new_subheap_size);
         return true;
     }
@@ -294,7 +296,18 @@ struct KmallocGlobalData {
     };
     Optional<ExpansionData> expansion_data;
 
-    IntrusiveList<&KmallocSubheap::list_node> subheaps;
+    bool is_valid_kmalloc_address(VirtualAddress vaddr) const
+    {
+        if (vaddr.as_ptr() >= initial_kmalloc_memory && vaddr.as_ptr() < (initial_kmalloc_memory + INITIAL_KMALLOC_MEMORY_SIZE))
+            return true;
+
+        if (!expansion_data.has_value())
+            return false;
+
+        return expansion_data->virtual_range.contains(vaddr);
+    }
+
+    KmallocSubheap::List subheaps;
 
     KmallocSlabheap slabheaps[6] = { 16, 32, 64, 128, 256, 512 };
 
@@ -304,18 +317,10 @@ struct KmallocGlobalData {
 READONLY_AFTER_INIT static KmallocGlobalData* g_kmalloc_global;
 alignas(KmallocGlobalData) static u8 g_kmalloc_global_heap[sizeof(KmallocGlobalData)];
 
-// Treat the heap as logically separate from .bss
-__attribute__((section(".heap"))) static u8 kmalloc_eternal_heap[ETERNAL_RANGE_SIZE];
-__attribute__((section(".heap"))) static u8 kmalloc_pool_heap[POOL_SIZE];
-
-static size_t g_kmalloc_bytes_eternal = 0;
 static size_t g_kmalloc_call_count;
 static size_t g_kfree_call_count;
 static size_t g_nested_kfree_calls;
 bool g_dump_kmalloc_stacks;
-
-static u8* s_next_eternal_ptr;
-READONLY_AFTER_INIT static u8* s_end_of_eternal_range;
 
 void kmalloc_enable_expand()
 {
@@ -333,28 +338,10 @@ static inline void kmalloc_verify_nospinlock_held()
 UNMAP_AFTER_INIT void kmalloc_init()
 {
     // Zero out heap since it's placed after end_of_kernel_bss.
-    memset(kmalloc_eternal_heap, 0, sizeof(kmalloc_eternal_heap));
-    memset(kmalloc_pool_heap, 0, sizeof(kmalloc_pool_heap));
-    g_kmalloc_global = new (g_kmalloc_global_heap) KmallocGlobalData(kmalloc_pool_heap, sizeof(kmalloc_pool_heap));
+    memset(initial_kmalloc_memory, 0, sizeof(initial_kmalloc_memory));
+    g_kmalloc_global = new (g_kmalloc_global_heap) KmallocGlobalData(initial_kmalloc_memory, sizeof(initial_kmalloc_memory));
 
     s_lock.initialize();
-
-    s_next_eternal_ptr = kmalloc_eternal_heap;
-    s_end_of_eternal_range = s_next_eternal_ptr + sizeof(kmalloc_eternal_heap);
-}
-
-void* kmalloc_eternal(size_t size)
-{
-    kmalloc_verify_nospinlock_held();
-
-    size = round_up_to_power_of_two(size, sizeof(void*));
-
-    SpinlockLocker lock(s_lock);
-    void* ptr = s_next_eternal_ptr;
-    s_next_eternal_ptr += size;
-    VERIFY(s_next_eternal_ptr < s_end_of_eternal_range);
-    g_kmalloc_bytes_eternal += size;
-    return ptr;
 }
 
 void* kmalloc(size_t size)
@@ -373,8 +360,12 @@ void* kmalloc(size_t size)
     Thread* current_thread = Thread::current();
     if (!current_thread)
         current_thread = Processor::idle_thread();
-    if (current_thread)
+    if (current_thread) {
+        // FIXME: By the time we check this, we have already allocated above.
+        //        This means that in the case of an infinite recursion, we can't catch it this way.
+        VERIFY(current_thread->is_allocation_enabled());
         PerformanceManager::add_kmalloc_perf_event(*current_thread, size, (FlatPtr)ptr);
+    }
 
     return ptr;
 }
@@ -395,8 +386,10 @@ void kfree_sized(void* ptr, size_t size)
         Thread* current_thread = Thread::current();
         if (!current_thread)
             current_thread = Processor::idle_thread();
-        if (current_thread)
+        if (current_thread) {
+            VERIFY(current_thread->is_allocation_enabled());
             PerformanceManager::add_kfree_perf_event(*current_thread, 0, (FlatPtr)ptr);
+        }
     }
 
     g_kmalloc_global->deallocate(ptr, size);
@@ -491,7 +484,6 @@ void get_kmalloc_stats(kmalloc_stats& stats)
     SpinlockLocker lock(s_lock);
     stats.bytes_allocated = g_kmalloc_global->allocated_bytes();
     stats.bytes_free = g_kmalloc_global->free_bytes();
-    stats.bytes_eternal = g_kmalloc_bytes_eternal;
     stats.kmalloc_call_count = g_kmalloc_call_count;
     stats.kfree_call_count = g_kfree_call_count;
 }

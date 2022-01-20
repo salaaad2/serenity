@@ -18,6 +18,7 @@
 #include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Time/TimeManagement.h>
+#include <Kernel/kstdio.h>
 
 // Remove this once SMP is stable and can be enabled by default
 #define SCHEDULE_ON_ALL_PROCESSORS 0
@@ -247,7 +248,7 @@ bool Scheduler::yield()
 {
     InterruptDisabler disabler;
 
-    auto current_thread = Thread::current();
+    auto const* current_thread = Thread::current();
     dbgln_if(SCHEDULER_DEBUG, "Scheduler[{}]: yielding thread {} in_irq={}", Processor::current_id(), *current_thread, Processor::current_in_irq());
     VERIFY(current_thread != nullptr);
     if (Processor::current_in_irq() || Processor::in_critical()) {
@@ -274,7 +275,7 @@ bool Scheduler::context_switch(Thread* thread)
 
     thread->did_schedule();
 
-    auto from_thread = Thread::current();
+    auto* from_thread = Thread::current();
     if (from_thread == thread)
         return false;
 
@@ -438,7 +439,7 @@ UNMAP_AFTER_INIT Thread* Scheduler::create_ap_idle_thread(u32 cpu)
     VERIFY(Processor::is_bootstrap_processor());
 
     VERIFY(s_colonel_process);
-    Thread* idle_thread = s_colonel_process->create_kernel_thread(idle_loop, nullptr, THREAD_PRIORITY_MIN, KString::must_create(String::formatted("idle thread #{}", cpu)), 1 << cpu, false);
+    Thread* idle_thread = s_colonel_process->create_kernel_thread(idle_loop, nullptr, THREAD_PRIORITY_MIN, MUST(KString::formatted("idle thread #{}", cpu)), 1 << cpu, false);
     VERIFY(idle_thread);
     return idle_thread;
 }
@@ -457,7 +458,7 @@ void Scheduler::timer_tick(const RegisterState& regs)
     VERIFY_INTERRUPTS_DISABLED();
     VERIFY(Processor::current_in_irq());
 
-    auto current_thread = Processor::current_thread();
+    auto* current_thread = Processor::current_thread();
     if (!current_thread)
         return;
 
@@ -517,7 +518,7 @@ void Scheduler::invoke_async()
 
 void Scheduler::notify_finalizer()
 {
-    if (g_finalizer_has_work.exchange(true, AK::MemoryOrder::memory_order_acq_rel) == false)
+    if (!g_finalizer_has_work.exchange(true, AK::MemoryOrder::memory_order_acq_rel))
         g_finalizer_wait_queue->wake_all();
 }
 
@@ -595,8 +596,14 @@ void dump_thread_list(bool with_stack_traces)
                 thread.times_scheduled());
             break;
         }
-        if (with_stack_traces)
-            dbgln("{}", thread.backtrace());
+        if (with_stack_traces) {
+            auto trace_or_error = thread.backtrace();
+            if (!trace_or_error.is_error()) {
+                auto trace = trace_or_error.release_value();
+                dbgln("Backtrace:");
+                kernelputstr(trace->characters(), trace->length());
+            }
+        }
         return IterationDecision::Continue;
     });
 }

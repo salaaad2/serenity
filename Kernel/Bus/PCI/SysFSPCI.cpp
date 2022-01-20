@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/Access.h>
 #include <Kernel/Bus/PCI/SysFSPCI.h>
@@ -16,7 +15,7 @@ namespace Kernel::PCI {
 UNMAP_AFTER_INIT NonnullRefPtr<PCIDeviceSysFSDirectory> PCIDeviceSysFSDirectory::create(const SysFSDirectory& parent_directory, Address address)
 {
     // FIXME: Handle allocation failure gracefully
-    auto device_name = MUST(KString::try_create(String::formatted("{:04x}:{:02x}:{:02x}.{}", address.domain(), address.bus(), address.device(), address.function())));
+    auto device_name = MUST(KString::formatted("{:04x}:{:02x}:{:02x}.{}", address.domain(), address.bus(), address.device(), address.function()));
     return adopt_ref(*new (nothrow) PCIDeviceSysFSDirectory(move(device_name), parent_directory, address));
 }
 

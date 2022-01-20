@@ -19,15 +19,15 @@
 
 namespace Kernel {
 
-ErrorOr<size_t> Process::procfs_get_thread_stack(ThreadID thread_id, KBufferBuilder& builder) const
+ErrorOr<void> Process::procfs_get_thread_stack(ThreadID thread_id, KBufferBuilder& builder) const
 {
     JsonArraySerializer array { builder };
     auto thread = Thread::from_tid(thread_id);
     if (!thread)
-        return Error::from_errno(ESRCH);
+        return ESRCH;
     bool show_kernel_addresses = Process::current().is_superuser();
     bool kernel_address_added = false;
-    for (auto address : Processor::capture_stack_trace(*thread, 1024)) {
+    for (auto address : TRY(Processor::capture_stack_trace(*thread, 1024))) {
         if (!show_kernel_addresses && !Memory::is_user_address(VirtualAddress { address })) {
             if (kernel_address_added)
                 continue;
@@ -38,8 +38,7 @@ ErrorOr<size_t> Process::procfs_get_thread_stack(ThreadID thread_id, KBufferBuil
     }
 
     array.finish();
-    // FIXME: This return value seems useless.
-    return 0;
+    return {};
 }
 
 ErrorOr<void> Process::traverse_stacks_directory(FileSystemID fsid, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)> callback) const
@@ -51,7 +50,8 @@ ErrorOr<void> Process::traverse_stacks_directory(FileSystemID fsid, Function<Err
         for (auto const& thread : list) {
             int tid = thread.tid().value();
             InodeIdentifier identifier = { fsid, SegmentedProcFSIndex::build_segmented_index_for_thread_stack(pid(), thread.tid()) };
-            TRY(callback({ String::number(tid), identifier, 0 }));
+            auto name = TRY(KString::number(tid));
+            TRY(callback({ name->view(), identifier, 0 }));
         }
         return {};
     });
@@ -143,7 +143,7 @@ ErrorOr<void> Process::procfs_get_pledge_stats(KBufferBuilder& builder) const
 ErrorOr<void> Process::procfs_get_unveil_stats(KBufferBuilder& builder) const
 {
     JsonArraySerializer array { builder };
-    for (auto& unveiled_path : unveiled_paths()) {
+    for (auto const& unveiled_path : unveiled_paths()) {
         if (!unveiled_path.was_explicitly_unveiled())
             continue;
         auto obj = array.add_object();
@@ -159,7 +159,7 @@ ErrorOr<void> Process::procfs_get_unveil_stats(KBufferBuilder& builder) const
             permissions_builder.append('c');
         if (unveiled_path.permissions() & UnveilAccess::Browse)
             permissions_builder.append('b');
-        obj.add("permissions", permissions_builder.to_string());
+        obj.add("permissions", permissions_builder.string_view());
     }
     array.finish();
     return {};
@@ -222,7 +222,7 @@ ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) 
     JsonArraySerializer array { builder };
     {
         SpinlockLocker lock(address_space().get_lock());
-        for (auto& region : address_space().regions()) {
+        for (auto const& region : address_space().regions()) {
             if (!region->is_user() && !Process::current().is_superuser())
                 continue;
             auto region_object = array.add_object();
@@ -247,7 +247,7 @@ ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) 
 
             StringBuilder pagemap_builder;
             for (size_t i = 0; i < region->page_count(); ++i) {
-                auto* page = region->physical_page(i);
+                auto const* page = region->physical_page(i);
                 if (!page)
                     pagemap_builder.append('N');
                 else if (page->is_shared_zero_page() || page->is_lazy_committed_page())
@@ -255,7 +255,7 @@ ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) 
                 else
                     pagemap_builder.append('P');
             }
-            region_object.add("pagemap", pagemap_builder.to_string());
+            region_object.add("pagemap", pagemap_builder.string_view());
         }
     }
     array.finish();
@@ -264,7 +264,7 @@ ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) 
 
 ErrorOr<void> Process::procfs_get_current_work_directory_link(KBufferBuilder& builder) const
 {
-    return builder.append_bytes(const_cast<Process&>(*this).current_directory().absolute_path().bytes());
+    return builder.append(TRY(const_cast<Process&>(*this).current_directory().try_serialize_absolute_path())->view());
 }
 
 mode_t Process::binary_link_required_mode() const
@@ -276,17 +276,17 @@ mode_t Process::binary_link_required_mode() const
 
 ErrorOr<void> Process::procfs_get_binary_link(KBufferBuilder& builder) const
 {
-    auto* custody = executable();
+    auto const* custody = executable();
     if (!custody)
         return Error::from_errno(ENOEXEC);
-    return builder.append(custody->absolute_path().bytes());
+    return builder.append(TRY(custody->try_serialize_absolute_path())->view());
 }
 
 ErrorOr<void> Process::procfs_get_tty_link(KBufferBuilder& builder) const
 {
     if (m_tty.is_null())
         return Error::from_errno(ENOENT);
-    return builder.append(m_tty->tty_name().characters());
+    return builder.append(m_tty->tty_name().view());
 }
 
 }

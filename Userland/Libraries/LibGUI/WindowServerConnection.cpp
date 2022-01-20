@@ -28,9 +28,9 @@ namespace GUI {
 
 WindowServerConnection& WindowServerConnection::the()
 {
-    static WindowServerConnection* s_connection = nullptr;
+    static RefPtr<WindowServerConnection> s_connection = nullptr;
     if (!s_connection)
-        s_connection = new WindowServerConnection;
+        s_connection = WindowServerConnection::try_create().release_value_but_fixme_should_propagate_errors();
     return *s_connection;
 }
 
@@ -40,8 +40,8 @@ static void set_system_theme_from_anonymous_buffer(Core::AnonymousBuffer buffer)
     Application::the()->set_system_palette(buffer);
 }
 
-WindowServerConnection::WindowServerConnection()
-    : IPC::ServerConnection<WindowClientEndpoint, WindowServerEndpoint>(*this, "/tmp/portal/window")
+WindowServerConnection::WindowServerConnection(NonnullOwnPtr<Core::Stream::LocalSocket> socket)
+    : IPC::ServerConnection<WindowClientEndpoint, WindowServerEndpoint>(*this, move(socket))
 {
     // NOTE: WindowServer automatically sends a "fast_greet" message to us when we connect.
     //       All we have to do is wait for it to arrive. This avoids a round-trip during application startup.
@@ -172,6 +172,7 @@ void WindowServerConnection::key_down(i32 window_id, u32 code_point, u32 key, u3
 
     if (auto* action = action_for_key_event(*window, *key_event)) {
         if (action->is_enabled()) {
+            action->flash_menubar_menu();
             action->activate();
             return;
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Kenneth Myhra <kennethmyhra@gmail.com>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  *
@@ -7,8 +7,10 @@
  */
 
 #include <AK/String.h>
+#include <AK/Vector.h>
 #include <LibCore/System.h>
 #include <LibSystem/syscall.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -24,7 +26,24 @@
 
 namespace Core::System {
 
+#ifndef HOST_NAME_MAX
+#    ifdef __APPLE__
+#        define HOST_NAME_MAX 255
+#    else
+#        define HOST_NAME_MAX 64
+#    endif
+#endif
+
 #ifdef __serenity__
+
+ErrorOr<void> beep()
+{
+    auto rc = ::sysbeep();
+    if (rc < 0)
+        return Error::from_syscall("beep", rc);
+    return {};
+}
+
 ErrorOr<void> pledge(StringView promises, StringView execpromises)
 {
     Syscall::SC_pledge_params params {
@@ -43,14 +62,6 @@ ErrorOr<void> unveil(StringView path, StringView permissions)
     };
     int rc = syscall(SC_unveil, &params);
     HANDLE_SYSCALL_RETURN_VALUE("unveil"sv, rc, {});
-}
-
-ErrorOr<Array<int, 2>> pipe2(int flags)
-{
-    Array<int, 2> fds;
-    if (::pipe2(fds.data(), flags) < 0)
-        return Error::from_syscall("pipe2"sv, -errno);
-    return fds;
 }
 
 ErrorOr<void> sendfd(int sockfd, int fd)
@@ -114,6 +125,31 @@ ErrorOr<long> ptrace(int request, pid_t tid, void* address, void* data)
 }
 #endif
 
+#ifndef AK_OS_BSD_GENERIC
+ErrorOr<Optional<struct spwd>> getspent()
+{
+    errno = 0;
+    if (auto* spwd = ::getspent())
+        return *spwd;
+    if (errno)
+        return Error::from_syscall("getspent"sv, -errno);
+    return Optional<struct spwd> {};
+}
+
+ErrorOr<Optional<struct spwd>> getspnam(StringView name)
+{
+    errno = 0;
+    ::setspent();
+    while (auto* spwd = ::getspent()) {
+        if (spwd->sp_namp == name)
+            return *spwd;
+    }
+    if (errno)
+        return Error::from_syscall("getspnam"sv, -errno);
+    return Optional<struct spwd> {};
+}
+#endif
+
 #ifndef AK_OS_MACOS
 ErrorOr<int> accept4(int sockfd, sockaddr* address, socklen_t* address_length, int flags)
 {
@@ -131,7 +167,7 @@ ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigac
     return {};
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__OpenBSD__)
 ErrorOr<sig_t> signal(int signal, sig_t handler)
 #else
 ErrorOr<sighandler_t> signal(int signal, sighandler_t handler)
@@ -309,11 +345,19 @@ ErrorOr<String> ptsname(int fd)
 
 ErrorOr<String> gethostname()
 {
-    char hostname[256];
+    char hostname[HOST_NAME_MAX];
     int rc = ::gethostname(hostname, sizeof(hostname));
     if (rc < 0)
         return Error::from_syscall("gethostname"sv, -errno);
     return String(&hostname[0]);
+}
+
+ErrorOr<void> sethostname(StringView hostname)
+{
+    int rc = ::sethostname(hostname.characters_without_null_termination(), hostname.length());
+    if (rc < 0)
+        return Error::from_syscall("sethostname"sv, -errno);
+    return {};
 }
 
 ErrorOr<String> getcwd()
@@ -359,7 +403,13 @@ ErrorOr<void> chmod(StringView pathname, mode_t mode)
         return Error::from_syscall("chmod"sv, -EFAULT);
 
 #ifdef __serenity__
-    int rc = syscall(SC_chmod, pathname.characters_without_null_termination(), pathname.length(), mode);
+    Syscall::SC_chmod_params params {
+        AT_FDCWD,
+        { pathname.characters_without_null_termination(), pathname.length() },
+        mode,
+        true
+    };
+    int rc = syscall(SC_chmod, &params);
     HANDLE_SYSCALL_RETURN_VALUE("chmod"sv, rc, {});
 #else
     String path = pathname;
@@ -376,13 +426,13 @@ ErrorOr<void> fchmod(int fd, mode_t mode)
     return {};
 }
 
-ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid)
+ErrorOr<void> lchown(StringView pathname, uid_t uid, gid_t gid)
 {
     if (!pathname.characters_without_null_termination())
         return Error::from_syscall("chown"sv, -EFAULT);
 
 #ifdef __serenity__
-    Syscall::SC_chown_params params = { { pathname.characters_without_null_termination(), pathname.length() }, uid, gid };
+    Syscall::SC_chown_params params = { { pathname.characters_without_null_termination(), pathname.length() }, uid, gid, AT_FDCWD, false };
     int rc = syscall(SC_chown, &params);
     HANDLE_SYSCALL_RETURN_VALUE("chown"sv, rc, {});
 #else
@@ -393,8 +443,47 @@ ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid)
 #endif
 }
 
-ErrorOr<struct passwd> getpwnam(StringView name)
+ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid)
 {
+    if (!pathname.characters_without_null_termination())
+        return Error::from_syscall("chown"sv, -EFAULT);
+
+#ifdef __serenity__
+    Syscall::SC_chown_params params = { { pathname.characters_without_null_termination(), pathname.length() }, uid, gid, AT_FDCWD, true };
+    int rc = syscall(SC_chown, &params);
+    HANDLE_SYSCALL_RETURN_VALUE("chown"sv, rc, {});
+#else
+    String path = pathname;
+    if (::lchown(path.characters(), uid, gid) < 0)
+        return Error::from_syscall("lchown"sv, -errno);
+    return {};
+#endif
+}
+
+ErrorOr<Optional<struct passwd>> getpwuid(uid_t uid)
+{
+    errno = 0;
+    if (auto* pwd = ::getpwuid(uid))
+        return *pwd;
+    if (errno)
+        return Error::from_syscall("getpwuid"sv, -errno);
+    return Optional<struct passwd> {};
+}
+
+ErrorOr<Optional<struct group>> getgrgid(gid_t gid)
+{
+    errno = 0;
+    if (auto* grp = ::getgrgid(gid))
+        return *grp;
+    if (errno)
+        return Error::from_syscall("getgrgid"sv, -errno);
+    return Optional<struct group> {};
+}
+
+ErrorOr<Optional<struct passwd>> getpwnam(StringView name)
+{
+    errno = 0;
+
     ::setpwent();
     if (errno)
         return Error::from_syscall("getpwnam"sv, -errno);
@@ -408,11 +497,13 @@ ErrorOr<struct passwd> getpwnam(StringView name)
     if (errno)
         return Error::from_syscall("getpwnam"sv, -errno);
     else
-        return Error::from_string_literal("getpwnam: Unknown username"sv);
+        return Optional<struct passwd> {};
 }
 
-ErrorOr<struct group> getgrnam(StringView name)
+ErrorOr<Optional<struct group>> getgrnam(StringView name)
 {
+    errno = 0;
+
     ::setgrent();
     if (errno)
         return Error::from_syscall("getgrnam"sv, -errno);
@@ -426,7 +517,7 @@ ErrorOr<struct group> getgrnam(StringView name)
     if (errno)
         return Error::from_syscall("getgrnam"sv, -errno);
     else
-        return Error::from_string_literal("getgrnam: Unknown username"sv);
+        return Optional<struct group> {};
 }
 
 ErrorOr<void> clock_settime(clockid_t clock_id, struct timespec* ts)
@@ -449,12 +540,13 @@ ErrorOr<pid_t> posix_spawnp(StringView const path, posix_spawn_file_actions_t* c
     return child_pid;
 }
 
-ErrorOr<pid_t> waitpid(pid_t waitee, int* wstatus, int options)
+ErrorOr<WaitPidResult> waitpid(pid_t waitee, int options)
 {
-    pid_t pid = ::waitpid(waitee, wstatus, options);
+    int wstatus;
+    pid_t pid = ::waitpid(waitee, &wstatus, options);
     if (pid < 0)
         return Error::from_syscall("waitpid"sv, -errno);
-    return pid;
+    return WaitPidResult { pid, wstatus };
 }
 
 ErrorOr<void> setuid(uid_t uid)
@@ -483,6 +575,21 @@ ErrorOr<void> setegid(gid_t gid)
     if (::setegid(gid) < 0)
         return Error::from_syscall("setegid"sv, -errno);
     return {};
+}
+
+ErrorOr<void> setpgid(pid_t pid, pid_t pgid)
+{
+    if (::setpgid(pid, pgid) < 0)
+        return Error::from_syscall("setpgid"sv, -errno);
+    return {};
+}
+
+ErrorOr<pid_t> setsid()
+{
+    int rc = ::setsid();
+    if (rc < 0)
+        return Error::from_syscall("setsid"sv, -errno);
+    return rc;
 }
 
 ErrorOr<bool> isatty(int fd)
@@ -526,6 +633,21 @@ ErrorOr<void> mkdir(StringView path, mode_t mode)
 #endif
 }
 
+ErrorOr<void> chdir(StringView path)
+{
+    if (path.is_null())
+        return Error::from_errno(EFAULT);
+#ifdef __serenity__
+    int rc = syscall(SC_chdir, path.characters_without_null_termination(), path.length());
+    HANDLE_SYSCALL_RETURN_VALUE("chdir"sv, rc, {});
+#else
+    String path_string = path;
+    if (::chdir(path_string.characters()) < 0)
+        return Error::from_syscall("chdir"sv, -errno);
+    return {};
+#endif
+}
+
 ErrorOr<pid_t> fork()
 {
     pid_t pid = ::fork();
@@ -563,6 +685,22 @@ ErrorOr<void> rename(StringView old_path, StringView new_path)
 #endif
 }
 
+ErrorOr<void> unlink(StringView path)
+{
+    if (path.is_null())
+        return Error::from_errno(EFAULT);
+
+#ifdef __serenity__
+    int rc = syscall(SC_unlink, path.characters_without_null_termination(), path.length());
+    HANDLE_SYSCALL_RETURN_VALUE("unlink"sv, rc, {});
+#else
+    String path_string = path;
+    if (::unlink(path_string.characters()) < 0)
+        return Error::from_syscall("unlink"sv, -errno);
+    return {};
+#endif
+}
+
 ErrorOr<void> utime(StringView path, Optional<struct utimbuf> maybe_buf)
 {
     if (path.is_null())
@@ -580,6 +718,19 @@ ErrorOr<void> utime(StringView path, Optional<struct utimbuf> maybe_buf)
         return Error::from_syscall("utime"sv, -errno);
     return {};
 #endif
+}
+
+ErrorOr<struct utsname> uname()
+{
+    utsname uts;
+#ifdef __serenity__
+    int rc = syscall(SC_uname, &uts);
+    HANDLE_SYSCALL_RETURN_VALUE("uname"sv, rc, uts);
+#else
+    if (::uname(&uts) < 0)
+        return Error::from_syscall("uname"sv, -errno);
+#endif
+    return uts;
 }
 
 ErrorOr<int> socket(int domain, int type, int protocol)
@@ -707,6 +858,33 @@ ErrorOr<void> socketpair(int domain, int type, int protocol, int sv[2])
     if (::socketpair(domain, type, protocol, sv) < 0)
         return Error::from_syscall("socketpair"sv, -errno);
     return {};
+}
+
+ErrorOr<Array<int, 2>> pipe2([[maybe_unused]] int flags)
+{
+    Array<int, 2> fds;
+#if defined(__unix__)
+    if (::pipe2(fds.data(), flags) < 0)
+        return Error::from_syscall("pipe2"sv, -errno);
+#else
+    if (::pipe(fds.data()) < 0)
+        return Error::from_syscall("pipe2"sv, -errno);
+#endif
+    return fds;
+}
+
+ErrorOr<Vector<gid_t>> getgroups()
+{
+    int count = ::getgroups(0, nullptr);
+    if (count < 0)
+        return Error::from_syscall("getgroups"sv, -errno);
+    if (count == 0)
+        return Vector<gid_t> {};
+    Vector<gid_t> groups;
+    TRY(groups.try_resize(count));
+    if (::getgroups(count, groups.data()) < 0)
+        return Error::from_syscall("getgroups"sv, -errno);
+    return groups;
 }
 
 }

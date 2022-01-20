@@ -13,7 +13,6 @@ set(SOURCES
     FontEditor.cpp
     FontEditorWindowGML.h
     GlyphEditorWidget.cpp
-    GlyphMapWidget.cpp
     main.cpp
     NewFontDialog.cpp
     NewFontDialogPage1GML.h
@@ -23,3 +22,4 @@ set(SOURCES
 
 serenity_app(FontEditor ICON app-font-editor)
 target_link_libraries(FontEditor LibGUI LibDesktop LibGfx LibMain)
+link_with_unicode_data(FontEditor)

@@ -48,7 +48,7 @@ UNMAP_AFTER_INIT void CommandLine::initialize()
     }
 }
 
-UNMAP_AFTER_INIT void CommandLine::build_commandline(const String& cmdline_from_bootloader)
+UNMAP_AFTER_INIT NonnullOwnPtr<KString> CommandLine::build_commandline(StringView cmdline_from_bootloader)
 {
     StringBuilder builder;
     builder.append(cmdline_from_bootloader);
@@ -56,7 +56,7 @@ UNMAP_AFTER_INIT void CommandLine::build_commandline(const String& cmdline_from_
         builder.append(" ");
         builder.append(s_embedded_cmd_line);
     }
-    m_string = builder.to_string();
+    return KString::must_create(builder.string_view());
 }
 
 UNMAP_AFTER_INIT void CommandLine::add_arguments(const Vector<StringView>& args)
@@ -70,18 +70,18 @@ UNMAP_AFTER_INIT void CommandLine::add_arguments(const Vector<StringView>& args)
         VERIFY(pair.size() == 2 || pair.size() == 1);
 
         if (pair.size() == 1) {
-            m_params.set(move(pair[0]), ""sv);
+            m_params.set(pair[0], ""sv);
         } else {
-            m_params.set(move(pair[0]), move(pair[1]));
+            m_params.set(pair[0], pair[1]);
         }
     }
 }
 
-UNMAP_AFTER_INIT CommandLine::CommandLine(const String& cmdline_from_bootloader)
+UNMAP_AFTER_INIT CommandLine::CommandLine(StringView cmdline_from_bootloader)
+    : m_string(build_commandline(cmdline_from_bootloader))
 {
     s_the = this;
-    build_commandline(cmdline_from_bootloader);
-    const auto& args = m_string.split_view(' ');
+    const auto& args = m_string->view().split_view(' ');
     m_params.ensure_capacity(args.size());
     add_arguments(args);
 }
@@ -217,7 +217,8 @@ UNMAP_AFTER_INIT AHCIResetMode CommandLine::ahci_reset_mode() const
     const auto ahci_reset_mode = lookup("ahci_reset_mode"sv).value_or("controllers"sv);
     if (ahci_reset_mode == "controllers"sv) {
         return AHCIResetMode::ControllerOnly;
-    } else if (ahci_reset_mode == "aggressive"sv) {
+    }
+    if (ahci_reset_mode == "aggressive"sv) {
         return AHCIResetMode::Aggressive;
     }
     PANIC("Unknown AHCIResetMode: {}", ahci_reset_mode);
@@ -233,7 +234,8 @@ PanicMode CommandLine::panic_mode(Validate should_validate) const
     const auto panic_mode = lookup("panic"sv).value_or("halt"sv);
     if (panic_mode == "halt"sv) {
         return PanicMode::Halt;
-    } else if (panic_mode == "shutdown"sv) {
+    }
+    if (panic_mode == "shutdown"sv) {
         return PanicMode::Shutdown;
     }
 
@@ -243,9 +245,14 @@ PanicMode CommandLine::panic_mode(Validate should_validate) const
     return PanicMode::Halt;
 }
 
-UNMAP_AFTER_INIT bool CommandLine::are_framebuffer_devices_enabled() const
+UNMAP_AFTER_INIT auto CommandLine::are_framebuffer_devices_enabled() const -> FrameBufferDevices
 {
-    return lookup("fbdev"sv).value_or("on"sv) == "on"sv;
+    const auto fbdev_value = lookup("fbdev"sv).value_or("on"sv);
+    if (fbdev_value == "on"sv)
+        return FrameBufferDevices::Enabled;
+    if (fbdev_value == "bootloader"sv)
+        return FrameBufferDevices::BootloaderOnly;
+    return FrameBufferDevices::ConsoleOnly;
 }
 
 StringView CommandLine::userspace_init() const
@@ -259,7 +266,7 @@ NonnullOwnPtrVector<KString> CommandLine::userspace_init_args() const
 
     auto init_args = lookup("init_args"sv).value_or(""sv).split_view(';');
     if (!init_args.is_empty())
-        args.prepend(KString::must_create(userspace_init()));
+        MUST(args.try_prepend(KString::must_create(userspace_init())));
     for (auto& init_arg : init_args)
         args.append(KString::must_create(init_arg));
     return args;

@@ -136,7 +136,10 @@ private:
         }
 
         auto file_contents = m_proc_stat->read_all();
-        auto json = JsonValue::from_string(file_contents).release_value_but_fixme_should_propagate_errors();
+        auto json_or_error = JsonValue::from_string(file_contents);
+        if (json_or_error.is_error())
+            return false;
+        auto json = json_or_error.release_value();
         auto const& obj = json.as_object();
         total = obj.get("total_time").to_u64();
         idle = obj.get("idle_time").to_u64();
@@ -157,7 +160,10 @@ private:
         }
 
         auto file_contents = m_proc_mem->read_all();
-        auto json = JsonValue::from_string(file_contents).release_value_but_fixme_should_propagate_errors();
+        auto json_or_error = JsonValue::from_string(file_contents);
+        if (json_or_error.is_error())
+            return false;
+        auto json = json_or_error.release_value();
         auto const& obj = json.as_object();
         unsigned kmalloc_allocated = obj.get("kmalloc_allocated").to_u32();
         unsigned kmalloc_available = obj.get("kmalloc_available").to_u32();
@@ -205,13 +211,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     NonnullRefPtrVector<GUI::Window> applet_windows;
 
-    auto create_applet = [&](GraphType graph_type, StringView spec) {
+    auto create_applet = [&](GraphType graph_type, StringView spec) -> ErrorOr<void> {
         auto parts = spec.split_view(',');
 
         dbgln("Create applet: {} with spec '{}'", (int)graph_type, spec);
 
         if (parts.size() != 2)
-            return;
+            return Error::from_string_literal("ResourceGraph: Applet spec is not composed of exactly 2 comma-separated parts"sv);
 
         auto name = parts[0];
         auto graph_color = Gfx::Color::from_string(parts[1]);
@@ -221,15 +227,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->set_window_type(GUI::WindowType::Applet);
         window->resize(GraphWidget::history_size + 2, 15);
 
-        window->set_main_widget<GraphWidget>(graph_type, graph_color, Optional<Gfx::Color> {});
+        auto graph_widget = TRY(window->try_set_main_widget<GraphWidget>(graph_type, graph_color, Optional<Gfx::Color> {}));
         window->show();
         applet_windows.append(move(window));
+
+        return {};
     };
 
     if (cpu)
-        create_applet(GraphType::CPU, cpu);
+        TRY(create_applet(GraphType::CPU, cpu));
     if (memory)
-        create_applet(GraphType::Memory, memory);
+        TRY(create_applet(GraphType::Memory, memory));
 
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/proc/stat", "r"));

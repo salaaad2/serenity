@@ -30,6 +30,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -148,8 +149,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         metadata.name = path;
 
         int rc = lstat(String(path).characters(), &metadata.stat);
-        if (rc < 0)
+        if (rc < 0) {
             perror("lstat");
+            continue;
+        }
 
         files.append(metadata);
     }

@@ -176,6 +176,30 @@ private:
     [[nodiscard]] RefPtr<PropertyOwningCSSStyleDeclaration> convert_to_declaration(NonnullRefPtr<StyleBlockRule>);
     [[nodiscard]] Optional<StyleProperty> convert_to_style_property(StyleDeclarationRule const&);
 
+    class Dimension {
+    public:
+        Dimension(Length&& value)
+            : m_value(move(value))
+        {
+        }
+        Dimension(Percentage&& value)
+            : m_value(move(value))
+        {
+        }
+
+        bool is_length() const;
+        Length length() const;
+
+        bool is_percentage() const;
+        Percentage percentage() const;
+
+        bool is_length_percentage() const;
+        LengthPercentage length_percentage() const;
+
+    private:
+        Variant<Length, Percentage> m_value;
+    };
+    Optional<Dimension> parse_dimension(StyleComponentValueRule const&);
     Optional<Color> parse_color(StyleComponentValueRule const&);
     Optional<Length> parse_length(StyleComponentValueRule const&);
 
@@ -189,7 +213,7 @@ private:
     RefPtr<StyleValue> parse_css_value(StyleComponentValueRule const&);
     RefPtr<StyleValue> parse_builtin_value(StyleComponentValueRule const&);
     RefPtr<StyleValue> parse_dynamic_value(StyleComponentValueRule const&);
-    RefPtr<StyleValue> parse_length_value(StyleComponentValueRule const&);
+    RefPtr<StyleValue> parse_dimension_value(StyleComponentValueRule const&);
     RefPtr<StyleValue> parse_numeric_value(StyleComponentValueRule const&);
     RefPtr<StyleValue> parse_identifier_value(StyleComponentValueRule const&);
     RefPtr<StyleValue> parse_color_value(StyleComponentValueRule const&);
@@ -235,9 +259,11 @@ private:
     Result<Selector::SimpleSelector, ParsingResult> parse_simple_selector(TokenStream<StyleComponentValueRule>&);
 
     NonnullRefPtr<MediaQuery> parse_media_query(TokenStream<StyleComponentValueRule>&);
-    OwnPtr<MediaQuery::MediaCondition> consume_media_condition(TokenStream<StyleComponentValueRule>&);
-    Optional<MediaQuery::MediaFeature> consume_media_feature(TokenStream<StyleComponentValueRule>&);
-    Optional<MediaQuery::MediaType> consume_media_type(TokenStream<StyleComponentValueRule>&);
+    OwnPtr<MediaCondition> parse_media_condition(TokenStream<StyleComponentValueRule>&, MediaCondition::AllowOr allow_or);
+    Optional<MediaFeature> parse_media_feature(TokenStream<StyleComponentValueRule>&);
+    Optional<MediaQuery::MediaType> parse_media_type(TokenStream<StyleComponentValueRule>&);
+    OwnPtr<MediaCondition> parse_media_in_parens(TokenStream<StyleComponentValueRule>&);
+    Optional<MediaFeatureValue> parse_media_feature_value(TokenStream<StyleComponentValueRule>&);
 
     OwnPtr<Supports::Condition> parse_supports_condition(TokenStream<StyleComponentValueRule>&);
     Optional<Supports::InParens> parse_supports_in_parens(TokenStream<StyleComponentValueRule>&);

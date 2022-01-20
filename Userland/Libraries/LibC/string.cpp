@@ -227,6 +227,12 @@ char* strchr(const char* str, int c)
     }
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699959399/functions/index.html
+char* index(const char* str, int c)
+{
+    return strchr(str, c);
+}
+
 char* strchrnul(const char* str, int c)
 {
     char ch = c;
@@ -258,6 +264,12 @@ char* strrchr(const char* str, int ch)
             last = const_cast<char*>(str);
     }
     return last;
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699959399/functions/rindex.html
+char* rindex(const char* str, int ch)
+{
+    return strrchr(str, ch);
 }
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/strcat.html
@@ -434,6 +446,23 @@ size_t strxfrm(char* dest, const char* src, size_t n)
     for (; i < n; ++i)
         dest[i] = '\0';
     return i;
+}
+
+// Not in POSIX, originated in BSD but also supported on Linux.
+// https://man.openbsd.org/strsep.3
+char* strsep(char** str, char const* delim)
+{
+    if (*str == nullptr)
+        return nullptr;
+    auto* begin = *str;
+    auto* end = begin + strcspn(begin, delim);
+    if (*end) {
+        *end = '\0';
+        *str = ++end;
+    } else {
+        *str = nullptr;
+    }
+    return begin;
 }
 
 void explicit_bzero(void* ptr, size_t size)

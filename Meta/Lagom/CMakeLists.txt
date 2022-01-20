@@ -8,9 +8,9 @@ project(
     LANGUAGES C CXX
 )
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "10.2")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "11")
   message(FATAL_ERROR
-      "A GCC version less than 10.2 was detected (${CMAKE_CXX_COMPILER_VERSION}), this is unsupported.\n"
+      "A GCC version less than 11 was detected (${CMAKE_CXX_COMPILER_VERSION}), this is unsupported.\n"
       "Please re-read the build instructions documentation, and upgrade your host compiler.\n")
 endif()
 
@@ -216,6 +216,11 @@ function(lagom_test source)
     )
 endfunction()
 
+if (NOT TARGET all_generated)
+    # Meta target to run all code-gen steps in the build.
+    add_custom_target(all_generated)
+endif()
+
 # AK/Core
 # Note: AK is included in LagomCore for the host build instead of LibC per the target build
 file(GLOB AK_SOURCES CONFIGURE_DEPENDS "../../AK/*.cpp")
@@ -224,8 +229,10 @@ lagom_lib(Core core
     SOURCES ${AK_SOURCES} ${LIBCORE_SOURCES}
     LIBS Threads::Threads
 )
-if (NOT APPLE)
-    target_link_libraries(LagomCore crypt) # Core::Account uses crypt() but it's not in libcrypt on macOS
+if (APPLE OR ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
+    target_link_libraries(LagomCore) # Core::Account uses crypt() but it's not in libcrypt on macOS
+else()
+    target_link_libraries(LagomCore crypt)
 endif()
 
 # Main
@@ -237,6 +244,19 @@ lagom_lib(Main main
 if (APPLE)
     target_link_options(LagomMain PRIVATE -undefined dynamic_lookup)
 endif()
+
+# TimeZone
+# This is needed even if Lagom is not enabled because it is depended upon by code generators.
+if (NOT ENABLE_OSS_FUZZ AND NOT ENABLE_FUZZER_SANITIZER)
+    include(time_zone_data)
+else()
+    set(ENABLE_TIME_ZONE_DATABASE_DOWNLOAD OFF)
+endif()
+file(GLOB LIBTIMEZONE_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibTimeZone/*.cpp")
+lagom_lib(TimeZone timezone
+    SOURCES ${LIBTIMEZONE_SOURCES} ${TIME_ZONE_DATA_SOURCES}
+)
+target_compile_definitions(LagomTimeZone PRIVATE ENABLE_TIME_ZONE_DATA=$<BOOL:${ENABLE_TIME_ZONE_DATABASE_DOWNLOAD}>)
 
 # Manually install AK headers
 install(
@@ -253,12 +273,6 @@ if (NOT ENABLE_OSS_FUZZ AND NOT ENABLE_FUZZER_SANITIZER)
 endif()
 
 if (BUILD_LAGOM)
-
-    if (NOT TARGET all_generated)
-        # Meta target to run all code-gen steps in the build.
-        add_custom_target(all_generated)
-    endif()
-
     # Lagom Libraries
 
     # Archive
@@ -291,7 +305,7 @@ if (BUILD_LAGOM)
 
     # ELF
     file(GLOB LIBELF_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibELF/*.cpp")
-    # There's no way we can reliably make the dymamic loading classes cross platform
+    # There's no way we can reliably make the dynamic loading classes cross platform
     list(FILTER LIBELF_SOURCES EXCLUDE REGEX ".*Dynamic.*.cpp$")
     lagom_lib(ELF elf
         SOURCES ${LIBELF_SOURCES}
@@ -314,9 +328,9 @@ if (BUILD_LAGOM)
 
     # GL
     file(GLOB LIBGL_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGL/*.cpp")
-    file(GLOB LIBGL_TEX_SCOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGL/Tex/*.cpp")
+    file(GLOB LIBGL_TEX_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGL/Tex/*.cpp")
     lagom_lib(GL gl
-        SOURCES ${LIBGL_SOURCES} ${LIBGL_TEX_SCOURCES}
+        SOURCES ${LIBGL_SOURCES} ${LIBGL_TEX_SOURCES}
         LIBS m LagomGfx LagomSoftGPU)
 
     # GUI-GML
@@ -400,13 +414,14 @@ if (BUILD_LAGOM)
         SOURCES ${LIBSOFTGPU_SOURCES}
         LIBS m LagomGfx
     )
-    
+
     # SQL
     file(GLOB_RECURSE LIBSQL_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibSQL/*.cpp")
     list(REMOVE_ITEM LIBSQL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibSQL/AST/SyntaxHighlighter.cpp")
     list(REMOVE_ITEM LIBSQL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibSQL/SQLClient.cpp")
     lagom_lib(SQL sql
         SOURCES ${LIBSQL_SOURCES}
+        LIBS LagomRegex
     )
 
     # TextCodec
@@ -434,7 +449,7 @@ if (BUILD_LAGOM)
         SOURCES ${LIBUNICODE_SOURCES} ${UNICODE_DATA_SOURCES}
     )
     target_compile_definitions(LagomUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
-    target_link_libraries(LagomUnicode -ldl)
+    target_link_libraries(LagomUnicode LagomTimeZone)
 
     # WASM
     file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
@@ -463,11 +478,11 @@ if (BUILD_LAGOM)
 
         add_executable(disasm_lagom ../../Userland/Utilities/disasm.cpp)
         set_target_properties(disasm_lagom PROPERTIES OUTPUT_NAME disasm)
-        target_link_libraries(disasm_lagom LagomCore LagomELF LagomX86)
+        target_link_libraries(disasm_lagom LagomCore LagomELF LagomX86 LagomMain)
 
         add_executable(gml-format_lagom ../../Userland/Utilities/gml-format.cpp)
         set_target_properties(gml-format_lagom PROPERTIES OUTPUT_NAME gml-format)
-        target_link_libraries(gml-format_lagom LagomCore LagomGML)
+        target_link_libraries(gml-format_lagom LagomCore LagomGML LagomMain)
 
         add_executable(js_lagom ../../Userland/Utilities/js.cpp)
         set_target_properties(js_lagom PROPERTIES OUTPUT_NAME js)
@@ -483,11 +498,11 @@ if (BUILD_LAGOM)
 
         add_executable(shell_lagom ../../Userland/Shell/main.cpp)
         set_target_properties(shell_lagom PROPERTIES OUTPUT_NAME shell)
-        target_link_libraries(shell_lagom LagomCore LagomShell)
+        target_link_libraries(shell_lagom LagomCore LagomShell LagomMain)
 
         add_executable(wasm_lagom ../../Userland/Utilities/wasm.cpp)
         set_target_properties(wasm_lagom PROPERTIES OUTPUT_NAME wasm)
-        target_link_libraries(wasm_lagom LagomCore LagomWasm LagomLine)
+        target_link_libraries(wasm_lagom LagomCore LagomWasm LagomLine LagomMain)
 
         enable_testing()
         # LibTest
@@ -533,6 +548,12 @@ if (BUILD_LAGOM)
             lagom_test(${source} LIBS LagomGL)
         endforeach()
 
+        # PDF
+        file(GLOB LIBPDF_TESTS CONFIGURE_DEPENDS "../../Tests/LibPDF/*.cpp")
+        foreach(source ${LIBPDF_TESTS})
+            lagom_test(${source} LIBS LagomPDF WORKING_DIRECTORY ${SERENITY_PROJECT_ROOT}/Base/home/anon/Documents/pdf/)
+        endforeach()
+
         # Regex
         file(GLOB LIBREGEX_TESTS CONFIGURE_DEPENDS "../../Tests/LibRegex/*.cpp")
         # RegexLibC test POSIX <regex.h> and contains many Serenity extensions
@@ -553,6 +574,15 @@ if (BUILD_LAGOM)
         foreach(source ${LIBTLS_TESTS})
             lagom_test(${source} LIBS LagomTLS
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibTLS)
+        endforeach()
+
+        # TimeZone
+        file(GLOB LIBTIMEZONE_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibTimeZone/*.cpp")
+        foreach(source ${LIBTIMEZONE_TEST_SOURCES})
+            lagom_test(${source} LIBS LagomTimeZone)
+
+            get_filename_component(target "${source}" NAME_WLE)
+            target_compile_definitions("${target}_lagom" PRIVATE ENABLE_TIME_ZONE_DATA=$<BOOL:${ENABLE_TIME_ZONE_DATABASE_DOWNLOAD}>)
         endforeach()
 
         # Unicode

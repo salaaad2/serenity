@@ -6,6 +6,10 @@ jobs:
     timeoutInMinutes: 0 # Setting to 0 means the maximum allowed timeout is used.
 
     variables:
+    - name: LLVM_CCACHE_DIR
+      value: $(Build.SourcesDirectory)/Toolchain/.ccache
+    - name: LLVM_CCACHE_MAXSIZE
+      value: 20GB
     - name: SERENITY_CCACHE_DIR
       value: $(Build.SourcesDirectory)/.ccache
 
@@ -22,9 +26,11 @@ jobs:
         arch: '${{ parameters.arch }}'
         toolchain: 'clang'
         build_directory: 'Build/${{ parameters.arch }}clang'
+        toolchain_ccache_path: '$(LLVM_CCACHE_DIR)'
+        toolchain_ccache_size: '$(LLVM_CCACHE_MAXSIZE)'
         serenity_ccache_path: '$(SERENITY_CCACHE_DIR)'
 
-    - script: ./Toolchain/BuildClang.sh
+    - script: ./Toolchain/BuildClang.sh --ci
       displayName: Extract Toolchain
       env:
         TRY_USE_LOCAL_TOOLCHAIN: 'y'
@@ -40,8 +46,8 @@ jobs:
           -DENABLE_UNDEFINED_SANITIZER=ON \
           -DENABLE_PCI_IDS_DOWNLOAD=OFF \
           -DENABLE_USB_IDS_DOWNLOAD=OFF \
-          -DCMAKE_C_COMPILER=gcc-10 \
-          -DCMAKE_CXX_COMPILER=g++-10
+          -DCMAKE_C_COMPILER=gcc-11 \
+          -DCMAKE_CXX_COMPILER=g++-11
       displayName: 'Create Build Environment'
       workingDirectory: $(Build.SourcesDirectory)
       env:

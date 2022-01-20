@@ -11,13 +11,13 @@
 #include <Kernel/KString.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Multiboot.h>
-#include <Kernel/Net/E1000ENetworkAdapter.h>
-#include <Kernel/Net/E1000NetworkAdapter.h>
+#include <Kernel/Net/Intel/E1000ENetworkAdapter.h>
+#include <Kernel/Net/Intel/E1000NetworkAdapter.h>
 #include <Kernel/Net/LoopbackAdapter.h>
-#include <Kernel/Net/NE2000NetworkAdapter.h>
+#include <Kernel/Net/NE2000/NetworkAdapter.h>
 #include <Kernel/Net/NetworkingManagement.h>
-#include <Kernel/Net/RTL8139NetworkAdapter.h>
-#include <Kernel/Net/RTL8168NetworkAdapter.h>
+#include <Kernel/Net/Realtek/RTL8139NetworkAdapter.h>
+#include <Kernel/Net/Realtek/RTL8168NetworkAdapter.h>
 #include <Kernel/Sections.h>
 
 namespace Kernel {
@@ -78,10 +78,9 @@ ErrorOr<NonnullOwnPtr<KString>> NetworkingManagement::generate_interface_name_fr
 {
     VERIFY(device_identifier.class_code().value() == 0x2);
     // Note: This stands for e - "Ethernet", p - "Port" as for PCI bus, "s" for slot as for PCI slot
-    auto name = String::formatted("ep{}s{}", device_identifier.address().bus(), device_identifier.address().device());
-    VERIFY(!NetworkingManagement::the().lookup_by_name(name));
-    // TODO: We need some way to to format data into a `KString`.
-    return KString::try_create(name.view());
+    auto name = TRY(KString::formatted("ep{}s{}", device_identifier.address().bus(), device_identifier.address().device()));
+    VERIFY(!NetworkingManagement::the().lookup_by_name(name->view()));
+    return name;
 }
 
 UNMAP_AFTER_INIT RefPtr<NetworkAdapter> NetworkingManagement::determine_network_device(PCI::DeviceIdentifier const& device_identifier) const

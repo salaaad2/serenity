@@ -36,11 +36,11 @@ them.
 
 ### `sys` directory
 
-This subdirectoy includes global settings of the kernel.
+This subdirectory includes global settings of the kernel.
 
 * **`caps_lock_to_ctrl`** - this node controls remapping of of caps lock to the Ctrl key.
 * **`kmalloc_stacks`** - this node controls whether to send information about kmalloc to debug log.
-* **`ubsan_is_deadly`** - this node controls the deadliness of the kernel undefinied behavior
+* **`ubsan_is_deadly`** - this node controls the deadliness of the kernel undefined behavior
 sanitizer errors.
 
 ### Per process entries
@@ -67,7 +67,7 @@ reset the the offset to 0.
 
 ## See also
 
-* [`mount`(2))](../man2/mount.md).
-* [`boot_parameters`(7))](boot_parameters.md).
-* [`pledge`(2))](../man2/pledge.md).
-* [`unveil`(2))](../man2/unveil.md).
+* [`mount`(2))](help://man/2/mount).
+* [`boot_parameters`(7))](help://man/7/boot_parameters).
+* [`pledge`(2))](help://man/2/pledge).
+* [`unveil`(2))](help://man/2/unveil).

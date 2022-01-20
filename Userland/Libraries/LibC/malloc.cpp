@@ -183,7 +183,11 @@ static void* os_alloc(size_t size, const char* name)
     flags |= MAP_RANDOMIZED;
 #endif
     auto* ptr = serenity_mmap(nullptr, size, PROT_READ | PROT_WRITE, flags, 0, 0, ChunkedBlock::block_size, name);
-    VERIFY(ptr != MAP_FAILED);
+    VERIFY(ptr != nullptr);
+    if (ptr == MAP_FAILED) {
+        errno = ENOMEM;
+        return nullptr;
+    }
     return ptr;
 }
 
@@ -198,8 +202,18 @@ enum class CallerWillInitializeMemory {
     Yes,
 };
 
+#ifndef NO_TLS
+// HACK: This is a __thread - marked thread-local variable. If we initialize it globally here, VERY weird errors happen.
+// The initialization happens in __malloc_init() and pthread_create_helper().
+__thread bool s_allocation_enabled;
+#endif
+
 static void* malloc_impl(size_t size, CallerWillInitializeMemory caller_will_initialize_memory)
 {
+#ifndef NO_TLS
+    VERIFY(s_allocation_enabled);
+#endif
+
     if (s_log_malloc)
         dbgln("LibC: malloc({})", size);
 
@@ -218,6 +232,11 @@ static void* malloc_impl(size_t size, CallerWillInitializeMemory caller_will_ini
 
     if (!allocator) {
         size_t real_size = round_up_to_power_of_two(sizeof(BigAllocationBlock) + size, ChunkedBlock::block_size);
+        if (real_size < size) {
+            dbgln_if(MALLOC_DEBUG, "LibC: Detected overflow trying to do big allocation of size {} for {}", real_size, size);
+            errno = ENOMEM;
+            return nullptr;
+        }
 #ifdef RECYCLE_BIG_ALLOCATIONS
         if (auto* allocator = big_allocator_for_size(real_size)) {
             if (!allocator->blocks.is_empty()) {
@@ -243,8 +262,12 @@ static void* malloc_impl(size_t size, CallerWillInitializeMemory caller_will_ini
             }
         }
 #endif
-        g_malloc_stats.number_of_big_allocs++;
         auto* block = (BigAllocationBlock*)os_alloc(real_size, "malloc: BigAllocationBlock");
+        if (block == nullptr) {
+            dbgln_if(MALLOC_DEBUG, "LibC: Failed to do big allocation of size {} for {}", real_size, size);
+            return nullptr;
+        }
+        g_malloc_stats.number_of_big_allocs++;
         new (block) BigAllocationBlock(real_size);
         ue_notify_malloc(&block->m_slot[0], size);
         return &block->m_slot[0];
@@ -299,6 +322,9 @@ static void* malloc_impl(size_t size, CallerWillInitializeMemory caller_will_ini
         char buffer[64];
         snprintf(buffer, sizeof(buffer), "malloc: ChunkedBlock(%zu)", good_size);
         block = (ChunkedBlock*)os_alloc(ChunkedBlock::block_size, buffer);
+        if (block == nullptr) {
+            return nullptr;
+        }
         new (block) ChunkedBlock(good_size);
         allocator->usable_blocks.append(*block);
         ++allocator->block_count;
@@ -330,6 +356,10 @@ static void* malloc_impl(size_t size, CallerWillInitializeMemory caller_will_ini
 
 static void free_impl(void* ptr)
 {
+#ifndef NO_TLS
+    VERIFY(s_allocation_enabled);
+#endif
+
     ScopedValueRollback rollback(errno);
 
     if (!ptr)
@@ -417,6 +447,7 @@ static void free_impl(void* ptr)
     }
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/malloc.html
 void* malloc(size_t size)
 {
     MemoryAuditingSuppressor suppressor;
@@ -457,6 +488,7 @@ void* _aligned_malloc(size_t size, size_t alignment)
     return aligned_ptr;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/free.html
 void free(void* ptr)
 {
     MemoryAuditingSuppressor suppressor;
@@ -472,6 +504,7 @@ void _aligned_free(void* ptr)
         free(((void**)ptr)[-1]);
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/calloc.html
 void* calloc(size_t count, size_t size)
 {
     MemoryAuditingSuppressor suppressor;
@@ -486,7 +519,7 @@ void* calloc(size_t count, size_t size)
     return ptr;
 }
 
-size_t malloc_size(void* ptr)
+size_t malloc_size(void const* ptr)
 {
     MemoryAuditingSuppressor suppressor;
     if (!ptr)
@@ -534,6 +567,12 @@ void* realloc(void* ptr, size_t size)
 
 void __malloc_init()
 {
+#ifndef NO_TLS
+    // HACK: This is a __thread - marked thread-local variable. If we initialize it globally, VERY weird errors happen.
+    // Therefore, we need to do the initialization here and in pthread_create_helper().
+    s_allocation_enabled = true;
+#endif
+
     s_in_userspace_emulator = (int)syscall(SC_emuctl, 0) != -ENOSYS;
     if (s_in_userspace_emulator) {
         // Don't bother scrubbing memory if we're running in UE since it

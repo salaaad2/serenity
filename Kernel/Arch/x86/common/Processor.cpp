@@ -7,7 +7,7 @@
 #include <AK/BuiltinWrappers.h>
 #include <AK/Format.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
+#include <AK/StringBuilder.h>
 #include <AK/Types.h>
 
 #include <Kernel/Interrupts/APIC.h>
@@ -45,6 +45,7 @@ Atomic<u32> Processor::s_idle_cpu_mask { 0 };
 extern "C" void context_first_init(Thread* from_thread, Thread* to_thread, TrapFrame* trap) __attribute__((used));
 extern "C" void enter_thread_context(Thread* from_thread, Thread* to_thread) __attribute__((used));
 extern "C" FlatPtr do_init_context(Thread* thread, u32 flags) __attribute__((used));
+extern "C" void syscall_entry();
 
 bool Processor::is_smp_enabled()
 {
@@ -220,71 +221,97 @@ UNMAP_AFTER_INIT void Processor::cpu_setup()
             write_xcr0(read_xcr0() | 0x7);
         }
     }
+
+#if ARCH(X86_64)
+    // x86_64 processors must support the syscall feature.
+    VERIFY(has_feature(CPUFeature::SYSCALL));
+    MSR efer_msr(MSR_EFER);
+    efer_msr.set(efer_msr.get() | 1u);
+
+    // Write code and stack selectors to the STAR MSR. The first value stored in bits 63:48 controls the sysret CS (value + 0x10) and SS (value + 0x8),
+    // and the value stored in bits 47:32 controls the syscall CS (value) and SS (value + 0x8).
+    u64 star = 0;
+    star |= 0x13ul << 48u;
+    star |= 0x08ul << 32u;
+    MSR star_msr(MSR_STAR);
+    star_msr.set(star);
+
+    // Write the syscall entry point to the LSTAR MSR.
+    MSR lstar_msr(MSR_LSTAR);
+    lstar_msr.set(reinterpret_cast<u64>(&syscall_entry));
+
+    // Write the SFMASK MSR. This MSR controls which bits of rflags are masked when a syscall instruction is executed -
+    // if a bit is set in sfmask, the corresponding bit in rflags is cleared. The value set here clears most of rflags,
+    // but keeps the reserved and virtualization bits intact. The userspace rflags value is saved in r11 by syscall.
+    constexpr u64 rflags_mask = 0x257fd5u;
+    MSR sfmask_msr(MSR_SFMASK);
+    sfmask_msr.set(rflags_mask);
+#endif
 }
 
-String Processor::features_string() const
+NonnullOwnPtr<KString> Processor::features_string() const
 {
     StringBuilder builder;
     auto feature_to_str =
-        [](CPUFeature f) -> const char* {
+        [](CPUFeature f) -> StringView {
         switch (f) {
         case CPUFeature::NX:
-            return "nx";
+            return "nx"sv;
         case CPUFeature::PAE:
-            return "pae";
+            return "pae"sv;
         case CPUFeature::PGE:
-            return "pge";
+            return "pge"sv;
         case CPUFeature::RDRAND:
-            return "rdrand";
+            return "rdrand"sv;
         case CPUFeature::RDSEED:
-            return "rdseed";
+            return "rdseed"sv;
         case CPUFeature::SMAP:
-            return "smap";
+            return "smap"sv;
         case CPUFeature::SMEP:
-            return "smep";
+            return "smep"sv;
         case CPUFeature::SSE:
-            return "sse";
+            return "sse"sv;
         case CPUFeature::TSC:
-            return "tsc";
+            return "tsc"sv;
         case CPUFeature::RDTSCP:
-            return "rdtscp";
+            return "rdtscp"sv;
         case CPUFeature::CONSTANT_TSC:
-            return "constant_tsc";
+            return "constant_tsc"sv;
         case CPUFeature::NONSTOP_TSC:
-            return "nonstop_tsc";
+            return "nonstop_tsc"sv;
         case CPUFeature::UMIP:
-            return "umip";
+            return "umip"sv;
         case CPUFeature::SEP:
-            return "sep";
+            return "sep"sv;
         case CPUFeature::SYSCALL:
-            return "syscall";
+            return "syscall"sv;
         case CPUFeature::MMX:
-            return "mmx";
+            return "mmx"sv;
         case CPUFeature::FXSR:
-            return "fxsr";
+            return "fxsr"sv;
         case CPUFeature::SSE2:
-            return "sse2";
+            return "sse2"sv;
         case CPUFeature::SSE3:
-            return "sse3";
+            return "sse3"sv;
         case CPUFeature::SSSE3:
-            return "ssse3";
+            return "ssse3"sv;
         case CPUFeature::SSE4_1:
-            return "sse4.1";
+            return "sse4.1"sv;
         case CPUFeature::SSE4_2:
-            return "sse4.2";
+            return "sse4.2"sv;
         case CPUFeature::XSAVE:
-            return "xsave";
+            return "xsave"sv;
         case CPUFeature::AVX:
-            return "avx";
+            return "avx"sv;
         case CPUFeature::LM:
-            return "lm";
+            return "lm"sv;
         case CPUFeature::HYPERVISOR:
-            return "hypervisor";
+            return "hypervisor"sv;
             // no default statement here intentionally so that we get
             // a warning if a new feature is forgotten to be added here
         }
         // Shouldn't ever happen
-        return "???";
+        return "???"sv;
     };
     bool first = true;
     for (u32 flag = 1; flag != 0; flag <<= 1) {
@@ -292,12 +319,12 @@ String Processor::features_string() const
             if (first)
                 first = false;
             else
-                builder.append(' ');
+                MUST(builder.try_append(' '));
             auto str = feature_to_str(static_cast<CPUFeature>(flag));
-            builder.append(str, strlen(str));
+            MUST(builder.try_append(str));
         }
     }
-    return builder.build();
+    return KString::must_create(builder.string_view());
 }
 
 UNMAP_AFTER_INIT void Processor::early_initialize(u32 cpu)
@@ -434,10 +461,9 @@ void Processor::write_raw_gdt_entry(u16 selector, u32 low, u32 high)
     m_gdt[i].high = high;
 
     // clear selectors we may have skipped
-    while (i < prev_gdt_length) {
-        m_gdt[i].low = 0;
-        m_gdt[i].high = 0;
-        i++;
+    for (auto j = prev_gdt_length; j < i; ++j) {
+        m_gdt[j].low = 0;
+        m_gdt[j].high = 0;
     }
 }
 
@@ -465,15 +491,15 @@ const DescriptorTablePointer& Processor::get_gdtr()
     return m_gdtr;
 }
 
-Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames)
+ErrorOr<Vector<FlatPtr, 32>> Processor::capture_stack_trace(Thread& thread, size_t max_frames)
 {
     FlatPtr frame_ptr = 0, ip = 0;
     Vector<FlatPtr, 32> stack_trace;
 
-    auto walk_stack = [&](FlatPtr stack_ptr) {
+    auto walk_stack = [&](FlatPtr stack_ptr) -> ErrorOr<void> {
         static constexpr size_t max_stack_frames = 4096;
         bool is_walking_userspace_stack = false;
-        stack_trace.append(ip);
+        TRY(stack_trace.try_append(ip));
         size_t count = 1;
         while (stack_ptr && stack_trace.size() < max_stack_frames) {
             FlatPtr retaddr;
@@ -494,24 +520,25 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
             if (Memory::is_user_range(VirtualAddress(stack_ptr), sizeof(FlatPtr) * 2)) {
                 if (copy_from_user(&retaddr, &((FlatPtr*)stack_ptr)[1]).is_error() || !retaddr)
                     break;
-                stack_trace.append(retaddr);
+                TRY(stack_trace.try_append(retaddr));
                 if (copy_from_user(&stack_ptr, (FlatPtr*)stack_ptr).is_error())
                     break;
             } else {
                 void* fault_at;
                 if (!safe_memcpy(&retaddr, &((FlatPtr*)stack_ptr)[1], sizeof(FlatPtr), fault_at) || !retaddr)
                     break;
-                stack_trace.append(retaddr);
+                TRY(stack_trace.try_append(retaddr));
                 if (!safe_memcpy(&stack_ptr, (FlatPtr*)stack_ptr, sizeof(FlatPtr), fault_at))
                     break;
             }
         }
+        return {};
     };
     auto capture_current_thread = [&]() {
         frame_ptr = (FlatPtr)__builtin_frame_address(0);
         ip = (FlatPtr)__builtin_return_address(0);
 
-        walk_stack(frame_ptr);
+        return walk_stack(frame_ptr);
     };
 
     // Since the thread may be running on another processor, there
@@ -525,7 +552,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
         // need to be preempted. Since this is our own thread it won't
         // cause any problems as the stack won't change below this frame.
         lock.unlock();
-        capture_current_thread();
+        TRY(capture_current_thread());
     } else if (thread.is_active()) {
         VERIFY(thread.cpu() != Processor::current_id());
         // If this is the case, the thread is currently running
@@ -534,6 +561,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
         // an IPI to that processor, have it walk the stack and wait
         // until it returns the data back to us
         auto& proc = Processor::current();
+        ErrorOr<void> result;
         smp_unicast(
             thread.cpu(),
             [&]() {
@@ -548,9 +576,10 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
                 // TODO: What to do about page faults here? We might deadlock
                 //       because the other processor is still holding the
                 //       scheduler lock...
-                capture_current_thread();
+                result = capture_current_thread();
             },
             false);
+        TRY(result);
     } else {
         switch (thread.state()) {
         case Thread::Running:
@@ -582,7 +611,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
             //       need to prevent the target thread from being run while
             //       we walk the stack
             lock.unlock();
-            walk_stack(frame_ptr);
+            TRY(walk_stack(frame_ptr));
             break;
         }
         default:
@@ -1156,8 +1185,9 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     write_raw_gdt_entry(GDT_SELECTOR_DATA3, 0x0000ffff, 0x00cff200); // data3
 #else
     write_raw_gdt_entry(GDT_SELECTOR_CODE0, 0x0000ffff, 0x00af9a00); // code0
-    write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00affa00); // code3
+    write_raw_gdt_entry(GDT_SELECTOR_DATA0, 0x0000ffff, 0x00af9200); // data0
     write_raw_gdt_entry(GDT_SELECTOR_DATA3, 0x0000ffff, 0x008ff200); // data3
+    write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00affa00); // code3
 #endif
 
 #if ARCH(I386)
@@ -1194,7 +1224,7 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     tss_descriptor.operation_size64 = 0;
     tss_descriptor.operation_size32 = 1;
     tss_descriptor.descriptor_type = 0;
-    tss_descriptor.type = 9;
+    tss_descriptor.type = Descriptor::SystemType::AvailableTSS;
     write_gdt_entry(GDT_SELECTOR_TSS, tss_descriptor); // tss
 
 #if ARCH(X86_64)

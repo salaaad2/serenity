@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2021, Mustafa Quraish <mustafa@serenityos.org>
+ * Copyright (c) 2021-2022, Mustafa Quraish <mustafa@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,6 +12,7 @@
 #include "Image.h"
 #include "Selection.h"
 #include <AK/Variant.h>
+#include <LibGUI/AbstractZoomPanWidget.h>
 #include <LibGUI/Frame.h>
 #include <LibGUI/UndoStack.h>
 #include <LibGfx/Point.h>
@@ -22,7 +23,7 @@ class Layer;
 class Tool;
 
 class ImageEditor final
-    : public GUI::Frame
+    : public GUI::AbstractZoomPanWidget
     , public ImageClient {
     C_OBJECT(ImageEditor);
 
@@ -43,6 +44,14 @@ public:
     bool undo();
     bool redo();
 
+    auto& undo_stack() { return m_undo_stack; }
+
+    String const& path() const { return m_path; }
+    void set_path(String);
+
+    String const& title() const { return m_title; }
+    void set_title(String);
+
     void add_guide(NonnullRefPtr<Guide> guide) { m_guides.append(guide); }
     void remove_guide(Guide const& guide)
     {
@@ -60,16 +69,7 @@ public:
         Image
     };
 
-    float scale() const { return m_scale; }
-    void scale_centered_on_position(Gfx::IntPoint const&, float);
     void fit_image_to_view(FitType type = FitType::Image);
-    void reset_scale_and_position();
-    void scale_by(float);
-    void set_absolute_scale(float, bool do_relayout = true);
-    Function<void(float)> on_scale_changed;
-
-    void set_pan_origin(Gfx::FloatPoint const&);
-    Gfx::FloatPoint pan_origin() const { return m_pan_origin; }
 
     Color primary_color() const { return m_primary_color; }
     void set_primary_color(Color);
@@ -88,20 +88,16 @@ public:
 
     Function<void(Layer*)> on_active_layer_change;
 
-    Function<void(String const&)> on_image_title_change;
+    Function<void(String const&)> on_title_change;
 
     Function<void(Gfx::IntPoint const&)> on_image_mouse_position_change;
 
     Function<void(void)> on_leave;
 
-    Gfx::FloatRect layer_rect_to_editor_rect(Layer const&, Gfx::IntRect const&) const;
-    Gfx::FloatRect image_rect_to_editor_rect(Gfx::IntRect const&) const;
-    Gfx::FloatRect editor_rect_to_image_rect(Gfx::IntRect const&) const;
-    Gfx::FloatPoint layer_position_to_editor_position(Layer const&, Gfx::IntPoint const&) const;
-    Gfx::FloatPoint image_position_to_editor_position(Gfx::IntPoint const&) const;
-    Gfx::FloatPoint editor_position_to_image_position(Gfx::IntPoint const&) const;
+    bool request_close();
 
-    Result<void, String> save_project_to_fd_and_close(int fd) const;
+    void save_project_as();
+    void save_project();
 
     NonnullRefPtrVector<Guide> const& guides() const { return m_guides; }
     bool guide_visibility() { return m_show_guides; }
@@ -126,24 +122,20 @@ private:
     virtual void mousedown_event(GUI::MouseEvent&) override;
     virtual void mousemove_event(GUI::MouseEvent&) override;
     virtual void mouseup_event(GUI::MouseEvent&) override;
-    virtual void mousewheel_event(GUI::MouseEvent&) override;
     virtual void keydown_event(GUI::KeyEvent&) override;
     virtual void keyup_event(GUI::KeyEvent&) override;
     virtual void context_menu_event(GUI::ContextMenuEvent&) override;
-    virtual void resize_event(GUI::ResizeEvent&) override;
     virtual void enter_event(Core::Event&) override;
     virtual void leave_event(Core::Event&) override;
 
     virtual void image_did_change(Gfx::IntRect const&) override;
     virtual void image_did_change_rect(Gfx::IntRect const&) override;
     virtual void image_select_layer(Layer*) override;
-    virtual void image_did_change_title(String const&) override;
 
     GUI::MouseEvent event_adjusted_for_layer(GUI::MouseEvent const&, Layer const&) const;
     GUI::MouseEvent event_with_pan_and_scale_applied(GUI::MouseEvent const&) const;
 
-    void clamped_scale_by(float, bool do_relayout);
-    void relayout();
+    Result<void, String> save_project_to_fd_and_close(int fd) const;
 
     int calculate_ruler_step_size() const;
     Gfx::IntRect mouse_indicator_rect_x() const;
@@ -151,7 +143,10 @@ private:
 
     NonnullRefPtr<Image> m_image;
     RefPtr<Layer> m_active_layer;
-    OwnPtr<GUI::UndoStack> m_undo_stack;
+    GUI::UndoStack m_undo_stack;
+
+    String m_path;
+    String m_title;
 
     NonnullRefPtrVector<Guide> m_guides;
     bool m_show_guides { true };
@@ -165,11 +160,6 @@ private:
     Color m_primary_color { Color::Black };
     Color m_secondary_color { Color::White };
 
-    Gfx::IntRect m_editor_image_rect;
-    float m_scale { 1 };
-    Gfx::FloatPoint m_pan_origin;
-    Gfx::FloatPoint m_saved_pan_origin;
-    Gfx::IntPoint m_click_position;
     Gfx::IntPoint m_mouse_position;
 
     int m_ruler_thickness { 20 };

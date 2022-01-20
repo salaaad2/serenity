@@ -72,6 +72,7 @@ private:
     void ensure_top_card_is_visible(NonnullRefPtr<CardStack> stack);
     void detect_full_stacks();
     void detect_victory();
+    void move_focused_cards(CardStack& stack);
 
     ALWAYS_INLINE CardStack& stack(StackLocation location)
     {
@@ -102,6 +103,7 @@ private:
     bool m_draw_animation { false };
     uint8_t m_draw_animation_delay { 0 };
     uint8_t m_draw_animation_pile { 0 };
+    Gfx::IntRect m_original_stock_rect;
 
     uint32_t m_score { 500 };
 };

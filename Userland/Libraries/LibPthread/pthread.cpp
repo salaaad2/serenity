@@ -14,6 +14,7 @@
 #include <bits/pthread_integration.h>
 #include <errno.h>
 #include <limits.h>
+#include <mallocdefs.h>
 #include <pthread.h>
 #include <serenity.h>
 #include <signal.h>
@@ -43,6 +44,9 @@ extern "C" {
 
 static void* pthread_create_helper(void* (*routine)(void*), void* argument, void* stack_location, size_t stack_size)
 {
+    // HACK: This is a __thread - marked thread-local variable. If we initialize it globally, VERY weird errors happen.
+    // Therefore, we need to do the initialization here and in __malloc_init().
+    s_allocation_enabled = true;
     s_stack_location = stack_location;
     s_stack_size = stack_size;
     void* ret_val = routine(argument);
@@ -171,12 +175,14 @@ int pthread_detach(pthread_t thread)
     __RETURN_PTHREAD_ERROR(rc);
 }
 
+// https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_sigmask.html
 int pthread_sigmask(int how, const sigset_t* set, sigset_t* old_set)
 {
     if (sigprocmask(how, set, old_set))
         return errno;
     return 0;
 }
+
 // https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_mutex_init.html
 int pthread_mutex_init(pthread_mutex_t* mutex, const pthread_mutexattr_t* attributes)
 {
@@ -513,7 +519,6 @@ int pthread_setspecific(pthread_key_t key, const void* value)
     return __pthread_setspecific(key, value);
 }
 
-// https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_setname_np.html
 int pthread_setname_np(pthread_t thread, const char* name)
 {
     if (!name)
@@ -522,7 +527,6 @@ int pthread_setname_np(pthread_t thread, const char* name)
     __RETURN_PTHREAD_ERROR(rc);
 }
 
-// https://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_getname_np.html
 int pthread_getname_np(pthread_t thread, char* buffer, size_t buffer_size)
 {
     int rc = syscall(SC_get_thread_name, thread, buffer, buffer_size);

@@ -33,3 +33,13 @@ void glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass
 {
     g_gl_context->gl_stencil_op_separate(face, sfail, dpfail, dppass);
 }
+
+void glStencilMask(GLuint mask)
+{
+    g_gl_context->gl_stencil_mask_separate(GL_FRONT_AND_BACK, mask);
+}
+
+void glStencilMaskSeparate(GLenum face, GLuint mask)
+{
+    g_gl_context->gl_stencil_mask_separate(face, mask);
+}

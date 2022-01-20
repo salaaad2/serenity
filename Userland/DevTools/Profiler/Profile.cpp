@@ -8,6 +8,7 @@
 #include "DisassemblyModel.h"
 #include "ProfileModel.h"
 #include "SamplesModel.h"
+#include "SourceModel.h"
 #include <AK/HashTable.h>
 #include <AK/LexicalPath.h>
 #include <AK/NonnullOwnPtrVector.h>
@@ -144,7 +145,7 @@ void Profile::rebuild_tree()
             ProfileNode* node = nullptr;
             auto& process_node = find_or_create_process_node(event.pid, event.serial);
             process_node.increment_event_count();
-            for_each_frame([&](const Frame& frame, bool is_innermost_frame) {
+            for_each_frame([&](Frame const& frame, bool is_innermost_frame) {
                 auto const& object_name = frame.object_name;
                 auto const& symbol = frame.symbol;
                 auto const& address = frame.address;
@@ -537,7 +538,7 @@ void Profile::set_show_percentages(bool show_percentages)
     m_show_percentages = show_percentages;
 }
 
-void Profile::set_disassembly_index(const GUI::ModelIndex& index)
+void Profile::set_disassembly_index(GUI::ModelIndex const& index)
 {
     if (m_disassembly_index == index)
         return;
@@ -552,6 +553,23 @@ void Profile::set_disassembly_index(const GUI::ModelIndex& index)
 GUI::Model* Profile::disassembly_model()
 {
     return m_disassembly_model;
+}
+
+void Profile::set_source_index(GUI::ModelIndex const& index)
+{
+    if (m_source_index == index)
+        return;
+    m_source_index = index;
+    auto* node = static_cast<ProfileNode*>(index.internal_data());
+    if (!node)
+        m_source_model = nullptr;
+    else
+        m_source_model = SourceModel::create(*this, *node);
+}
+
+GUI::Model* Profile::source_model()
+{
+    return m_source_model;
 }
 
 ProfileNode::ProfileNode(Process const& process)

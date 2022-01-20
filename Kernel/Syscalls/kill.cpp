@@ -65,7 +65,7 @@ ErrorOr<void> Process::do_killall(int signal)
     ErrorOr<void> error;
 
     // Send the signal to all processes we have access to for.
-    processes().for_each([&](auto& process) {
+    Process::all_instances().for_each([&](auto& process) {
         ErrorOr<void> res;
         if (process.pid() == pid())
             res = do_killself(signal);
@@ -99,9 +99,9 @@ ErrorOr<FlatPtr> Process::sys$kill(pid_t pid_or_pgid, int signal)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
     if (pid_or_pgid == pid().value())
-        REQUIRE_PROMISE(stdio);
+        TRY(require_promise(Pledge::stdio));
     else
-        REQUIRE_PROMISE(proc);
+        TRY(require_promise(Pledge::proc));
 
     if (signal < 0 || signal >= 32)
         return EINVAL;
@@ -130,7 +130,7 @@ ErrorOr<FlatPtr> Process::sys$kill(pid_t pid_or_pgid, int signal)
 ErrorOr<FlatPtr> Process::sys$killpg(pid_t pgrp, int signum)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(proc);
+    TRY(require_promise(Pledge::proc));
     if (signum < 1 || signum >= 32)
         return EINVAL;
     if (pgrp < 0)

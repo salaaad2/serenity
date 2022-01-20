@@ -14,6 +14,8 @@
 #ifdef KERNEL
 #    include <Kernel/Arch/Processor.h>
 #    include <Kernel/Arch/ScopedCritical.h>
+#else
+#    include <sched.h>
 #endif
 
 namespace AK {
@@ -73,13 +75,13 @@ public:
     {
         auto current_consumers = m_consumers.fetch_or(1u, AK::MemoryOrder::memory_order_relaxed);
         VERIFY(!(current_consumers & 1u));
-        // We flagged revokation, now wait until everyone trying to obtain
+        // We flagged revocation, now wait until everyone trying to obtain
         // a strong reference is done
         while (current_consumers > 0) {
 #ifdef KERNEL
             Kernel::Processor::wait_check();
 #else
-            // TODO: yield?
+            sched_yield();
 #endif
             current_consumers = m_consumers.load(AK::MemoryOrder::memory_order_acquire) & ~1u;
         }
@@ -94,7 +96,7 @@ private:
     {
     }
     mutable Atomic<void*> m_ptr;
-    mutable Atomic<unsigned> m_consumers; // LSB indicates revokation in progress
+    mutable Atomic<unsigned> m_consumers; // LSB indicates revocation in progress
 };
 
 template<typename T>

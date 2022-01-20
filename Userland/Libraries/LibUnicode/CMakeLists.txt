@@ -4,7 +4,7 @@ if (DEFINED UNICODE_DATA_SOURCES)
     set(SOURCES ${UNICODE_DATA_SOURCES})
     serenity_lib(LibUnicodeData unicodedata)
     target_compile_options(LibUnicodeData PRIVATE -g0 -Os)
-    target_link_libraries(LibUnicodeData LibCore)
+    target_link_libraries(LibUnicodeData LibCore LibTimeZone)
 endif()
 
 set(SOURCES
@@ -13,11 +13,10 @@ set(SOURCES
     DateTimeFormat.cpp
     Locale.cpp
     NumberFormat.cpp
-    UnicodeSymbols.cpp
 )
 
 serenity_lib(LibUnicode unicode)
-target_link_libraries(LibUnicode LibCore)
+target_link_libraries(LibUnicode LibCore LibTimeZone)
 target_compile_definitions(LibUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
 
 if (DEFINED UNICODE_DATA_SOURCES)

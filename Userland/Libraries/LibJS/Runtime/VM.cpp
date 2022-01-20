@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -97,9 +97,6 @@ void VM::gather_roots(HashTable<Cell*>& roots)
 
     roots.set(m_exception);
 
-    if (m_last_value.is_cell())
-        roots.set(&m_last_value.as_cell());
-
     auto gather_roots_from_execution_context_stack = [&roots](Vector<ExecutionContext*> const& stack) {
         for (auto& execution_context : stack) {
             if (execution_context->this_value.is_cell())
@@ -160,10 +157,7 @@ ThrowCompletionOr<Value> VM::named_evaluation_if_anonymous_function(GlobalObject
         }
     }
 
-    auto value = expression.execute(interpreter(), global_object);
-    if (auto* thrown_exception = exception())
-        return JS::throw_completion(thrown_exception->value());
-    return value;
+    return TRY(expression.execute(interpreter(), global_object)).release_value();
 }
 
 // 13.15.5.2 Runtime Semantics: DestructuringAssignmentEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-destructuringassignmentevaluation
@@ -178,35 +172,46 @@ ThrowCompletionOr<void> VM::destructuring_assignment_evaluation(NonnullRefPtr<Bi
 // 8.5.2 Runtime Semantics: BindingInitialization, https://tc39.es/ecma262/#sec-runtime-semantics-bindinginitialization
 ThrowCompletionOr<void> VM::binding_initialization(FlyString const& target, Value value, Environment* environment, GlobalObject& global_object)
 {
-    if (environment) {
-        MUST(environment->initialize_binding(global_object, target, value));
-        return {};
-    }
-    auto reference = resolve_binding(target);
-    return reference.put_value(global_object, value);
+    // 1. Let name be StringValue of Identifier.
+    // 2. Return ? InitializeBoundName(name, value, environment).
+    return initialize_bound_name(global_object, target, value, environment);
 }
 
 // 8.5.2 Runtime Semantics: BindingInitialization, https://tc39.es/ecma262/#sec-runtime-semantics-bindinginitialization
 ThrowCompletionOr<void> VM::binding_initialization(NonnullRefPtr<BindingPattern> const& target, Value value, Environment* environment, GlobalObject& global_object)
 {
+    // BindingPattern : ObjectBindingPattern
     if (target->kind == BindingPattern::Kind::Object) {
+        // 1. Perform ? RequireObjectCoercible(value).
         TRY(require_object_coercible(global_object, value));
+
+        // 2. Return the result of performing BindingInitialization of ObjectBindingPattern using value and environment as arguments.
+
+        // BindingInitialization of ObjectBindingPattern
+        // 1. Perform ? PropertyBindingInitialization of BindingPropertyList using value and environment as the arguments.
         TRY(property_binding_initialization(*target, value, environment, global_object));
+
+        // 2. Return NormalCompletion(empty).
         return {};
-    } else {
-        auto* iterator = TRY(get_iterator(global_object, value));
-        auto iterator_done = false;
+    }
+    // BindingPattern : ArrayBindingPattern
+    else {
+        // 1. Let iteratorRecord be ? GetIterator(value).
+        auto iterator_record = TRY(get_iterator(global_object, value));
 
-        auto result = iterator_binding_initialization(*target, iterator, iterator_done, environment, global_object);
+        // 2. Let result be IteratorBindingInitialization of ArrayBindingPattern with arguments iteratorRecord and environment.
+        auto result = iterator_binding_initialization(*target, iterator_record, environment, global_object);
 
-        if (!iterator_done) {
+        // 3. If iteratorRecord.[[Done]] is false, return ? IteratorClose(iteratorRecord, result).
+        if (!iterator_record.done) {
             // iterator_close() always returns a Completion, which ThrowCompletionOr will interpret as a throw
             // completion. So only return the result of iterator_close() if it is indeed a throw completion.
             auto completion = result.is_throw_completion() ? result.release_error() : normal_completion({});
-            if (completion = iterator_close(*iterator, move(completion)); completion.is_error())
+            if (completion = iterator_close(global_object, iterator_record, move(completion)); completion.is_error())
                 return completion.release_error();
         }
 
+        // 4. Return result.
         return result;
     }
 }
@@ -225,15 +230,12 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
         if (property.is_rest) {
             Reference assignment_target;
             if (auto identifier_ptr = property.name.get_pointer<NonnullRefPtr<Identifier>>()) {
-                assignment_target = resolve_binding((*identifier_ptr)->string(), environment);
+                assignment_target = TRY(resolve_binding((*identifier_ptr)->string(), environment));
             } else if (auto member_ptr = property.alias.get_pointer<NonnullRefPtr<MemberExpression>>()) {
-                assignment_target = (*member_ptr)->to_reference(interpreter(), global_object);
+                assignment_target = TRY((*member_ptr)->to_reference(interpreter(), global_object));
             } else {
                 VERIFY_NOT_REACHED();
             }
-
-            if (auto* thrown_exception = exception())
-                return JS::throw_completion(thrown_exception->value());
 
             auto* rest_object = Object::create(global_object, global_object.object_prototype());
             VERIFY(rest_object);
@@ -245,34 +247,22 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
                 return assignment_target.initialize_referenced_binding(global_object, rest_object);
         }
 
-        PropertyKey name;
-
-        property.name.visit(
-            [&](Empty) { VERIFY_NOT_REACHED(); },
-            [&](NonnullRefPtr<Identifier> const& identifier) {
-                name = identifier->string();
+        auto name = TRY(property.name.visit(
+            [&](Empty) -> ThrowCompletionOr<PropertyKey> { VERIFY_NOT_REACHED(); },
+            [&](NonnullRefPtr<Identifier> const& identifier) -> ThrowCompletionOr<PropertyKey> {
+                return identifier->string();
             },
-            [&](NonnullRefPtr<Expression> const& expression) {
-                auto result = expression->execute(interpreter(), global_object);
-                if (exception())
-                    return;
-                auto name_or_error = result.to_property_key(global_object);
-                if (name_or_error.is_error())
-                    return;
-                name = name_or_error.release_value();
-            });
-
-        if (auto* thrown_exception = exception())
-            return JS::throw_completion(thrown_exception->value());
+            [&](NonnullRefPtr<Expression> const& expression) -> ThrowCompletionOr<PropertyKey> {
+                auto result = TRY(expression->execute(interpreter(), global_object)).release_value();
+                return result.to_property_key(global_object);
+            }));
 
         seen_names.set(name);
 
         if (property.name.has<NonnullRefPtr<Identifier>>() && property.alias.has<Empty>()) {
             // FIXME: this branch and not taking this have a lot in common we might want to unify it more (like it was before).
             auto& identifier = *property.name.get<NonnullRefPtr<Identifier>>();
-            auto reference = resolve_binding(identifier.string(), environment);
-            if (auto* thrown_exception = exception())
-                return JS::throw_completion(thrown_exception->value());
+            auto reference = TRY(resolve_binding(identifier.string(), environment));
 
             auto value_to_assign = TRY(object->get(name));
             if (property.initializer && value_to_assign.is_undefined()) {
@@ -286,30 +276,22 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
             continue;
         }
 
-        Optional<Reference> reference_to_assign_to;
-
-        property.alias.visit(
-            [&](Empty) {},
-            [&](NonnullRefPtr<Identifier> const& identifier) {
-                reference_to_assign_to = resolve_binding(identifier->string(), environment);
+        auto reference_to_assign_to = TRY(property.alias.visit(
+            [&](Empty) -> ThrowCompletionOr<Optional<Reference>> { return Optional<Reference> {}; },
+            [&](NonnullRefPtr<Identifier> const& identifier) -> ThrowCompletionOr<Optional<Reference>> {
+                return TRY(resolve_binding(identifier->string(), environment));
             },
-            [&](NonnullRefPtr<BindingPattern> const&) {},
-            [&](NonnullRefPtr<MemberExpression> const& member_expression) {
-                reference_to_assign_to = member_expression->to_reference(interpreter(), global_object);
-            });
-
-        if (auto* thrown_exception = exception())
-            return JS::throw_completion(thrown_exception->value());
+            [&](NonnullRefPtr<BindingPattern> const&) -> ThrowCompletionOr<Optional<Reference>> { return Optional<Reference> {}; },
+            [&](NonnullRefPtr<MemberExpression> const& member_expression) -> ThrowCompletionOr<Optional<Reference>> {
+                return TRY(member_expression->to_reference(interpreter(), global_object));
+            }));
 
         auto value_to_assign = TRY(object->get(name));
         if (property.initializer && value_to_assign.is_undefined()) {
             if (auto* identifier_ptr = property.alias.get_pointer<NonnullRefPtr<Identifier>>())
                 value_to_assign = TRY(named_evaluation_if_anonymous_function(global_object, *property.initializer, (*identifier_ptr)->string()));
             else
-                value_to_assign = property.initializer->execute(interpreter(), global_object);
-
-            if (auto* thrown_exception = exception())
-                return JS::throw_completion(thrown_exception->value());
+                value_to_assign = TRY(property.initializer->execute(interpreter(), global_object)).release_value();
         }
 
         if (auto* binding_ptr = property.alias.get_pointer<NonnullRefPtr<BindingPattern>>()) {
@@ -328,72 +310,114 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
 
 // 13.15.5.5 Runtime Semantics: IteratorDestructuringAssignmentEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-iteratordestructuringassignmentevaluation
 // 8.5.3 Runtime Semantics: IteratorBindingInitialization, https://tc39.es/ecma262/#sec-runtime-semantics-iteratorbindinginitialization
-ThrowCompletionOr<void> VM::iterator_binding_initialization(BindingPattern const& binding, Object* iterator, bool& iterator_done, Environment* environment, GlobalObject& global_object)
+ThrowCompletionOr<void> VM::iterator_binding_initialization(BindingPattern const& binding, Iterator& iterator_record, Environment* environment, GlobalObject& global_object)
 {
     // FIXME: this method is nearly identical to destructuring assignment!
     for (size_t i = 0; i < binding.entries.size(); i++) {
         auto& entry = binding.entries[i];
         Value value;
 
-        Optional<Reference> assignment_target;
-        entry.alias.visit(
-            [&](Empty) {},
-            [&](NonnullRefPtr<Identifier> const& identifier) {
-                assignment_target = resolve_binding(identifier->string(), environment);
+        auto assignment_target = TRY(entry.alias.visit(
+            [&](Empty) -> ThrowCompletionOr<Optional<Reference>> { return Optional<Reference> {}; },
+            [&](NonnullRefPtr<Identifier> const& identifier) -> ThrowCompletionOr<Optional<Reference>> {
+                return TRY(resolve_binding(identifier->string(), environment));
             },
-            [&](NonnullRefPtr<BindingPattern> const&) {},
-            [&](NonnullRefPtr<MemberExpression> const& member_expression) {
-                assignment_target = member_expression->to_reference(interpreter(), global_object);
-            });
+            [&](NonnullRefPtr<BindingPattern> const&) -> ThrowCompletionOr<Optional<Reference>> { return Optional<Reference> {}; },
+            [&](NonnullRefPtr<MemberExpression> const& member_expression) -> ThrowCompletionOr<Optional<Reference>> {
+                return TRY(member_expression->to_reference(interpreter(), global_object));
+            }));
 
-        if (auto* thrown_exception = exception())
-            return JS::throw_completion(thrown_exception->value());
-
+        // BindingRestElement : ... BindingIdentifier
+        // BindingRestElement : ... BindingPattern
         if (entry.is_rest) {
             VERIFY(i == binding.entries.size() - 1);
 
+            // 2. Let A be ! ArrayCreate(0).
             auto* array = MUST(Array::create(global_object, 0));
-            while (!iterator_done) {
-                auto next_object_or_error = iterator_next(*iterator);
-                if (next_object_or_error.is_throw_completion()) {
-                    iterator_done = true;
-                    return JS::throw_completion(next_object_or_error.release_error().value());
-                }
-                auto* next_object = next_object_or_error.release_value();
 
-                auto done_property = TRY(next_object->get(names.done));
-                if (done_property.to_boolean()) {
-                    iterator_done = true;
+            // 3. Let n be 0.
+            // 4. Repeat,
+            while (true) {
+                ThrowCompletionOr<Object*> next { nullptr };
+
+                // a. If iteratorRecord.[[Done]] is false, then
+                if (!iterator_record.done) {
+                    // i. Let next be IteratorStep(iteratorRecord).
+                    next = iterator_step(global_object, iterator_record);
+
+                    // ii. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
+                    // iii. ReturnIfAbrupt(next).
+                    if (next.is_error()) {
+                        iterator_record.done = true;
+                        return next.release_error();
+                    }
+
+                    // iv. If next is false, set iteratorRecord.[[Done]] to true.
+                    if (!next.value())
+                        iterator_record.done = true;
+                }
+
+                // b. If iteratorRecord.[[Done]] is true, then
+                if (iterator_record.done) {
+                    // NOTE: Step i. and ii. are handled below.
                     break;
                 }
 
-                auto next_value = TRY(next_object->get(names.value));
-                array->indexed_properties().append(next_value);
+                // c. Let nextValue be IteratorValue(next).
+                auto next_value = iterator_value(global_object, *next.value());
+
+                // d. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
+                // e. ReturnIfAbrupt(nextValue).
+                if (next_value.is_error()) {
+                    iterator_record.done = true;
+                    return next_value.release_error();
+                }
+
+                // f. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(n)), nextValue).
+                array->indexed_properties().append(next_value.value());
+
+                // g. Set n to n + 1.
             }
             value = array;
-
-        } else if (!iterator_done) {
-            auto next_object_or_error = iterator_next(*iterator);
-            if (next_object_or_error.is_throw_completion()) {
-                iterator_done = true;
-                return JS::throw_completion(next_object_or_error.release_error().value());
-            }
-            auto* next_object = next_object_or_error.release_value();
-
-            auto done_property = TRY(next_object->get(names.done));
-            if (done_property.to_boolean()) {
-                iterator_done = true;
-                value = js_undefined();
-            } else {
-                auto value_or_error = next_object->get(names.value);
-                if (value_or_error.is_throw_completion()) {
-                    iterator_done = true;
-                    return JS::throw_completion(value_or_error.release_error().value());
-                }
-                value = value_or_error.release_value();
-            }
-        } else {
+        }
+        // SingleNameBinding : BindingIdentifier Initializer[opt]
+        // BindingElement : BindingPattern Initializer[opt]
+        else {
+            // 1. Let v be undefined.
             value = js_undefined();
+
+            // 2. If iteratorRecord.[[Done]] is false, then
+            if (!iterator_record.done) {
+                // a. Let next be IteratorStep(iteratorRecord).
+                auto next = iterator_step(global_object, iterator_record);
+
+                // b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
+                // c. ReturnIfAbrupt(next).
+                if (next.is_error()) {
+                    iterator_record.done = true;
+                    return next.release_error();
+                }
+
+                // d. If next is false, set iteratorRecord.[[Done]] to true.
+                if (!next.value()) {
+                    iterator_record.done = true;
+                }
+                // e. Else,
+                else {
+                    // i. Set v to IteratorValue(next).
+                    auto value_or_error = iterator_value(global_object, *next.value());
+
+                    // ii. If v is an abrupt completion, set iteratorRecord.[[Done]] to true.
+                    // iii. ReturnIfAbrupt(v).
+                    if (value_or_error.is_throw_completion()) {
+                        iterator_record.done = true;
+                        return value_or_error.release_error();
+                    }
+                    value = value_or_error.release_value();
+                }
+            }
+
+            // NOTE: Step 3. and 4. are handled below.
         }
 
         if (value.is_undefined() && entry.initializer) {
@@ -401,10 +425,7 @@ ThrowCompletionOr<void> VM::iterator_binding_initialization(BindingPattern const
             if (auto* identifier_ptr = entry.alias.get_pointer<NonnullRefPtr<Identifier>>())
                 value = TRY(named_evaluation_if_anonymous_function(global_object, *entry.initializer, (*identifier_ptr)->string()));
             else
-                value = entry.initializer->execute(interpreter(), global_object);
-
-            if (auto* thrown_exception = exception())
-                return JS::throw_completion(thrown_exception->value());
+                value = TRY(entry.initializer->execute(interpreter(), global_object)).release_value();
         }
 
         if (auto* binding_ptr = entry.alias.get_pointer<NonnullRefPtr<BindingPattern>>()) {
@@ -422,7 +443,7 @@ ThrowCompletionOr<void> VM::iterator_binding_initialization(BindingPattern const
 }
 
 // 9.1.2.1 GetIdentifierReference ( env, name, strict ), https://tc39.es/ecma262/#sec-getidentifierreference
-Reference VM::get_identifier_reference(Environment* environment, FlyString name, bool strict, size_t hops)
+ThrowCompletionOr<Reference> VM::get_identifier_reference(Environment* environment, FlyString name, bool strict, size_t hops)
 {
     // 1. If env is the value null, then
     if (!environment) {
@@ -430,21 +451,30 @@ Reference VM::get_identifier_reference(Environment* environment, FlyString name,
         return Reference { Reference::BaseType::Unresolvable, move(name), strict };
     }
 
+    // 2. Let exists be ? env.HasBinding(name).
     Optional<size_t> index;
-    auto exists = TRY_OR_DISCARD(environment->has_binding(name, &index));
+    auto exists = TRY(environment->has_binding(name, &index));
 
+    // Note: This is an optimization for looking up the same reference.
     Optional<EnvironmentCoordinate> environment_coordinate;
     if (index.has_value())
         environment_coordinate = EnvironmentCoordinate { .hops = hops, .index = index.value() };
 
-    if (exists)
+    // 3. If exists is true, then
+    if (exists) {
+        // a. Return the Reference Record { [[Base]]: env, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
         return Reference { *environment, move(name), strict, environment_coordinate };
-    else
+    }
+    // 4. Else,
+    else {
+        // a. Let outer be env.[[OuterEnv]].
+        // b. Return ? GetIdentifierReference(outer, name, strict).
         return get_identifier_reference(environment->outer_environment(), move(name), strict, hops + 1);
+    }
 }
 
 // 9.4.2 ResolveBinding ( name [ , env ] ), https://tc39.es/ecma262/#sec-resolvebinding
-Reference VM::resolve_binding(FlyString const& name, Environment* environment)
+ThrowCompletionOr<Reference> VM::resolve_binding(FlyString const& name, Environment* environment)
 {
     // 1. If env is not present or if env is undefined, then
     if (!environment) {
@@ -460,6 +490,10 @@ Reference VM::resolve_binding(FlyString const& name, Environment* environment)
 
     // 4. Return ? GetIdentifierReference(env, name, strict).
     return get_identifier_reference(environment, name, strict);
+
+    // NOTE: The spec says:
+    //       Note: The result of ResolveBinding is always a Reference Record whose [[ReferencedName]] field is name.
+    //       But this is not actually correct as GetIdentifierReference (or really the methods it calls) can throw.
 }
 
 // 7.3.33 InitializeInstanceElements ( O, constructor ), https://tc39.es/ecma262/#sec-initializeinstanceelements
@@ -476,14 +510,15 @@ ThrowCompletionOr<void> VM::initialize_instance_elements(Object& object, ECMAScr
 void VM::throw_exception(Exception& exception)
 {
     set_exception(exception);
-    unwind(ScopeType::Try);
 }
 
 // 9.4.4 ResolveThisBinding ( ), https://tc39.es/ecma262/#sec-resolvethisbinding
-Value VM::resolve_this_binding(GlobalObject& global_object)
+ThrowCompletionOr<Value> VM::resolve_this_binding(GlobalObject& global_object)
 {
+    // 1. Let envRec be GetThisEnvironment().
     auto& environment = get_this_environment(*this);
-    return TRY_OR_DISCARD(environment.get_this_binding(global_object));
+    // 2. Return ? envRec.GetThisBinding().
+    return TRY(environment.get_this_binding(global_object));
 }
 
 String VM::join_arguments(size_t start_index) const
@@ -497,9 +532,14 @@ String VM::join_arguments(size_t start_index) const
     return joined_arguments.build();
 }
 
+// 9.4.5 GetNewTarget ( ), https://tc39.es/ecma262/#sec-getnewtarget
 Value VM::get_new_target()
 {
+    // 1. Let envRec be GetThisEnvironment().
     auto& env = get_this_environment(*this);
+
+    // 2. Assert: envRec has a [[NewTarget]] field.
+    // 3. Return envRec.[[NewTarget]].
     return verify_cast<FunctionEnvironment>(env).new_target();
 }
 
@@ -548,7 +588,6 @@ void VM::run_queued_promise_jobs()
         // exceptions when running Promise jobs. See the commit where these two lines were initially
         // added for a much more detailed explanation.
         clear_exception();
-        stop_unwind();
 
         if (pushed_execution_context)
             pop_execution_context();

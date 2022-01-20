@@ -49,7 +49,7 @@ Result<NonnullRefPtr<DynamicLoader>, DlErrorMessage> DynamicLoader::try_create(i
         return DlErrorMessage { String::formatted("File {} has invalid ELF header", filename) };
 
     String file_mmap_name = String::formatted("ELF_DYN: {}", filename);
-    auto* data = mmap_with_name(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0, file_mmap_name.characters());
+    auto* data = mmap_with_name(nullptr, size, PROT_READ, MAP_SHARED, fd, 0, file_mmap_name.characters());
     if (data == MAP_FAILED) {
         return DlErrorMessage { "DynamicLoader::try_create mmap" };
     }
@@ -122,8 +122,11 @@ bool DynamicLoader::validate()
     auto* elf_header = (ElfW(Ehdr)*)m_file_data;
     if (!validate_elf_header(*elf_header, m_file_size))
         return false;
-    if (!validate_program_headers(*elf_header, m_file_size, (u8*)m_file_data, m_file_size, &m_program_interpreter))
+    StringBuilder interpreter_path_builder;
+    auto result_or_error = validate_program_headers(*elf_header, m_file_size, { m_file_data, m_file_size }, &interpreter_path_builder);
+    if (result_or_error.is_error() || !result_or_error.value())
         return false;
+    m_program_interpreter = interpreter_path_builder.string_view();
     return true;
 }
 

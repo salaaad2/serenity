@@ -7,8 +7,10 @@
 #include "BoardView.h"
 #include "Game.h"
 #include "GameSizeDialog.h"
+#include <AK/URL.h>
 #include <LibConfig/Client.h>
 #include <LibCore/System.h>
+#include <LibDesktop/Launcher.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
@@ -37,9 +39,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Config::pledge_domains("2048");
 
+    TRY(Desktop::Launcher::add_allowed_handler_with_only_specific_urls("/bin/Help", { URL::create_with_file_protocol("/usr/share/man/man6/2048.md") }));
+    TRY(Desktop::Launcher::seal_allowlist());
+
     TRY(Core::System::pledge("stdio rpath recvfd sendfd"));
 
     TRY(Core::System::unveil("/res", "r"));
+    TRY(Core::System::unveil("/tmp/portal/launch", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     size_t board_size = Config::read_i32("2048", "", "board_size", 4);
@@ -141,19 +147,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             break;
         case Game::MoveOutcome::Won: {
             update();
-            auto message_box = GUI::MessageBox::construct(window, "Congratulations! You won the game, Do you still want to continue?",
-                "Want to continue?",
+            auto want_to_continue = GUI::MessageBox::show(window,
+                String::formatted("You won the game in {} turns with a score of {}. Would you like to continue?", game.turns(), game.score()),
+                "Congratulations!",
                 GUI::MessageBox::Type::Question,
                 GUI::MessageBox::InputType::YesNo);
-            if (message_box->exec() == GUI::MessageBox::ExecYes)
+            if (want_to_continue == GUI::MessageBox::ExecYes)
                 game.set_want_to_continue();
-            else {
-                GUI::MessageBox::show(window,
-                    String::formatted("You reached {} in {} turns with a score of {}", game.largest_tile(), game.turns(), game.score()),
-                    "You won!",
-                    GUI::MessageBox::Type::Information);
+            else
                 start_a_new_game();
-            }
             break;
         }
         case Game::MoveOutcome::GameOver:
@@ -169,7 +171,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto game_menu = TRY(window->try_add_menu("&Game"));
 
-    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png")), [&](auto&) {
         start_a_new_game();
     })));
 
@@ -190,7 +192,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     })));
 
     TRY(game_menu->try_add_separator());
-    TRY(game_menu->try_add_action(GUI::Action::create("&Settings...", [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&Settings...", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/settings.png")), [&](auto&) {
         change_settings();
     })));
 
@@ -200,6 +202,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     })));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
+        Desktop::Launcher::open(URL::create_with_file_protocol("/usr/share/man/man6/2048.md"), "/bin/Help");
+    })));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("2048", app_icon, window)));
 
     window->show();

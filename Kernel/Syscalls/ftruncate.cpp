@@ -9,10 +9,12 @@
 
 namespace Kernel {
 
+// NOTE: The length is passed by pointer because off_t is 64bit,
+// hence it can't be passed by register on 32bit platforms.
 ErrorOr<FlatPtr> Process::sys$ftruncate(int fd, Userspace<off_t const*> userspace_length)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
-    REQUIRE_PROMISE(stdio);
+    TRY(require_promise(Pledge::stdio));
     auto length = TRY(copy_typed_from_user(userspace_length));
     if (length < 0)
         return EINVAL;

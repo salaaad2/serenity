@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -179,7 +179,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
     // 27. Set dateTimeFormat.[[TimeZone]] to timeZone.
     date_time_format.set_time_zone(move(time_zone));
 
-    // 28. Let opt be a new Record.
+    // 28. Let formatOptions be a new Record.
     Unicode::CalendarPattern format_options {};
 
     // 29. For each row of Table 4, except the header row, in table order, do
@@ -193,7 +193,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
             // i. Let value be ? GetNumberOption(options, "fractionalSecondDigits", 1, 3, undefined).
             auto value = TRY(get_number_option(global_object, *options, property, 1, 3, {}));
 
-            // d. Set opt.[[<prop>]] to value.
+            // d. Set formatOptions.[[<prop>]] to value.
             if (value.has_value())
                 option = static_cast<ValueType>(value.value());
         }
@@ -202,7 +202,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
             // i. Let value be ? GetOption(options, prop, "string", « the strings given in the Values column of the row », undefined).
             auto value = TRY(get_option(global_object, *options, property, Value::Type::String, defaults, Empty {}));
 
-            // d. Set opt.[[<prop>]] to value.
+            // d. Set formatOptions.[[<prop>]] to value.
             if (!value.is_undefined())
                 option = Unicode::calendar_pattern_style_from_string(value.as_string().string());
         }
@@ -212,31 +212,81 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
 
     // 30. Let dataLocaleData be localeData.[[<dataLocale>]].
 
-    // 31. Let matcher be ? GetOption(options, "formatMatcher", "string", « "basic", "best fit" », "best fit").
+    // 31. Let hcDefault be dataLocaleData.[[hourCycle]].
+    auto default_hour_cycle = Unicode::get_default_regional_hour_cycle(data_locale);
+
+    // Non-standard, default_hour_cycle will be empty if Unicode data generation is disabled.
+    if (!default_hour_cycle.has_value())
+        return &date_time_format;
+
+    // 32. Let hc be dateTimeFormat.[[HourCycle]].
+    // 33. If hc is null, then
+    //     a. Set hc to hcDefault.
+    auto hour_cycle_value = date_time_format.has_hour_cycle() ? date_time_format.hour_cycle() : *default_hour_cycle;
+
+    // 34. If hour12 is true, then
+    if (hour12.is_boolean() && hour12.as_bool()) {
+        // a. If hcDefault is "h11" or "h23", then
+        if ((default_hour_cycle == Unicode::HourCycle::H11) || (default_hour_cycle == Unicode::HourCycle::H23)) {
+            // i. Set hc to "h11".
+            hour_cycle_value = Unicode::HourCycle::H11;
+        }
+        // b. Else,
+        else {
+            // i. Set hc to "h12".
+            hour_cycle_value = Unicode::HourCycle::H12;
+        }
+    }
+    // 35. Else if hour12 is false, then
+    else if (hour12.is_boolean() && !hour12.as_bool()) {
+        // a. If hcDefault is "h11" or "h23", then
+        if ((default_hour_cycle == Unicode::HourCycle::H11) || (default_hour_cycle == Unicode::HourCycle::H23)) {
+            // i. Set hc to "h23".
+            hour_cycle_value = Unicode::HourCycle::H23;
+        }
+        // b. Else,
+        else {
+            // i. Set hc to "h24".
+            hour_cycle_value = Unicode::HourCycle::H24;
+        }
+    }
+    // 36. Else,
+    else {
+        // a. Assert: hour12 is undefined.
+        VERIFY(hour12.is_undefined());
+    }
+
+    // 37. Set dateTimeFormat.[[HourCycle]] to hc.
+    date_time_format.set_hour_cycle(hour_cycle_value);
+
+    // 38. Set formatOptions.[[hourCycle]] to hc.
+    format_options.hour_cycle = hour_cycle_value;
+
+    // 39. Let matcher be ? GetOption(options, "formatMatcher", "string", « "basic", "best fit" », "best fit").
     matcher = TRY(get_option(global_object, *options, vm.names.formatMatcher, Value::Type::String, AK::Array { "basic"sv, "best fit"sv }, "best fit"sv));
 
-    // 32. Let dateStyle be ? GetOption(options, "dateStyle", "string", « "full", "long", "medium", "short" », undefined).
+    // 40. Let dateStyle be ? GetOption(options, "dateStyle", "string", « "full", "long", "medium", "short" », undefined).
     auto date_style = TRY(get_option(global_object, *options, vm.names.dateStyle, Value::Type::String, AK::Array { "full"sv, "long"sv, "medium"sv, "short"sv }, Empty {}));
 
-    // 33. Set dateTimeFormat.[[DateStyle]] to dateStyle.
+    // 41. Set dateTimeFormat.[[DateStyle]] to dateStyle.
     if (!date_style.is_undefined())
         date_time_format.set_date_style(date_style.as_string().string());
 
-    // 34. Let timeStyle be ? GetOption(options, "timeStyle", "string", « "full", "long", "medium", "short" », undefined).
+    // 42. Let timeStyle be ? GetOption(options, "timeStyle", "string", « "full", "long", "medium", "short" », undefined).
     auto time_style = TRY(get_option(global_object, *options, vm.names.timeStyle, Value::Type::String, AK::Array { "full"sv, "long"sv, "medium"sv, "short"sv }, Empty {}));
 
-    // 35. Set dateTimeFormat.[[TimeStyle]] to timeStyle.
+    // 43. Set dateTimeFormat.[[TimeStyle]] to timeStyle.
     if (!time_style.is_undefined())
         date_time_format.set_time_style(time_style.as_string().string());
 
     Optional<Unicode::CalendarPattern> best_format {};
 
-    // 36. If dateStyle is not undefined or timeStyle is not undefined, then
+    // 44. If dateStyle is not undefined or timeStyle is not undefined, then
     if (date_time_format.has_date_style() || date_time_format.has_time_style()) {
         // a. For each row in Table 4, except the header row, do
         TRY(for_each_calendar_field(global_object, format_options, [&](auto const& option, auto const& property, auto const&) -> ThrowCompletionOr<void> {
             // i. Let prop be the name given in the Property column of the row.
-            // ii. Let p be opt.[[<prop>]].
+            // ii. Let p be formatOptions.[[<prop>]].
             // iii. If p is not undefined, then
             if (option.has_value()) {
                 // 1. Throw a TypeError exception.
@@ -250,28 +300,24 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
         // c. Let bestFormat be DateTimeStyleFormat(dateStyle, timeStyle, styles).
         best_format = date_time_style_format(data_locale, date_time_format);
     }
-    // 37. Else,
+    // 45. Else,
     else {
         // a. Let formats be dataLocaleData.[[formats]].[[<calendar>]].
         auto formats = Unicode::get_calendar_available_formats(data_locale, date_time_format.calendar());
 
         // b. If matcher is "basic", then
         if (matcher.as_string().string() == "basic"sv) {
-            // i. Let bestFormat be BasicFormatMatcher(opt, formats).
+            // i. Let bestFormat be BasicFormatMatcher(formatOptions, formats).
             best_format = basic_format_matcher(format_options, move(formats));
         }
         // c. Else,
         else {
-            // i. Let bestFormat be BestFitFormatMatcher(opt, formats).
+            // i. Let bestFormat be BestFitFormatMatcher(formatOptions, formats).
             best_format = best_fit_format_matcher(format_options, move(formats));
         }
     }
 
-    // Non-standard, best_format will be empty if Unicode data generation is disabled.
-    if (!best_format.has_value())
-        return &date_time_format;
-
-    // 38. For each row in Table 4, except the header row, in table order, do
+    // 46. For each row in Table 4, except the header row, in table order, do
     date_time_format.for_each_calendar_field_zipped_with(*best_format, [&](auto& date_time_format_field, auto const& best_format_field, auto) {
         // a. Let prop be the name given in the Property column of the row.
         // b. If bestFormat has a field [[<prop>]], then
@@ -285,93 +331,42 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& glo
     String pattern;
     Vector<Unicode::CalendarRangePattern> range_patterns;
 
-    // 39. If dateTimeFormat.[[Hour]] is undefined, then
+    // 47. If dateTimeFormat.[[Hour]] is undefined, then
     if (!date_time_format.has_hour()) {
         // a. Set dateTimeFormat.[[HourCycle]] to undefined.
         date_time_format.clear_hour_cycle();
+    }
 
-        // b. Let pattern be bestFormat.[[pattern]].
+    // 48. If dateTimeformat.[[HourCycle]] is "h11" or "h12", then
+    if ((hour_cycle_value == Unicode::HourCycle::H11) || (hour_cycle_value == Unicode::HourCycle::H12)) {
+        // a. Let pattern be bestFormat.[[pattern12]].
+        if (best_format->pattern12.has_value()) {
+            pattern = best_format->pattern12.release_value();
+        } else {
+            // Non-standard, LibUnicode only provides [[pattern12]] when [[pattern]] has a day
+            // period. Other implementations provide [[pattern12]] as a copy of [[pattern]].
+            pattern = move(best_format->pattern);
+        }
+
+        // b. Let rangePatterns be bestFormat.[[rangePatterns12]].
+        range_patterns = Unicode::get_calendar_range12_formats(data_locale, date_time_format.calendar(), best_format->skeleton);
+    }
+    // 49. Else,
+    else {
+        // a. Let pattern be bestFormat.[[pattern]].
         pattern = move(best_format->pattern);
 
-        // c. Let rangePatterns be bestFormat.[[rangePatterns]].
+        // b. Let rangePatterns be bestFormat.[[rangePatterns]].
         range_patterns = Unicode::get_calendar_range_formats(data_locale, date_time_format.calendar(), best_format->skeleton);
     }
-    // 40. Else,
-    else {
-        // a. Let hcDefault be dataLocaleData.[[hourCycle]].
-        auto default_hour_cycle = Unicode::get_default_regional_hour_cycle(data_locale);
-        VERIFY(default_hour_cycle.has_value());
 
-        // b. Let hc be dateTimeFormat.[[HourCycle]].
-        // c. If hc is null, then
-        //     i. Set hc to hcDefault.
-        auto hour_cycle = date_time_format.has_hour_cycle() ? date_time_format.hour_cycle() : *default_hour_cycle;
-
-        // d. If hour12 is not undefined, then
-        if (!hour12.is_undefined()) {
-            // i. If hour12 is true, then
-            if (hour12.as_bool()) {
-                // 1. If hcDefault is "h11" or "h23", then
-                if ((default_hour_cycle == Unicode::HourCycle::H11) || (default_hour_cycle == Unicode::HourCycle::H23)) {
-                    // a. Set hc to "h11".
-                    hour_cycle = Unicode::HourCycle::H11;
-                }
-                // 2. Else,
-                else {
-                    // a. Set hc to "h12".
-                    hour_cycle = Unicode::HourCycle::H12;
-                }
-            }
-            // ii. Else,
-            else {
-                // 1. Assert: hour12 is false.
-                // 2. If hcDefault is "h11" or "h23", then
-                if ((default_hour_cycle == Unicode::HourCycle::H11) || (default_hour_cycle == Unicode::HourCycle::H23)) {
-                    // a. Set hc to "h23".
-                    hour_cycle = Unicode::HourCycle::H23;
-                }
-                // 3. Else,
-                else {
-                    // a. Set hc to "h24".
-                    hour_cycle = Unicode::HourCycle::H24;
-                }
-            }
-        }
-
-        // e. Set dateTimeFormat.[[HourCycle]] to hc.
-        date_time_format.set_hour_cycle(hour_cycle);
-
-        // f. If dateTimeformat.[[HourCycle]] is "h11" or "h12", then
-        if ((hour_cycle == Unicode::HourCycle::H11) || (hour_cycle == Unicode::HourCycle::H12)) {
-            // i. Let pattern be bestFormat.[[pattern12]].
-            if (best_format->pattern12.has_value()) {
-                pattern = best_format->pattern12.release_value();
-            } else {
-                // Non-standard, LibUnicode only provides [[pattern12]] when [[pattern]] has a day
-                // period. Other implementations provide [[pattern12]] as a copy of [[pattern]].
-                pattern = move(best_format->pattern);
-            }
-
-            // ii. Let rangePatterns be bestFormat.[[rangePatterns12]].
-            range_patterns = Unicode::get_calendar_range12_formats(data_locale, date_time_format.calendar(), best_format->skeleton);
-        }
-        // g. Else,
-        else {
-            // i. Let pattern be bestFormat.[[pattern]].
-            pattern = move(best_format->pattern);
-
-            // ii. Let rangePatterns be bestFormat.[[rangePatterns]].
-            range_patterns = Unicode::get_calendar_range_formats(data_locale, date_time_format.calendar(), best_format->skeleton);
-        }
-    }
-
-    // 41. Set dateTimeFormat.[[Pattern]] to pattern.
+    // 50. Set dateTimeFormat.[[Pattern]] to pattern.
     date_time_format.set_pattern(move(pattern));
 
-    // 42. Set dateTimeFormat.[[RangePatterns]] to rangePatterns.
+    // 51. Set dateTimeFormat.[[RangePatterns]] to rangePatterns.
     date_time_format.set_range_patterns(move(range_patterns));
 
-    // 43. Return dateTimeFormat.
+    // 52. Return dateTimeFormat.
     return &date_time_format;
 }
 
@@ -587,20 +582,23 @@ Optional<Unicode::CalendarPattern> basic_format_matcher(Unicode::CalendarPattern
     // 6. Let shortMorePenalty be 3.
     constexpr int short_more_penalty = 3;
 
-    // 7. Let bestScore be -Infinity.
+    // 7. Let offsetPenalty be 1.
+    constexpr int offset_penalty = 1;
+
+    // 8. Let bestScore be -Infinity.
     int best_score = NumericLimits<int>::min();
 
-    // 8. Let bestFormat be undefined.
+    // 9. Let bestFormat be undefined.
     Optional<Unicode::CalendarPattern> best_format;
 
-    // 9. Assert: Type(formats) is List.
-    // 10. For each element format of formats, do
+    // 10. Assert: Type(formats) is List.
+    // 11. For each element format of formats, do
     for (auto& format : formats) {
         // a. Let score be 0.
         int score = 0;
 
         // b. For each property name property shown in Table 4, do
-        format.for_each_calendar_field_zipped_with(options, [&](auto const& format_prop, auto const& options_prop, auto) {
+        format.for_each_calendar_field_zipped_with(options, [&](auto const& format_prop, auto const& options_prop, auto type) {
             using ValueType = typename RemoveReference<decltype(options_prop)>::ValueType;
 
             // i. If options has a field [[<property>]], let optionsProp be options.[[<property>]]; else let optionsProp be undefined.
@@ -614,7 +612,62 @@ Optional<Unicode::CalendarPattern> basic_format_matcher(Unicode::CalendarPattern
             else if (options_prop.has_value() && !format_prop.has_value()) {
                 score -= removal_penalty;
             }
-            // v. Else if optionsProp ≠ formatProp, then
+            // v. Else if property is "timeZoneName", then
+            else if (type == Unicode::CalendarPattern::Field::TimeZoneName) {
+                // This is needed to avoid a compile error. Although we only enter this branch for TimeZoneName,
+                // the lambda we are in will be generated with property types other than CalendarPatternStyle.
+                auto compare_prop = [](auto prop, auto test) { return prop == static_cast<ValueType>(test); };
+
+                // 1. If optionsProp is "short" or "shortGeneric", then
+                if (compare_prop(options_prop, Unicode::CalendarPatternStyle::Short) || compare_prop(options_prop, Unicode::CalendarPatternStyle::ShortGeneric)) {
+                    // a. If formatProp is "shortOffset", decrease score by offsetPenalty.
+                    if (compare_prop(format_prop, Unicode::CalendarPatternStyle::ShortOffset))
+                        score -= offset_penalty;
+                    // b. Else if formatProp is "longOffset", decrease score by (offsetPenalty + shortMorePenalty).
+                    else if (compare_prop(format_prop, Unicode::CalendarPatternStyle::LongOffset))
+                        score -= offset_penalty + short_more_penalty;
+                    // c. Else if optionsProp is "short" and formatProp is "long", decrease score by shortMorePenalty.
+                    else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::Short) || compare_prop(format_prop, Unicode::CalendarPatternStyle::Long))
+                        score -= short_more_penalty;
+                    // d. Else if optionsProp is "shortGeneric" and formatProp is "longGeneric", decrease score by shortMorePenalty.
+                    else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::ShortGeneric) || compare_prop(format_prop, Unicode::CalendarPatternStyle::LongGeneric))
+                        score -= short_more_penalty;
+                    // e. Else if optionsProp ≠ formatProp, decrease score by removalPenalty.
+                    else if (options_prop != format_prop)
+                        score -= removal_penalty;
+                }
+                // 2. Else if optionsProp is "shortOffset" and formatProp is "longOffset", decrease score by shortMorePenalty.
+                else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::ShortOffset) || compare_prop(format_prop, Unicode::CalendarPatternStyle::LongOffset)) {
+                    score -= short_more_penalty;
+                }
+                // 3. Else if optionsProp is "long" or "longGeneric", then
+                else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::Long) || compare_prop(options_prop, Unicode::CalendarPatternStyle::LongGeneric)) {
+                    // a. If formatProp is "longOffset", decrease score by offsetPenalty.
+                    if (compare_prop(format_prop, Unicode::CalendarPatternStyle::LongOffset))
+                        score -= offset_penalty;
+                    // b. Else if formatProp is "shortOffset", decrease score by (offsetPenalty + longLessPenalty).
+                    else if (compare_prop(format_prop, Unicode::CalendarPatternStyle::ShortOffset))
+                        score -= offset_penalty + long_less_penalty;
+                    // c. Else if optionsProp is "long" and formatProp is "short", decrease score by longLessPenalty.
+                    else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::Long) || compare_prop(format_prop, Unicode::CalendarPatternStyle::Short))
+                        score -= long_less_penalty;
+                    // d. Else if optionsProp is "longGeneric" and formatProp is "shortGeneric", decrease score by longLessPenalty.
+                    else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::LongGeneric) || compare_prop(format_prop, Unicode::CalendarPatternStyle::ShortGeneric))
+                        score -= long_less_penalty;
+                    // e. Else if optionsProp ≠ formatProp, decrease score by removalPenalty.
+                    else if (options_prop != format_prop)
+                        score -= removal_penalty;
+                }
+                // 4. Else if optionsProp is "longOffset" and formatProp is "shortOffset", decrease score by longLessPenalty.
+                else if (compare_prop(options_prop, Unicode::CalendarPatternStyle::LongOffset) || compare_prop(format_prop, Unicode::CalendarPatternStyle::ShortOffset)) {
+                    score -= long_less_penalty;
+                }
+                // 5. Else if optionsProp ≠ formatProp, decrease score by removalPenalty.
+                else if (options_prop != format_prop) {
+                    score -= removal_penalty;
+                }
+            }
+            // vi. Else if optionsProp ≠ formatProp, then
             else if (options_prop != format_prop) {
                 using ValuesType = Conditional<IsIntegral<ValueType>, AK::Array<u8, 3>, AK::Array<Unicode::CalendarPatternStyle, 5>>;
                 ValuesType values {};
@@ -701,7 +754,7 @@ Optional<Unicode::CalendarPattern> basic_format_matcher(Unicode::CalendarPattern
         }
     });
 
-    // 11. Return bestFormat.
+    // 12. Return bestFormat.
     return best_format;
 }
 
@@ -881,9 +934,10 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(GlobalObjec
             // ii. Let v be dateTimeFormat.[[TimeZone]].
             auto const& value = date_time_format.time_zone();
 
-            // iii. Let fv be a String value representing v in the form given by f; the String value depends upon the implementation and the effective locale. The String value may also depend on the value of the [[InDST]] field of tm. If the implementation does not have a localized representation of f, then use the String value of v itself.
-            // FIXME: This should take [[InDST]] into account.
-            auto formatted_value = Unicode::get_time_zone_name(data_locale, value, style).value_or(value);
+            // iii. Let fv be a String value representing v in the form given by f; the String value depends upon the implementation and the effective locale of dateTimeFormat.
+            //      The String value may also depend on the value of the [[InDST]] field of tm if f is "short", "long", "shortOffset", or "longOffset".
+            //      If the implementation does not have a localized representation of f, then use the String value of v itself.
+            auto formatted_value = Unicode::format_time_zone(data_locale, value, style, local_time.time_since_epoch());
 
             // iv. Append a new Record { [[Type]]: p, [[Value]]: fv } as the last element of the list result.
             result.append({ "timeZoneName"sv, move(formatted_value) });
@@ -973,6 +1027,9 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(GlobalObjec
                 formatted_value = symbol.value_or(String::number(value));
                 break;
             }
+
+            default:
+                VERIFY_NOT_REACHED();
             }
 
             // xi. Append a new Record { [[Type]]: p, [[Value]]: fv } as the last element of the list result.
@@ -1434,15 +1491,14 @@ ThrowCompletionOr<Array*> format_date_time_range_to_parts(GlobalObject& global_o
 }
 
 // 11.1.14 ToLocalTime ( t, calendar, timeZone ), https://tc39.es/ecma402/#sec-tolocaltime
-ThrowCompletionOr<LocalTime> to_local_time(GlobalObject& global_object, double time, StringView calendar, [[maybe_unused]] StringView time_zone)
+ThrowCompletionOr<LocalTime> to_local_time(GlobalObject& global_object, double time, StringView calendar, StringView time_zone)
 {
     // 1. Assert: Type(t) is Number.
 
     // 2. If calendar is "gregory", then
     if (calendar == "gregory"sv) {
         // a. Let timeZoneOffset be the value calculated according to LocalTZA(t, true) where the local time zone is replaced with timezone timeZone.
-        // FIXME: Implement LocalTZA when timezones other than UTC are supported.
-        double time_zone_offset = 0;
+        double time_zone_offset = local_tza(time, true, time_zone);
 
         // b. Let tz be the time value t + timeZoneOffset.
         double zoned_time = time + time_zone_offset;
@@ -1473,9 +1529,6 @@ ThrowCompletionOr<LocalTime> to_local_time(GlobalObject& global_object, double t
             .second = sec_from_time(zoned_time),
             // msFromTime(tz) specified in es2022's Hours, Minutes, Second, and Milliseconds.
             .millisecond = ms_from_time(zoned_time),
-            // Calculate true or false using the best available information about the specified calendar and timeZone, including current and historical information about time zone offsets from UTC and daylight saving time rules.
-            // FIXME: Implement this.
-            .in_dst = false,
         };
     }
 

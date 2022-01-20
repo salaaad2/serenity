@@ -16,21 +16,40 @@
 
 // Condition variable attributes.
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_init.html
 int pthread_condattr_init(pthread_condattr_t* attr)
 {
     attr->clockid = CLOCK_MONOTONIC_COARSE;
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_destroy.html
 int pthread_condattr_destroy(pthread_condattr_t*)
 {
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_getclock.html
+int pthread_condattr_getclock(pthread_condattr_t* attr, clockid_t* clock)
+{
+    *clock = attr->clockid;
+    return 0;
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_setclock.html
 int pthread_condattr_setclock(pthread_condattr_t* attr, clockid_t clock)
 {
-    attr->clockid = clock;
-    return 0;
+    switch (clock) {
+    case CLOCK_REALTIME:
+    case CLOCK_REALTIME_COARSE:
+    case CLOCK_MONOTONIC:
+    case CLOCK_MONOTONIC_COARSE:
+    case CLOCK_MONOTONIC_RAW:
+        attr->clockid = clock;
+        return 0;
+    default:
+        return EINVAL;
+    }
 }
 
 // Condition variables.
@@ -44,6 +63,7 @@ static constexpr u32 NEED_TO_WAKE_ONE = 1;
 static constexpr u32 NEED_TO_WAKE_ALL = 2;
 static constexpr u32 INCREMENT = 4;
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_init.html
 int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr)
 {
     cond->mutex = nullptr;
@@ -52,16 +72,19 @@ int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr)
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_destroy.html
 int pthread_cond_destroy(pthread_cond_t*)
 {
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_wait.html
 int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex)
 {
     return pthread_cond_timedwait(cond, mutex, nullptr);
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_timedwait.html
 int pthread_cond_timedwait(pthread_cond_t* cond, pthread_mutex_t* mutex, const struct timespec* abstime)
 {
     // Save the mutex this condition variable is associated with. We don't (yet)
@@ -85,6 +108,7 @@ int pthread_cond_timedwait(pthread_cond_t* cond, pthread_mutex_t* mutex, const s
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_signal.html
 int pthread_cond_signal(pthread_cond_t* cond)
 {
     // Increment the generation.
@@ -114,6 +138,7 @@ int pthread_cond_signal(pthread_cond_t* cond)
     return 0;
 }
 
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_broadcast.html
 int pthread_cond_broadcast(pthread_cond_t* cond)
 {
     // Increment the generation.

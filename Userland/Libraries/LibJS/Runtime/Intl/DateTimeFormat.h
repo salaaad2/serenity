@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +9,7 @@
 #include <AK/Array.h>
 #include <AK/String.h>
 #include <AK/StringView.h>
+#include <AK/Time.h>
 #include <AK/Types.h>
 #include <AK/Vector.h>
 #include <LibJS/Runtime/Completion.h>
@@ -160,7 +161,13 @@ enum class OptionDefaults {
 };
 
 // Table 5: Record returned by ToLocalTime, https://tc39.es/ecma402/#table-datetimeformat-tolocaltime-record
+// Note: [[InDST]] is not included here - it is handled by LibUnicode / LibTimeZone.
 struct LocalTime {
+    AK::Time time_since_epoch() const
+    {
+        return AK::Time::from_timestamp(year, month + 1, day + 1, hour, minute, second, millisecond);
+    }
+
     int weekday { 0 };     // [[Weekday]]
     Unicode::Era era {};   // [[Era]]
     i32 year { 0 };        // [[Year]]
@@ -172,7 +179,6 @@ struct LocalTime {
     u8 minute { 0 };       // [[Minute]]
     u8 second { 0 };       // [[Second]]
     u16 millisecond { 0 }; // [[Millisecond]]
-    bool in_dst { false }; // [[InDST]]
 };
 
 struct PatternPartitionWithSource : public PatternPartition {
@@ -216,7 +222,7 @@ ThrowCompletionOr<void> for_each_calendar_field(GlobalObject& global_object, Uni
     constexpr auto narrow_short_long = AK::Array { "narrow"sv, "short"sv, "long"sv };
     constexpr auto two_digit_numeric = AK::Array { "2-digit"sv, "numeric"sv };
     constexpr auto two_digit_numeric_narrow_short_long = AK::Array { "2-digit"sv, "numeric"sv, "narrow"sv, "short"sv, "long"sv };
-    constexpr auto short_long = AK::Array { "short"sv, "long"sv };
+    constexpr auto time_zone = AK::Array { "short"sv, "long"sv, "shortOffset"sv, "longOffset"sv, "shortGeneric"sv, "longGeneric"sv };
 
     // Table 4: Components of date and time formats, https://tc39.es/ecma402/#table-datetimeformat-components
     TRY(callback(pattern.weekday, vm.names.weekday, narrow_short_long));
@@ -229,7 +235,7 @@ ThrowCompletionOr<void> for_each_calendar_field(GlobalObject& global_object, Uni
     TRY(callback(pattern.minute, vm.names.minute, two_digit_numeric));
     TRY(callback(pattern.second, vm.names.second, two_digit_numeric));
     TRY(callback(pattern.fractional_second_digits, vm.names.fractionalSecondDigits, Empty {}));
-    TRY(callback(pattern.time_zone_name, vm.names.timeZoneName, short_long));
+    TRY(callback(pattern.time_zone_name, vm.names.timeZoneName, time_zone));
 
     return {};
 }

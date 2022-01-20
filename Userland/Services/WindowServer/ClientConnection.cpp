@@ -45,7 +45,7 @@ ClientConnection* ClientConnection::from_client_id(int client_id)
     return (*it).value.ptr();
 }
 
-ClientConnection::ClientConnection(NonnullRefPtr<Core::LocalSocket> client_socket, int client_id)
+ClientConnection::ClientConnection(NonnullOwnPtr<Core::Stream::LocalSocket> client_socket, int client_id)
     : IPC::ClientConnection<WindowClientEndpoint, WindowServerEndpoint>(*this, move(client_socket), client_id)
 {
     if (!s_connections)
@@ -190,6 +190,42 @@ void ClientConnection::update_menu_item(i32 menu_id, i32 identifier, [[maybe_unu
     menu_item->set_default(is_default);
     if (checkable)
         menu_item->set_checked(checked);
+}
+
+void ClientConnection::flash_menubar_menu(i32 window_id, i32 menu_id)
+{
+    auto itw = m_windows.find(window_id);
+    if (itw == m_windows.end()) {
+        did_misbehave("FlashMenubarMenu: Bad window ID");
+        return;
+    }
+    auto& window = *(*itw).value;
+
+    auto itm = m_menus.find(menu_id);
+    if (itm == m_menus.end()) {
+        did_misbehave("FlashMenubarMenu: Bad menu ID");
+        return;
+    }
+    auto& menu = *(*itm).value;
+
+    if (window.menubar().flash_menu(&menu)) {
+        window.frame().invalidate_menubar();
+
+        if (m_flashed_menu_timer && m_flashed_menu_timer->is_active()) {
+            m_flashed_menu_timer->on_timeout();
+            m_flashed_menu_timer->stop();
+        }
+
+        m_flashed_menu_timer = Core::Timer::create_single_shot(75, [weak_window = window.make_weak_ptr<Window>()]() mutable {
+            if (!weak_window)
+                return;
+            weak_window->menubar().flash_menu(nullptr);
+            weak_window->frame().invalidate_menubar();
+        });
+        m_flashed_menu_timer->start();
+    } else if (m_flashed_menu_timer) {
+        m_flashed_menu_timer->restart();
+    }
 }
 
 void ClientConnection::add_menu_separator(i32 menu_id)
@@ -1080,8 +1116,11 @@ Messages::WindowServer::GetColorUnderCursorResponse ClientConnection::get_color_
     //        manual translation to avoid sampling the color on the actual cursor itself.
     auto cursor_location = ScreenInput::the().cursor_location().translated(-1, -1);
     auto& screen_with_cursor = ScreenInput::the().cursor_location_screen();
-    auto color = Compositor::the().color_at_position({}, screen_with_cursor, cursor_location);
-    return color;
+
+    if (!screen_with_cursor.rect().contains(cursor_location))
+        return Optional<Color> {};
+
+    return { Compositor::the().color_at_position({}, screen_with_cursor, cursor_location) };
 }
 
 Messages::WindowServer::IsWindowModifiedResponse ClientConnection::is_window_modified(i32 window_id)

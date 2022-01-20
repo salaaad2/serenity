@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -21,6 +21,7 @@
 #include <LibJS/Runtime/ErrorTypes.h>
 #include <LibJS/Runtime/Exception.h>
 #include <LibJS/Runtime/ExecutionContext.h>
+#include <LibJS/Runtime/Iterator.h>
 #include <LibJS/Runtime/MarkedValueList.h>
 #include <LibJS/Runtime/Promise.h>
 #include <LibJS/Runtime/Value.h>
@@ -29,15 +30,6 @@ namespace JS {
 
 class Identifier;
 struct BindingPattern;
-
-enum class ScopeType {
-    None,
-    Function,
-    Block,
-    Try,
-    Breakable,
-    Continuable,
-};
 
 class VM : public RefCounted<VM> {
 public:
@@ -131,6 +123,11 @@ public:
     Realm const* current_realm() const { return running_execution_context().realm; }
     Realm* current_realm() { return running_execution_context().realm; }
 
+    // https://tc39.es/ecma262/#active-function-object
+    // The value of the Function component of the running execution context is also called the active function object.
+    FunctionObject const* active_function_object() const { return running_execution_context().function; }
+    FunctionObject* active_function_object() { return running_execution_context().function; }
+
     bool in_strict_mode() const;
 
     size_t argument_count() const
@@ -155,45 +152,15 @@ public:
         return running_execution_context().this_value;
     }
 
-    Value resolve_this_binding(GlobalObject&);
-
-    Value last_value() const { return m_last_value; }
-    void set_last_value(Badge<Bytecode::Interpreter>, Value value) { m_last_value = value; }
-    void set_last_value(Badge<Interpreter>, Value value) { m_last_value = value; }
+    ThrowCompletionOr<Value> resolve_this_binding(GlobalObject&);
 
     const StackInfo& stack_info() const { return m_stack_info; };
-
-    bool underscore_is_last_value() const { return m_underscore_is_last_value; }
-    void set_underscore_is_last_value(bool b) { m_underscore_is_last_value = b; }
 
     u32 execution_generation() const { return m_execution_generation; }
     void finish_execution_generation() { ++m_execution_generation; }
 
-    void unwind(ScopeType type, FlyString label = {})
-    {
-        m_unwind_until = type;
-        m_unwind_until_label = move(label);
-    }
-    void stop_unwind()
-    {
-        m_unwind_until = ScopeType::None;
-        m_unwind_until_label = {};
-    }
-    bool should_unwind_until(ScopeType type, Vector<FlyString> const& labels) const
-    {
-        if (m_unwind_until_label.is_null())
-            return m_unwind_until == type;
-        return m_unwind_until == type && any_of(labels.begin(), labels.end(), [&](FlyString const& label) {
-            return m_unwind_until_label == label;
-        });
-    }
-    bool should_unwind() const { return m_unwind_until != ScopeType::None; }
-
-    ScopeType unwind_until() const { return m_unwind_until; }
-    FlyString unwind_until_label() const { return m_unwind_until_label; }
-
-    Reference resolve_binding(FlyString const&, Environment* = nullptr);
-    Reference get_identifier_reference(Environment*, FlyString, bool strict, size_t hops = 0);
+    ThrowCompletionOr<Reference> resolve_binding(FlyString const&, Environment* = nullptr);
+    ThrowCompletionOr<Reference> get_identifier_reference(Environment*, FlyString, bool strict, size_t hops = 0);
 
     template<typename T, typename... Args>
     void throw_exception(GlobalObject& global_object, Args&&... args)
@@ -279,10 +246,8 @@ private:
 
     [[nodiscard]] ThrowCompletionOr<Value> call_internal(FunctionObject&, Value this_value, Optional<MarkedValueList> arguments);
 
-    ThrowCompletionOr<Object*> copy_data_properties(Object& rest_object, Object const& source, HashTable<PropertyKey> const& seen_names, GlobalObject& global_object);
-
     ThrowCompletionOr<void> property_binding_initialization(BindingPattern const& binding, Value value, Environment* environment, GlobalObject& global_object);
-    ThrowCompletionOr<void> iterator_binding_initialization(BindingPattern const& binding, Object* iterator, bool& iterator_done, Environment* environment, GlobalObject& global_object);
+    ThrowCompletionOr<void> iterator_binding_initialization(BindingPattern const& binding, Iterator& iterator_record, Environment* environment, GlobalObject& global_object);
 
     Exception* m_exception { nullptr };
 
@@ -294,10 +259,6 @@ private:
     Vector<ExecutionContext*> m_execution_context_stack;
 
     Vector<Vector<ExecutionContext*>> m_saved_execution_context_stacks;
-
-    Value m_last_value;
-    ScopeType m_unwind_until { ScopeType::None };
-    FlyString m_unwind_until_label;
 
     StackInfo m_stack_info;
 
@@ -314,8 +275,6 @@ private:
     Symbol* m_well_known_symbol_##snake_name { nullptr };
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
-
-    bool m_underscore_is_last_value { false };
 
     u32 m_execution_generation { 0 };
 

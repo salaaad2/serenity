@@ -93,9 +93,12 @@ extern "C" {
 #define GL_SHADING_LANGUAGE_VERSION 0x8B8C
 
 // Get parameters
+#define GL_COLOR_MATERIAL_FACE 0x0B55
+#define GL_COLOR_MATERIAL_MODE 0x0B56
 #define GL_COLOR_MATERIAL 0x0B57
 #define GL_FOG_START 0x0B63
 #define GL_FOG_END 0x0B64
+#define GL_STENCIL_CLEAR_VALUE 0x0B91
 #define GL_MATRIX_MODE 0x0BA0
 #define GL_NORMALIZE 0x0BA1
 #define GL_VIEWPORT 0x0BA2
@@ -227,6 +230,7 @@ extern "C" {
 
 // Format enums
 #define GL_COLOR_INDEX 0x1900
+#define GL_COLOR_INDEX8_EXT 0x80E5
 #define GL_STENCIL_INDEX 0x1901
 #define GL_DEPTH_COMPONENT 0x1902
 #define GL_RED 0x1903
@@ -236,13 +240,27 @@ extern "C" {
 #define GL_RGB 0x1907
 #define GL_RGBA 0x1908
 #define GL_LUMINANCE 0x1909
+#define GL_LUMINANCE8 0x8040
 #define GL_LUMINANCE_ALPHA 0x190A
+#define GL_LUMINANCE8_ALPHA8 0x8045
 #define GL_BGR 0x190B
 #define GL_BGRA 0x190C
 #define GL_BITMAP 0x1A00
 
+#define GL_LUMINANCE8 0x8040
+#define GL_INTENSITY8 0x804B
+#define GL_R3_G3_B2 0x2A10
+#define GL_RGB4 0x804F
+#define GL_RGB5 0x8050
+#define GL_RGB8 0x8051
+#define GL_RGBA2 0x8055
+#define GL_RGBA4 0x8056
+#define GL_RGB5_A1 0x8057
+#define GL_RGBA8 0x8058
+
 // Lighting related defines
 #define GL_LIGHTING 0x0B50
+#define GL_LIGHT_MODEL_LOCAL_VIEWER 0x0B51
 #define GL_LIGHT_MODEL_TWO_SIDE 0x0B52
 #define GL_LIGHT_MODEL_AMBIENT 0x0B53
 
@@ -277,6 +295,12 @@ extern "C" {
 #define GL_ONE_MINUS_CONSTANT_COLOR 0x8002
 #define GL_CONSTANT_ALPHA 0x8003
 #define GL_ONE_MINUS_CONSTANT_ALPHA 0x8004
+
+// Points
+#define GL_POINT_SMOOTH 0x0B10
+#define GL_POINT_SIZE_MIN_EXT 0x8126
+#define GL_POINT_SIZE_MAX_EXT 0x8127
+#define GL_DISTANCE_ATTENUATION_EXT 0x8129
 
 // Polygon modes
 #define GL_POINT 0x1B00
@@ -451,16 +475,19 @@ GLAPI void glClear(GLbitfield mask);
 GLAPI void glClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
 GLAPI void glClearDepth(GLdouble depth);
 GLAPI void glClearStencil(GLint s);
+GLAPI void glColor3d(GLdouble r, GLdouble g, GLdouble b);
 GLAPI void glColor3dv(GLdouble const* v);
 GLAPI void glColor3f(GLfloat r, GLfloat g, GLfloat b);
 GLAPI void glColor3fv(const GLfloat* v);
 GLAPI void glColor3ub(GLubyte r, GLubyte g, GLubyte b);
+GLAPI void glColor3ubv(GLubyte const* v);
 GLAPI void glColor4dv(GLdouble const* v);
 GLAPI void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 GLAPI void glColor4fv(const GLfloat* v);
 GLAPI void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a);
 GLAPI void glColor4ubv(const GLubyte* v);
 GLAPI void glColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
+GLAPI void glColorMaterial(GLenum face, GLenum mode);
 GLAPI void glDeleteTextures(GLsizei n, const GLuint* textures);
 GLAPI void glEnd();
 GLAPI void glFrustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble nearVal, GLdouble farVal);
@@ -476,6 +503,7 @@ GLAPI void glPushMatrix();
 GLAPI void glPopMatrix();
 GLAPI void glMultMatrixd(GLdouble const* matrix);
 GLAPI void glMultMatrixf(GLfloat const* matrix);
+GLAPI void glRotated(GLdouble angle, GLdouble x, GLdouble y, GLdouble z);
 GLAPI void glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z);
 GLAPI void glScaled(GLdouble x, GLdouble y, GLdouble z);
 GLAPI void glScalef(GLfloat x, GLfloat y, GLfloat z);
@@ -532,15 +560,26 @@ GLAPI void glTexImage1D(GLenum target, GLint level, GLint internalFormat, GLsize
 GLAPI void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLvoid const* data);
 GLAPI void glTexImage3D(GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, GLvoid const* data);
 GLAPI void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* data);
+GLAPI void glTexCoord1f(GLfloat s);
+GLAPI void glTexCoord1fv(GLfloat const* v);
 GLAPI void glTexCoord2d(GLdouble s, GLdouble t);
 GLAPI void glTexCoord2dv(GLdouble const* v);
 GLAPI void glTexCoord2f(GLfloat s, GLfloat t);
 GLAPI void glTexCoord2fv(GLfloat const* v);
+GLAPI void glTexCoord2i(GLint s, GLint t);
+GLAPI void glTexCoord3f(GLfloat s, GLfloat t, GLfloat r);
+GLAPI void glTexCoord3fv(GLfloat const* v);
+GLAPI void glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q);
 GLAPI void glTexCoord4fv(const GLfloat* v);
+GLAPI void glMultiTexCoord2fARB(GLenum target, GLfloat s, GLfloat t);
+GLAPI void glMultiTexCoord2f(GLenum target, GLfloat s, GLfloat t);
 GLAPI void glTexParameteri(GLenum target, GLenum pname, GLint param);
 GLAPI void glTexParameterf(GLenum target, GLenum pname, GLfloat param);
 GLAPI void glTexEnvf(GLenum target, GLenum pname, GLfloat param);
+GLAPI void glTexEnvi(GLenum target, GLenum pname, GLint param);
 GLAPI void glBindTexture(GLenum target, GLuint texture);
+GLAPI GLboolean glIsTexture(GLuint texture);
+GLAPI void glActiveTextureARB(GLenum texture);
 GLAPI void glActiveTexture(GLenum texture);
 GLAPI void glGetBooleanv(GLenum pname, GLboolean* data);
 GLAPI void glGetDoublev(GLenum pname, GLdouble* params);
@@ -549,6 +588,9 @@ GLAPI void glGetIntegerv(GLenum pname, GLint* data);
 GLAPI void glDepthMask(GLboolean flag);
 GLAPI void glEnableClientState(GLenum cap);
 GLAPI void glDisableClientState(GLenum cap);
+GLAPI void glClientActiveTextureARB(GLenum target);
+GLAPI void glClientActiveTexture(GLenum target);
+
 GLAPI void glVertexPointer(GLint size, GLenum type, GLsizei stride, const void* pointer);
 GLAPI void glColorPointer(GLint size, GLenum type, GLsizei stride, const void* pointer);
 GLAPI void glTexCoordPointer(GLint size, GLenum type, GLsizei stride, const void* pointer);
@@ -565,11 +607,14 @@ GLAPI void glFogi(GLenum pname, GLint param);
 GLAPI void glPixelStorei(GLenum pname, GLint param);
 GLAPI void glScissor(GLint x, GLint y, GLsizei width, GLsizei height);
 GLAPI void glLightf(GLenum light, GLenum pname, GLfloat param);
-GLAPI void glLightfv(GLenum light, GLenum pname, GLfloat* param);
+GLAPI void glLightfv(GLenum light, GLenum pname, GLfloat const* param);
 GLAPI void glLightModelf(GLenum pname, GLfloat param);
 GLAPI void glLightModelfv(GLenum pname, GLfloat const* params);
+GLAPI void glLightModeli(GLenum pname, GLint param);
 GLAPI void glStencilFunc(GLenum func, GLint ref, GLuint mask);
 GLAPI void glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask);
+GLAPI void glStencilMask(GLuint mask);
+GLAPI void glStencilMaskSeparate(GLenum face, GLuint mask);
 GLAPI void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass);
 GLAPI void glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
 GLAPI void glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz);
@@ -606,6 +651,7 @@ GLAPI void glTexGeni(GLenum coord, GLenum pname, GLint param);
 GLAPI void glRectf(GLfloat x1, GLfloat y1, GLfloat x2, GLfloat y2);
 GLAPI void glRecti(GLint x1, GLint y1, GLint x2, GLint y2);
 GLAPI void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint* params);
+GLAPI void glPointSize(GLfloat size);
 
 #ifdef __cplusplus
 }

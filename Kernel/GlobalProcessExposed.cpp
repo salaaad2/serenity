@@ -131,7 +131,7 @@ private:
         JsonArraySerializer array { builder };
         LocalSocket::for_each([&array](auto& socket) {
             auto obj = array.add_object();
-            obj.add("path", String(socket.socket_path()));
+            obj.add("path", socket.socket_path());
             obj.add("origin_pid", socket.origin_pid().value());
             obj.add("origin_uid", socket.origin_uid().value());
             obj.add("origin_gid", socket.origin_gid().value());
@@ -336,9 +336,7 @@ private:
     ProcFSSelfProcessDirectory();
     virtual bool acquire_link(KBufferBuilder& builder) override
     {
-        if (builder.appendff("{}", Process::current().pid().value()).is_error())
-            return false;
-        return true;
+        return !builder.appendff("{}", Process::current().pid().value()).is_error();
     }
 };
 
@@ -360,7 +358,12 @@ private:
             fs_object.add("free_block_count", fs.free_block_count());
             fs_object.add("total_inode_count", fs.total_inode_count());
             fs_object.add("free_inode_count", fs.free_inode_count());
-            fs_object.add("mount_point", mount.absolute_path());
+            auto mount_point_or_error = mount.absolute_path();
+            if (mount_point_or_error.is_error()) {
+                result = mount_point_or_error.release_error();
+                return IterationDecision::Break;
+            }
+            fs_object.add("mount_point", mount_point_or_error.value()->view());
             fs_object.add("block_size", static_cast<u64>(fs.block_size()));
             fs_object.add("readonly", fs.is_readonly());
             fs_object.add("mount_flags", mount.flags());
@@ -372,7 +375,7 @@ private:
                     result = pseudo_path_or_error.release_error();
                     return IterationDecision::Break;
                 }
-                fs_object.add("source", pseudo_path_or_error.value()->characters());
+                fs_object.add("source", pseudo_path_or_error.value()->view());
             } else {
                 fs_object.add("source", "none");
             }
@@ -403,7 +406,6 @@ private:
         JsonObjectSerializer<KBufferBuilder> json { builder };
         json.add("kmalloc_allocated", stats.bytes_allocated);
         json.add("kmalloc_available", stats.bytes_free);
-        json.add("kmalloc_eternal_allocated", stats.bytes_eternal);
         json.add("user_physical_allocated", system_memory.user_physical_pages_used);
         json.add("user_physical_available", system_memory.user_physical_pages - system_memory.user_physical_pages_used);
         json.add("user_physical_committed", system_memory.user_physical_pages_committed);
@@ -451,7 +453,7 @@ private:
         JsonObjectSerializer<KBufferBuilder> json { builder };
 
         // Keep this in sync with CProcessStatistics.
-        auto build_process = [&](JsonArraySerializer<KBufferBuilder>& array, const Process& process) {
+        auto build_process = [&](JsonArraySerializer<KBufferBuilder>& array, const Process& process) -> ErrorOr<void> {
             auto process_object = array.add_object();
 
             if (process.is_user_process()) {
@@ -464,7 +466,7 @@ private:
                 ENUMERATE_PLEDGE_PROMISES
 #undef __ENUMERATE_PLEDGE_PROMISE
 
-                process_object.add("pledge", pledge_builder.to_string());
+                process_object.add("pledge", pledge_builder.string_view());
 
                 switch (process.veil_state()) {
                 case VeilState::None:
@@ -478,8 +480,8 @@ private:
                     break;
                 }
             } else {
-                process_object.add("pledge", String());
-                process_object.add("veil", String());
+                process_object.add("pledge", ""sv);
+                process_object.add("veil", ""sv);
             }
 
             process_object.add("pid", process.pid().value());
@@ -491,7 +493,7 @@ private:
             process_object.add("ppid", process.ppid().value());
             process_object.add("nfds", process.fds().open_count());
             process_object.add("name", process.name());
-            process_object.add("executable", process.executable() ? process.executable()->absolute_path() : "");
+            process_object.add("executable", process.executable() ? TRY(process.executable()->try_serialize_absolute_path())->view() : ""sv);
             process_object.add("tty", process.tty() ? process.tty()->tty_name().view() : "notty"sv);
             process_object.add("amount_virtual", process.address_space().amount_virtual());
             process_object.add("amount_resident", process.address_space().amount_resident());
@@ -528,16 +530,20 @@ private:
                 thread_object.add("ipv4_socket_read_bytes", thread.ipv4_socket_read_bytes());
                 thread_object.add("ipv4_socket_write_bytes", thread.ipv4_socket_write_bytes());
             });
+
+            return {};
         };
 
         SpinlockLocker lock(g_scheduler_lock);
         {
             {
                 auto array = json.add_array("processes");
-                auto processes = Process::all_processes();
-                build_process(array, *Scheduler::colonel());
-                for (auto& process : processes)
-                    build_process(array, process);
+                TRY(build_process(array, *Scheduler::colonel()));
+                TRY(Process::all_instances().with([&](auto& processes) -> ErrorOr<void> {
+                    for (auto& process : processes)
+                        TRY(build_process(array, process));
+                    return {};
+                }));
             }
 
             auto total_time_scheduled = Scheduler::get_total_time_scheduled();
@@ -565,14 +571,16 @@ private:
                 obj.add("family", info.display_family());
 
                 auto features_array = obj.add_array("features");
-                for (auto& feature : info.features().split(' '))
+                auto keep_empty = false;
+                info.features().for_each_split_view(' ', keep_empty, [&](StringView feature) {
                     features_array.add(feature);
+                });
                 features_array.finish();
 
                 obj.add("model", info.display_model());
                 obj.add("stepping", info.stepping());
                 obj.add("type", info.type());
-                obj.add("brandstr", info.brandstr());
+                obj.add("brand", info.brand());
             });
         array.finish();
         return {};
@@ -756,7 +764,7 @@ private:
     {
         if (!Process::current().is_superuser())
             return EPERM;
-        return builder.append(String::number(kernel_load_base));
+        return builder.appendff("{}", kernel_load_base);
     }
 };
 
@@ -937,12 +945,12 @@ ErrorOr<void> ProcFSRootDirectory::traverse_as_directory(FileSystemID fsid, Func
     TRY(callback({ ".", { fsid, component_index() }, 0 }));
     TRY(callback({ "..", { fsid, 0 }, 0 }));
 
-    for (auto& component : m_components) {
+    for (auto const& component : m_components) {
         InodeIdentifier identifier = { fsid, component.component_index() };
         TRY(callback({ component.name(), identifier, 0 }));
     }
 
-    return processes().with([&](auto& list) -> ErrorOr<void> {
+    return Process::all_instances().with([&](auto& list) -> ErrorOr<void> {
         for (auto& process : list) {
             VERIFY(!(process.pid() < 0));
             u64 process_id = (u64)process.pid().value();
@@ -965,8 +973,7 @@ ErrorOr<NonnullRefPtr<ProcFSExposedComponent>> ProcFSRootDirectory::lookup(Strin
         return maybe_candidate.release_value();
     }
 
-    String process_directory_name = name;
-    auto pid = process_directory_name.to_uint<unsigned>();
+    auto pid = name.to_uint<unsigned>();
     if (!pid.has_value())
         return ESRCH;
     auto actual_pid = pid.value();

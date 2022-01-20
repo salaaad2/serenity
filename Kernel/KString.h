@@ -30,6 +30,11 @@ public:
         return vformatted(fmtstr.view(), variadic_format_parameters);
     }
 
+    [[nodiscard]] static ErrorOr<NonnullOwnPtr<KString>> number(Arithmetic auto value)
+    {
+        return formatted("{}", value);
+    }
+
     void operator delete(void*);
 
     ErrorOr<NonnullOwnPtr<KString>> try_clone() const;
@@ -38,6 +43,7 @@ public:
     [[nodiscard]] size_t length() const { return m_length; }
     [[nodiscard]] char const* characters() const { return m_characters; }
     [[nodiscard]] StringView view() const { return { characters(), length() }; }
+    [[nodiscard]] ReadonlyBytes bytes() const { return { characters(), length() }; }
 
 private:
     explicit KString(size_t length)
