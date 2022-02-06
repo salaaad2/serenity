@@ -304,11 +304,10 @@ public:
     void evaluate_media_queries_and_report_changes();
     void add_media_query_list(NonnullRefPtr<CSS::MediaQueryList>&);
 
+    bool has_focus() const;
+
 private:
     explicit Document(const AK::URL&);
-
-    // ^DOM::Node
-    virtual RefPtr<Layout::Node> create_layout_node() override;
 
     // ^HTML::GlobalEventHandlers
     virtual EventTarget& global_event_handlers_to_event_target() final { return *this; }

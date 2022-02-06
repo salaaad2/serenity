@@ -63,10 +63,10 @@ public:
         return &entry;
     }
 
-    CacheEntry& ensure(BlockBasedFileSystem::BlockIndex block_index) const
+    ErrorOr<CacheEntry*> ensure(BlockBasedFileSystem::BlockIndex block_index) const
     {
         if (auto* entry = get(block_index))
-            return *entry;
+            return entry;
 
         if (m_clean_list.is_empty()) {
             // Not a single clean entry! Flush writes and try again.
@@ -81,12 +81,12 @@ public:
         m_clean_list.prepend(new_entry);
 
         m_hash.remove(new_entry.block_index);
-        m_hash.set(block_index, &new_entry);
+        TRY(m_hash.try_set(block_index, &new_entry));
 
         new_entry.block_index = block_index;
         new_entry.has_data = false;
 
-        return new_entry;
+        return &new_entry;
     }
 
     const CacheEntry* entries() const { return (const CacheEntry*)m_entries->data(); }
@@ -131,7 +131,7 @@ ErrorOr<void> BlockBasedFileSystem::initialize()
     return {};
 }
 
-ErrorOr<void> BlockBasedFileSystem::write_block(BlockIndex index, const UserOrKernelBuffer& data, size_t count, size_t offset, bool allow_cache)
+ErrorOr<void> BlockBasedFileSystem::write_block(BlockIndex index, const UserOrKernelBuffer& data, size_t count, u64 offset, bool allow_cache)
 {
     VERIFY(m_logical_block_size);
     VERIFY(offset + count <= block_size());
@@ -140,73 +140,66 @@ ErrorOr<void> BlockBasedFileSystem::write_block(BlockIndex index, const UserOrKe
     // NOTE: We copy the `data` to write into a local buffer before taking the cache lock.
     //       This makes sure any page faults caused by accessing the data will occur before
     //       we tie down the cache.
-    auto buffered_data_or_error = ByteBuffer::create_uninitialized(count);
-    if (!buffered_data_or_error.has_value())
-        return ENOMEM;
-    auto buffered_data = buffered_data_or_error.release_value();
+    auto buffered_data = TRY(ByteBuffer::create_uninitialized(count));
 
     TRY(data.read(buffered_data.bytes()));
 
     return m_cache.with_exclusive([&](auto& cache) -> ErrorOr<void> {
         if (!allow_cache) {
             flush_specific_block_if_needed(index);
-            auto base_offset = index.value() * block_size() + offset;
+            u64 base_offset = index.value() * block_size() + offset;
             auto nwritten = TRY(file_description().write(base_offset, data, count));
             VERIFY(nwritten == count);
             return {};
         }
 
-        auto& entry = cache->ensure(index);
+        auto entry = TRY(cache->ensure(index));
         if (count < block_size()) {
             // Fill the cache first.
             TRY(read_block(index, nullptr, block_size()));
         }
-        memcpy(entry.data + offset, buffered_data.data(), count);
+        memcpy(entry->data + offset, buffered_data.data(), count);
 
-        cache->mark_dirty(entry);
-        entry.has_data = true;
+        cache->mark_dirty(*entry);
+        entry->has_data = true;
         return {};
     });
 }
 
-bool BlockBasedFileSystem::raw_read(BlockIndex index, UserOrKernelBuffer& buffer)
+ErrorOr<void> BlockBasedFileSystem::raw_read(BlockIndex index, UserOrKernelBuffer& buffer)
 {
     auto base_offset = index.value() * m_logical_block_size;
-    auto nread = file_description().read(buffer, base_offset, m_logical_block_size);
-    VERIFY(!nread.is_error());
-    VERIFY(nread.value() == m_logical_block_size);
-    return true;
+    auto nread = TRY(file_description().read(buffer, base_offset, m_logical_block_size));
+    VERIFY(nread == m_logical_block_size);
+    return {};
 }
 
-bool BlockBasedFileSystem::raw_write(BlockIndex index, const UserOrKernelBuffer& buffer)
+ErrorOr<void> BlockBasedFileSystem::raw_write(BlockIndex index, const UserOrKernelBuffer& buffer)
 {
     auto base_offset = index.value() * m_logical_block_size;
-    auto nwritten = file_description().write(base_offset, buffer, m_logical_block_size);
-    VERIFY(!nwritten.is_error());
-    VERIFY(nwritten.value() == m_logical_block_size);
-    return true;
+    auto nwritten = TRY(file_description().write(base_offset, buffer, m_logical_block_size));
+    VERIFY(nwritten == m_logical_block_size);
+    return {};
 }
 
-bool BlockBasedFileSystem::raw_read_blocks(BlockIndex index, size_t count, UserOrKernelBuffer& buffer)
+ErrorOr<void> BlockBasedFileSystem::raw_read_blocks(BlockIndex index, size_t count, UserOrKernelBuffer& buffer)
 {
     auto current = buffer;
     for (auto block = index.value(); block < (index.value() + count); block++) {
-        if (!raw_read(BlockIndex { block }, current))
-            return false;
+        TRY(raw_read(BlockIndex { block }, current));
         current = current.offset(logical_block_size());
     }
-    return true;
+    return {};
 }
 
-bool BlockBasedFileSystem::raw_write_blocks(BlockIndex index, size_t count, const UserOrKernelBuffer& buffer)
+ErrorOr<void> BlockBasedFileSystem::raw_write_blocks(BlockIndex index, size_t count, const UserOrKernelBuffer& buffer)
 {
     auto current = buffer;
     for (auto block = index.value(); block < (index.value() + count); block++) {
-        if (!raw_write(block, current))
-            return false;
+        TRY(raw_write(block, current));
         current = current.offset(logical_block_size());
     }
-    return true;
+    return {};
 }
 
 ErrorOr<void> BlockBasedFileSystem::write_blocks(BlockIndex index, unsigned count, const UserOrKernelBuffer& data, bool allow_cache)
@@ -219,7 +212,7 @@ ErrorOr<void> BlockBasedFileSystem::write_blocks(BlockIndex index, unsigned coun
     return {};
 }
 
-ErrorOr<void> BlockBasedFileSystem::read_block(BlockIndex index, UserOrKernelBuffer* buffer, size_t count, size_t offset, bool allow_cache) const
+ErrorOr<void> BlockBasedFileSystem::read_block(BlockIndex index, UserOrKernelBuffer* buffer, size_t count, u64 offset, bool allow_cache) const
 {
     VERIFY(m_logical_block_size);
     VERIFY(offset + count <= block_size());
@@ -228,22 +221,22 @@ ErrorOr<void> BlockBasedFileSystem::read_block(BlockIndex index, UserOrKernelBuf
     return m_cache.with_exclusive([&](auto& cache) -> ErrorOr<void> {
         if (!allow_cache) {
             const_cast<BlockBasedFileSystem*>(this)->flush_specific_block_if_needed(index);
-            auto base_offset = index.value() * block_size() + offset;
+            u64 base_offset = index.value() * block_size() + offset;
             auto nread = TRY(file_description().read(*buffer, base_offset, count));
             VERIFY(nread == count);
             return {};
         }
 
-        auto& entry = cache->ensure(index);
-        if (!entry.has_data) {
+        auto* entry = TRY(cache->ensure(index));
+        if (!entry->has_data) {
             auto base_offset = index.value() * block_size();
-            auto entry_data_buffer = UserOrKernelBuffer::for_kernel_buffer(entry.data);
+            auto entry_data_buffer = UserOrKernelBuffer::for_kernel_buffer(entry->data);
             auto nread = TRY(file_description().read(entry_data_buffer, base_offset, block_size()));
             VERIFY(nread == block_size());
-            entry.has_data = true;
+            entry->has_data = true;
         }
         if (buffer)
-            TRY(buffer->write(entry.data + offset, count));
+            TRY(buffer->write(entry->data + offset, count));
         return {};
     });
 }

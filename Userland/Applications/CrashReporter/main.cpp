@@ -153,7 +153,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Vector<String> memory_regions;
     coredump->for_each_memory_region_info([&](auto& memory_region_info) {
-        memory_regions.append(String::formatted("{:p} - {:p}: {}", memory_region_info.region_start, memory_region_info.region_end, (const char*)memory_region_info.region_name));
+        memory_regions.append(String::formatted("{:p} - {:p}: {}", memory_region_info.region_start, memory_region_info.region_end, memory_region_info.region_name));
         return IterationDecision::Continue;
     });
 
@@ -162,20 +162,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto environment = coredump->process_environment();
     auto pid = coredump->process_pid();
     auto termination_signal = coredump->process_termination_signal();
-
-    if (unlink_on_exit)
-        TRY(Core::System::unveil(coredump_path, "c"));
-    TRY(Core::System::unveil(executable_path.characters(), "r"));
-    TRY(Core::System::unveil("/bin/HackStudio", "rx"));
-    TRY(Core::System::unveil("/res", "r"));
-    TRY(Core::System::unveil("/tmp/portal/launch", "rw"));
-    TRY(Core::System::unveil("/usr/lib", "r"));
-    coredump->for_each_library([](auto library_info) {
-        // FIXME: Make for_each_library propagate ErrorOr values so we can use TRY.
-        if (library_info.path.starts_with('/'))
-            MUST(Core::System::unveil(library_info.path, "r"));
-    });
-    TRY(Core::System::unveil(nullptr, nullptr));
 
     auto app_icon = GUI::Icon::default_icon("app-crash-reporter");
 
@@ -290,10 +276,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             size_t thread_index = 0;
             coredump->for_each_thread_info([&](auto& thread_info) {
                 results.thread_backtraces.append(build_backtrace(*coredump, thread_info, thread_index, [&](size_t frame_index, size_t frame_count) {
-                    window->set_progress(100.0f * (float)(frame_index + 1) / (float)frame_count);
-                    progressbar.set_value(frame_index + 1);
-                    progressbar.set_max(frame_count);
-                    Core::EventLoop::wake();
+                    Core::EventLoop::with_main_locked([&](auto& main) {
+                        main->deferred_invoke([&, frame_index, frame_count] {
+                            window->set_progress(100.0f * (float)(frame_index + 1) / (float)frame_count);
+                            progressbar.set_value(frame_index + 1);
+                            progressbar.set_max(frame_count);
+                        });
+                    });
                 }));
                 results.thread_cpu_registers.append(build_cpu_registers(thread_info, thread_index));
                 ++thread_index;

@@ -88,9 +88,7 @@ UNMAP_AFTER_INIT bool Access::find_and_register_pci_host_bridges_from_acpi_mcfg_
 
 UNMAP_AFTER_INIT bool Access::initialize_for_multiple_pci_domains(PhysicalAddress mcfg_table)
 {
-    if (Access::is_initialized())
-        return false;
-
+    VERIFY(!Access::is_initialized());
     auto* access = new Access();
     if (!access->find_and_register_pci_host_bridges_from_acpi_mcfg_table(mcfg_table))
         return false;
@@ -101,15 +99,29 @@ UNMAP_AFTER_INIT bool Access::initialize_for_multiple_pci_domains(PhysicalAddres
 
 UNMAP_AFTER_INIT bool Access::initialize_for_one_pci_domain()
 {
-    if (Access::is_initialized()) {
-        return false;
-    }
+    VERIFY(!Access::is_initialized());
     auto* access = new Access();
     auto host_bridge = HostBridge::must_create_with_io_access();
     access->add_host_controller(move(host_bridge));
     access->rescan_hardware();
     dbgln_if(PCI_DEBUG, "PCI: access for one PCI domain initialised.");
     return true;
+}
+
+void Access::add_host_controller_and_enumerate_attached_devices(NonnullOwnPtr<HostController> controller, Function<void(DeviceIdentifier const&)> callback)
+{
+    SpinlockLocker locker(m_access_lock);
+    SpinlockLocker scan_locker(m_scan_lock);
+    auto domain_number = controller->domain_number();
+
+    VERIFY(!m_host_controllers.contains(domain_number));
+    // Note: We need to register the new controller as soon as possible, and
+    // definitely before enumerating devices behing that.
+    m_host_controllers.set(domain_number, move(controller));
+    m_host_controllers.get(domain_number).value()->enumerate_attached_devices([&](DeviceIdentifier const& device_identifier) -> void {
+        m_device_identifiers.append(device_identifier);
+        callback(device_identifier);
+    });
 }
 
 UNMAP_AFTER_INIT void Access::add_host_controller(NonnullOwnPtr<HostController> controller)
@@ -125,7 +137,7 @@ UNMAP_AFTER_INIT Access::Access()
 
 UNMAP_AFTER_INIT void Access::rescan_hardware()
 {
-    MutexLocker locker(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     SpinlockLocker scan_locker(m_scan_lock);
     VERIFY(m_device_identifiers.is_empty());
     for (auto it = m_host_controllers.begin(); it != m_host_controllers.end(); ++it) {
@@ -137,7 +149,7 @@ UNMAP_AFTER_INIT void Access::rescan_hardware()
 
 void Access::fast_enumerate(Function<void(DeviceIdentifier const&)>& callback) const
 {
-    MutexLocker locker(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(!m_device_identifiers.is_empty());
     for (auto const& device_identifier : m_device_identifiers) {
         callback(device_identifier);
@@ -159,21 +171,21 @@ DeviceIdentifier Access::get_device_identifier(Address address) const
 
 void Access::write8_field(Address address, u32 field, u8 value)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     controller.write8_field(address.bus(), address.device(), address.function(), field, value);
 }
 void Access::write16_field(Address address, u32 field, u16 value)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     controller.write16_field(address.bus(), address.device(), address.function(), field, value);
 }
 void Access::write32_field(Address address, u32 field, u32 value)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     controller.write32_field(address.bus(), address.device(), address.function(), field, value);
@@ -190,21 +202,21 @@ u16 Access::read16_field(Address address, RegisterOffset field)
 
 u8 Access::read8_field(Address address, u32 field)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     return controller.read8_field(address.bus(), address.device(), address.function(), field);
 }
 u16 Access::read16_field(Address address, u32 field)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     return controller.read16_field(address.bus(), address.device(), address.function(), field);
 }
 u32 Access::read32_field(Address address, u32 field)
 {
-    MutexLocker lock(m_access_lock);
+    SpinlockLocker locker(m_access_lock);
     VERIFY(m_host_controllers.contains(address.domain()));
     auto& controller = *m_host_controllers.get(address.domain()).value();
     return controller.read32_field(address.bus(), address.device(), address.function(), field);

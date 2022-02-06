@@ -10,7 +10,7 @@
 #include <AK/Types.h>
 #include <Kernel/Devices/BlockDevice.h>
 #include <Kernel/Graphics/GenericGraphicsAdapter.h>
-#include <Kernel/Locking/Mutex.h>
+#include <Kernel/Locking/Spinlock.h>
 #include <LibC/sys/ioctl_numbers.h>
 
 namespace Kernel {
@@ -33,8 +33,8 @@ public:
 
 private:
     // ^File
-    virtual bool can_read(const OpenFileDescription&, size_t) const override final { return true; }
-    virtual bool can_write(const OpenFileDescription&, size_t) const override final { return true; }
+    virtual bool can_read(const OpenFileDescription&, u64) const override final { return true; }
+    virtual bool can_write(const OpenFileDescription&, u64) const override final { return true; }
     virtual void start_request(AsyncBlockDeviceRequest& request) override final { request.complete(AsyncDeviceRequest::Failure); }
     virtual ErrorOr<size_t> read(OpenFileDescription&, u64, UserOrKernelBuffer&, size_t) override { return EINVAL; }
     virtual ErrorOr<size_t> write(OpenFileDescription&, u64, const UserOrKernelBuffer&, size_t) override { return EINVAL; }
@@ -57,13 +57,14 @@ protected:
     // FIXME: This method is too much specific to the VirtIO implementation (especially the buffer_index parameter)
     virtual ErrorOr<void> flush_rectangle(size_t buffer_index, FBRect const&) = 0;
 
+    virtual ErrorOr<ByteBuffer> get_edid(size_t head) const = 0;
+
     ErrorOr<void> verify_head_index(int head_index) const;
 
     GenericFramebufferDevice(const GenericGraphicsAdapter&);
     mutable WeakPtr<GenericGraphicsAdapter> m_graphics_adapter;
-    mutable Mutex m_heads_lock;
-    mutable Mutex m_flushing_lock;
-    mutable Mutex m_resolution_lock;
+    mutable Spinlock m_flushing_lock;
+    mutable Spinlock m_resolution_lock;
 };
 
 }

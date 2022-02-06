@@ -73,7 +73,7 @@ private:
     Ext2FSInode(Ext2FS&, InodeIndex);
 
     mutable Vector<BlockBasedFileSystem::BlockIndex> m_block_list;
-    mutable HashMap<String, InodeIndex> m_lookup_cache;
+    mutable HashMap<NonnullOwnPtr<KString>, InodeIndex> m_lookup_cache;
     ext2_inode m_raw_inode {};
 };
 
@@ -122,7 +122,7 @@ private:
     ErrorOr<void> write_ext2_inode(InodeIndex, ext2_inode const&);
     bool find_block_containing_inode(InodeIndex, BlockIndex& block_index, unsigned& offset) const;
 
-    bool flush_super_block();
+    ErrorOr<void> flush_super_block();
 
     virtual StringView class_name() const override { return "Ext2FS"sv; }
     virtual Ext2FSInode& root_inode() override;

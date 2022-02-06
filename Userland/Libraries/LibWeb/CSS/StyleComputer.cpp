@@ -714,8 +714,11 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
             weight = Gfx::FontWeight::Bold;
         else
             weight = Gfx::FontWeight::Black;
+    } else if (font_weight->is_calculated()) {
+        auto maybe_weight = font_weight->as_calculated().resolve_integer();
+        if (maybe_weight.has_value())
+            weight = maybe_weight.value();
     }
-    // FIXME: calc() for font-weight
 
     bool bold = weight > Gfx::FontWeight::Regular;
 
@@ -773,12 +776,11 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
             maybe_length = font_size->to_length();
 
         } else if (font_size->is_calculated()) {
-            Length length = Length(0, Length::Type::Calculated);
-            length.set_calculated_style(verify_cast<CalculatedStyleValue>(font_size.ptr()));
-            maybe_length = length;
+            maybe_length = Length::make_calculated(font_size->as_calculated());
         }
         if (maybe_length.has_value()) {
             // FIXME: Support font-size: calc(...)
+            //        Theoretically we can do this now, but to resolve it we need a layout_node which we might not have. :^(
             if (!maybe_length->is_calculated()) {
                 auto px = maybe_length.value().to_px(viewport_rect, font_metrics, root_font_size);
                 if (px != 0)
@@ -793,13 +795,14 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     FontSelector font_selector;
     bool monospace = false;
 
+    // FIXME: Implement font slope style. All found fonts are currently hard-coded as regular.
     auto find_font = [&](String const& family) -> RefPtr<Gfx::Font> {
-        font_selector = { family, size, weight };
+        font_selector = { family, size, weight, 0 };
 
         if (auto found_font = FontCache::the().get(font_selector))
             return found_font;
 
-        if (auto found_font = Gfx::FontDatabase::the().get(family, size, weight))
+        if (auto found_font = Gfx::FontDatabase::the().get(family, size, weight, 0))
             return found_font;
 
         return {};
@@ -873,6 +876,41 @@ void StyleComputer::absolutize_values(StyleProperties& style, DOM::Element const
     }
 }
 
+// https://drafts.csswg.org/css-display/#transformations
+void StyleComputer::transform_box_type_if_needed(StyleProperties& style, DOM::Element const&) const
+{
+    // 2.7. Automatic Box Type Transformations
+
+    // Some layout effects require blockification or inlinification of the box type,
+    // which sets the box’s computed outer display type to block or inline (respectively).
+    // (This has no effect on display types that generate no box at all, such as none or contents.)
+
+    // Additionally:
+
+    // FIXME: If a block box (block flow) is inlinified, its inner display type is set to flow-root so that it remains a block container.
+    //
+    // FIXME: If an inline box (inline flow) is inlinified, it recursively inlinifies all of its in-flow children,
+    //        so that no block-level descendants break up the inline formatting context in which it participates.
+    //
+    // FIXME: For legacy reasons, if an inline block box (inline flow-root) is blockified, it becomes a block box (losing its flow-root nature).
+    //        For consistency, a run-in flow-root box also blockifies to a block box.
+    //
+    // FIXME: If a layout-internal box is blockified, its inner display type converts to flow so that it becomes a block container.
+    //        Inlinification has no effect on layout-internal boxes. (However, placement in such an inline context will typically cause them
+    //        to be wrapped in an appropriately-typed anonymous inline-level box.)
+
+    // Absolute positioning or floating an element blockifies the box’s display type. [CSS2]
+    auto display = style.display();
+    if (!display.is_none() && !display.is_contents() && !display.is_block_outside()) {
+        if (style.position() == CSS::Position::Absolute || style.position() == CSS::Position::Fixed || style.float_() != CSS::Float::None)
+            style.set_property(CSS::PropertyID::Display, IdentifierStyleValue::create(CSS::ValueID::Block));
+    }
+
+    // FIXME: Containment in a ruby container inlinifies the box’s display type, as described in [CSS-RUBY-1].
+
+    // FIXME: A parent with a grid or flex display value blockifies the box’s display type. [CSS-GRID-1] [CSS-FLEXBOX-1]
+}
+
 NonnullRefPtr<StyleProperties> StyleComputer::create_document_style() const
 {
     auto style = StyleProperties::create();
@@ -896,6 +934,9 @@ NonnullRefPtr<StyleProperties> StyleComputer::compute_style(DOM::Element& elemen
 
     // 4. Default the values, applying inheritance and 'initial' as needed
     compute_defaulted_values(style, &element);
+
+    // 5. Run automatic box type transformations
+    transform_box_type_if_needed(style, element);
 
     return style;
 }

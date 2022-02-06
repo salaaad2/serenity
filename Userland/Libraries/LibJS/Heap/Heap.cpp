@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -43,6 +43,7 @@ Heap::Heap(VM& vm)
     static_assert(HeapBlock::min_possible_cell_size <= 24, "Heap Cell tracking uses too much data!");
     m_allocators.append(make<CellAllocator>(32));
     m_allocators.append(make<CellAllocator>(64));
+    m_allocators.append(make<CellAllocator>(96));
     m_allocators.append(make<CellAllocator>(128));
     m_allocators.append(make<CellAllocator>(256));
     m_allocators.append(make<CellAllocator>(512));
@@ -189,14 +190,6 @@ public:
             return;
         dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
 
-#ifdef JS_TRACK_ZOMBIE_CELLS
-        if (cell.state() == Cell::State::Zombie) {
-            dbgln("BUG! Marking a zombie cell, {} @ {:p}", cell.class_name(), &cell);
-            cell.vm().dump_backtrace();
-            VERIFY_NOT_REACHED();
-        }
-#endif
-
         cell.set_marked(true);
         cell.visit_edges(*this);
     }
@@ -233,16 +226,7 @@ void Heap::sweep_dead_cells(bool print_report, const Core::ElapsedTimer& measure
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
             if (!cell->is_marked()) {
                 dbgln_if(HEAP_DEBUG, "  ~ {}", cell);
-#ifdef JS_TRACK_ZOMBIE_CELLS
-                if (m_zombify_dead_cells) {
-                    cell->set_state(Cell::State::Zombie);
-                    cell->did_become_zombie();
-                } else {
-#endif
-                    block.deallocate(cell);
-#ifdef JS_TRACK_ZOMBIE_CELLS
-                }
-#endif
+                block.deallocate(cell);
                 ++collected_cells;
                 collected_cell_bytes += block.cell_size();
             } else {

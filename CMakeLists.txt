@@ -98,6 +98,10 @@ add_custom_target(extlinux-image
     BYPRODUCTS "${CMAKE_BINARY_DIR}/extlinux_disk_image"
     USES_TERMINAL
 )
+add_custom_target(install-native-partition
+    COMMAND "${CMAKE_COMMAND}" -E env "SERENITY_SOURCE_DIR=${SerenityOS_SOURCE_DIR}" "SERENITY_ARCH=${SERENITY_ARCH}" "SERENITY_TOOLCHAIN=${CMAKE_CXX_COMPILER_ID}" "LLVM_VERSION=${CMAKE_CXX_COMPILER_VERSION}" "${SerenityOS_SOURCE_DIR}/Meta/build-native-partition.sh"
+    USES_TERMINAL
+)
 
 add_custom_target(lint-shell-scripts
     COMMAND "${SerenityOS_SOURCE_DIR}/Meta/lint-shell-scripts.sh"
@@ -267,6 +271,9 @@ endif()
 add_subdirectory(AK)
 add_subdirectory(Kernel)
 if(NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
+    if (ENABLE_MOLD_LINKER)
+        add_link_options(-fuse-ld=mold)
+    endif()
     add_subdirectory(Userland)
     add_subdirectory(Tests)
 endif()
@@ -283,8 +290,7 @@ set(PCI_IDS_PATH ${CMAKE_BINARY_DIR}/${PCI_IDS_FILE})
 set(PCI_IDS_INSTALL_PATH ${CMAKE_INSTALL_DATAROOTDIR}/${PCI_IDS_FILE})
 
 if(ENABLE_PCI_IDS_DOWNLOAD AND NOT EXISTS ${PCI_IDS_GZ_PATH})
-    message(STATUS "Downloading PCI ID database from ${PCI_IDS_GZ_URL}...")
-    file(DOWNLOAD ${PCI_IDS_GZ_URL} ${PCI_IDS_GZ_PATH} INACTIVITY_TIMEOUT 10)
+    download_file("${PCI_IDS_GZ_URL}" "${PCI_IDS_GZ_PATH}")
 endif()
 
 if(EXISTS ${PCI_IDS_GZ_PATH} AND NOT EXISTS ${PCI_IDS_INSTALL_PATH})
@@ -300,8 +306,7 @@ set(USB_IDS_PATH ${CMAKE_BINARY_DIR}/${USB_IDS_FILE})
 set(USB_IDS_INSTALL_PATH ${CMAKE_INSTALL_DATAROOTDIR}/${USB_IDS_FILE})
 
 if(ENABLE_USB_IDS_DOWNLOAD AND NOT EXISTS ${USB_IDS_GZ_PATH})
-    message(STATUS "Downloading USB ID database from ${USB_IDS_GZ_URL}...")
-    file(DOWNLOAD ${USB_IDS_GZ_URL} ${USB_IDS_GZ_PATH} INACTIVITY_TIMEOUT 10)
+    download_file("${USB_IDS_GZ_URL}" "${USB_IDS_GZ_PATH}")
 endif()
 
 if(EXISTS ${USB_IDS_GZ_PATH} AND NOT EXISTS ${USB_IDS_INSTALL_PATH})

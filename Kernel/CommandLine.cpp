@@ -27,6 +27,11 @@ UNMAP_AFTER_INIT void CommandLine::early_initialize(const char* cmd_line)
     s_cmd_line[length] = '\0';
 }
 
+bool CommandLine::was_initialized()
+{
+    return s_the != nullptr;
+}
+
 const CommandLine& kernel_command_line()
 {
     VERIFY(s_the);
@@ -150,6 +155,16 @@ UNMAP_AFTER_INIT bool CommandLine::is_legacy_time_enabled() const
     return lookup("time"sv).value_or("modern"sv) == "legacy"sv;
 }
 
+bool CommandLine::is_pc_speaker_enabled() const
+{
+    auto value = lookup("pcspeaker"sv).value_or("off"sv);
+    if (value == "on"sv)
+        return true;
+    if (value == "off"sv)
+        return false;
+    PANIC("Unknown pcspeaker setting: {}", value);
+}
+
 UNMAP_AFTER_INIT bool CommandLine::is_force_pio() const
 {
     return contains("force_pio"sv);
@@ -158,6 +173,11 @@ UNMAP_AFTER_INIT bool CommandLine::is_force_pio() const
 UNMAP_AFTER_INIT StringView CommandLine::root_device() const
 {
     return lookup("root"sv).value_or("/dev/hda"sv);
+}
+
+bool CommandLine::is_nvme_polling_enabled() const
+{
+    return contains("nvme_poll"sv);
 }
 
 UNMAP_AFTER_INIT AcpiFeatureLevel CommandLine::acpi_feature_level() const

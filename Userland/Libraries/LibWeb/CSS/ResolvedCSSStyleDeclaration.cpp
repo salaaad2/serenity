@@ -1,10 +1,11 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
 #include <AK/NonnullRefPtr.h>
 #include <LibWeb/CSS/ResolvedCSSStyleDeclaration.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -83,7 +84,7 @@ static RefPtr<StyleValue> style_value_for_display(CSS::Display display)
             break;
         }
 
-        return StyleValueList::create(move(values));
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
 
     if (display.is_internal()) {
@@ -159,6 +160,23 @@ static CSS::ValueID to_css_value_id(CSS::TextDecorationLine value)
         return CSS::ValueID::LineThrough;
     case TextDecorationLine::Blink:
         return CSS::ValueID::Blink;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static CSS::ValueID to_css_value_id(CSS::TextDecorationStyle value)
+{
+    switch (value) {
+    case TextDecorationStyle::Solid:
+        return CSS::ValueID::Solid;
+    case TextDecorationStyle::Double:
+        return CSS::ValueID::Double;
+    case TextDecorationStyle::Dotted:
+        return CSS::ValueID::Dotted;
+    case TextDecorationStyle::Dashed:
+        return CSS::ValueID::Dashed;
+    case TextDecorationStyle::Wavy:
+        return CSS::ValueID::Wavy;
     }
     VERIFY_NOT_REACHED();
 }
@@ -467,6 +485,8 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         return IdentifierStyleValue::create(to_css_value_id(layout_node.computed_values().text_align()));
     case CSS::PropertyID::TextDecorationLine:
         return IdentifierStyleValue::create(to_css_value_id(layout_node.computed_values().text_decoration_line()));
+    case CSS::PropertyID::TextDecorationStyle:
+        return IdentifierStyleValue::create(to_css_value_id(layout_node.computed_values().text_decoration_style()));
     case CSS::PropertyID::TextTransform:
         return IdentifierStyleValue::create(to_css_value_id(layout_node.computed_values().text_transform()));
     case CSS::PropertyID::Position:
@@ -531,7 +551,7 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         values.append(style_value_for_length_percentage(margin.right));
         values.append(style_value_for_length_percentage(margin.bottom));
         values.append(style_value_for_length_percentage(margin.left));
-        return StyleValueList::create(move(values));
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
     case CSS::PropertyID::MarginTop:
         return style_value_for_length_percentage(layout_node.computed_values().margin().top);
@@ -548,7 +568,7 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         values.append(style_value_for_length_percentage(padding.right));
         values.append(style_value_for_length_percentage(padding.bottom));
         values.append(style_value_for_length_percentage(padding.left));
-        return StyleValueList::create(move(values));
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
     case CSS::PropertyID::PaddingTop:
         return style_value_for_length_percentage(layout_node.computed_values().padding().top);
@@ -679,10 +699,10 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
     case CSS::PropertyID::Invalid:
         return IdentifierStyleValue::create(CSS::ValueID::Invalid);
     case CSS::PropertyID::Custom:
-        dbgln("Computed style for custom properties was requested (?)");
+        dbgln_if(LIBWEB_CSS_DEBUG, "Computed style for custom properties was requested (?)");
         return {};
     default:
-        dbgln("FIXME: Computed style for the '{}' property was requested", string_from_property_id(property_id));
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Computed style for the '{}' property was requested", string_from_property_id(property_id));
         return {};
     }
     }

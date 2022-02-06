@@ -16,6 +16,7 @@
 #include <Applications/Browser/BrowserWindowGML.h>
 #include <LibConfig/Client.h>
 #include <LibCore/StandardPaths.h>
+#include <LibCore/Stream.h>
 #include <LibGUI/AboutDialog.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
@@ -197,21 +198,21 @@ void BrowserWindow::build_menus()
     });
 
     m_view_source_action = GUI::Action::create(
-        "View &Source", { Mod_Ctrl, Key_U }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/code.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        "View &Source", { Mod_Ctrl, Key_U }, g_icon_bag.code, [this](auto&) {
             active_tab().m_web_content_view->get_source();
         },
         this);
     m_view_source_action->set_status_tip("View source code of the current page");
 
     m_inspect_dom_tree_action = GUI::Action::create(
-        "Inspect &DOM Tree", { Mod_None, Key_F12 }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/tree.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        "Inspect &DOM Tree", { Mod_None, Key_F12 }, g_icon_bag.tree, [this](auto&) {
             active_tab().show_inspector_window(Tab::InspectorTarget::Document);
         },
         this);
     m_inspect_dom_tree_action->set_status_tip("Open inspector window for this page");
 
     m_inspect_dom_node_action = GUI::Action::create(
-        "&Inspect Element", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/inspect.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        "&Inspect Element", g_icon_bag.inspect, [this](auto&) {
             active_tab().show_inspector_window(Tab::InspectorTarget::HoveredElement);
         },
         this);
@@ -222,7 +223,7 @@ void BrowserWindow::build_menus()
     inspect_menu.add_action(*m_inspect_dom_tree_action);
 
     auto js_console_action = GUI::Action::create(
-        "Open &JS Console", { Mod_Ctrl, Key_I }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/filetype-javascript.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        "Open &JS Console", { Mod_Ctrl, Key_I }, g_icon_bag.filetype_javascript, [this](auto&) {
             active_tab().show_console_window();
         },
         this);
@@ -247,78 +248,13 @@ void BrowserWindow::build_menus()
 
     settings_menu.add_action(*m_change_homepage_action);
 
-    m_search_engine_actions.set_exclusive(true);
-    auto& search_engine_menu = settings_menu.add_submenu("&Search Engine");
-    search_engine_menu.set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png").release_value_but_fixme_should_propagate_errors());
-    bool search_engine_set = false;
-
-    m_disable_search_engine_action = GUI::Action::create_checkable(
-        "Disable", [](auto&) {
-            g_search_engine = {};
-            Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
-        },
-        this);
-    search_engine_menu.add_action(*m_disable_search_engine_action);
-    m_search_engine_actions.add_action(*m_disable_search_engine_action);
-    m_disable_search_engine_action->set_checked(true);
-
-    auto search_engines_file = Core::File::construct(Browser::search_engines_file_path());
-    if (search_engines_file->open(Core::OpenMode::ReadOnly)) {
-        if (auto maybe_json = JsonValue::from_string(search_engines_file->read_all()); !maybe_json.is_error() && maybe_json.value().is_array()) {
-            auto json = maybe_json.release_value().as_array();
-            for (auto& json_item : json.values()) {
-                if (!json_item.is_object())
-                    continue;
-                auto search_engine = json_item.as_object();
-                auto name = search_engine.get("title").to_string();
-                auto url_format = search_engine.get("url_format").to_string();
-
-                auto action = GUI::Action::create_checkable(
-                    name, [&, url_format](auto&) {
-                        g_search_engine = url_format;
-                        Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
-                    },
-                    this);
-                search_engine_menu.add_action(action);
-                m_search_engine_actions.add_action(action);
-
-                if (g_search_engine == url_format) {
-                    action->set_checked(true);
-                    search_engine_set = true;
-                }
-                action->set_status_tip(url_format);
-            }
-        }
-    }
-
-    auto custom_search_engine_action = GUI::Action::create_checkable("Custom...", [&](auto& action) {
-        String search_engine;
-        if (GUI::InputBox::show(this, search_engine, "Enter URL template:", "Custom Search Engine", "https://host/search?q={}") != GUI::InputBox::ExecOK || search_engine.is_empty()) {
-            m_disable_search_engine_action->activate();
-            return;
-        }
-
-        auto argument_count = search_engine.count("{}"sv);
-        if (argument_count != 1) {
-            GUI::MessageBox::show(this, "Invalid format, must contain '{}' once!", "Error", GUI::MessageBox::Type::Error);
-            m_disable_search_engine_action->activate();
-            return;
-        }
-
-        g_search_engine = search_engine;
-        Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
-        action.set_status_tip(search_engine);
-    });
-    search_engine_menu.add_action(custom_search_engine_action);
-    m_search_engine_actions.add_action(custom_search_engine_action);
-
-    if (!search_engine_set && !g_search_engine.is_empty()) {
-        custom_search_engine_action->set_checked(true);
-        custom_search_engine_action->set_status_tip(g_search_engine);
+    auto load_search_engines_result = load_search_engines(settings_menu);
+    if (load_search_engines_result.is_error()) {
+        dbgln("Failed to open search-engines file: {}", load_search_engines_result.error());
     }
 
     auto& color_scheme_menu = settings_menu.add_submenu("&Color Scheme");
-    color_scheme_menu.set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/color-chooser.png").release_value_but_fixme_should_propagate_errors());
+    color_scheme_menu.set_icon(g_icon_bag.color_chooser);
     {
         auto current_setting = Web::CSS::preferred_color_scheme_from_string(Config::read_string("Browser", "Preferences", "ColorScheme", "auto"));
         m_color_scheme_actions.set_exclusive(true);
@@ -343,13 +279,18 @@ void BrowserWindow::build_menus()
 
     auto& debug_menu = add_menu("&Debug");
     debug_menu.add_action(GUI::Action::create(
-        "Dump &DOM Tree", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/tree.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        "Dump &DOM Tree", g_icon_bag.tree, [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-dom-tree");
         },
         this));
     debug_menu.add_action(GUI::Action::create(
         "Dump &Layout Tree", [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-layout-tree");
+        },
+        this));
+    debug_menu.add_action(GUI::Action::create(
+        "Dump &Stacking Context Tree", [this](auto&) {
+            active_tab().m_web_content_view->debug_request("dump-stacking-context-tree");
         },
         this));
     debug_menu.add_action(GUI::Action::create(
@@ -360,7 +301,7 @@ void BrowserWindow::build_menus()
     debug_menu.add_action(GUI::Action::create("Dump &History", { Mod_Ctrl, Key_H }, [this](auto&) {
         active_tab().m_history.dump();
     }));
-    debug_menu.add_action(GUI::Action::create("Dump C&ookies", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/cookie.png").release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+    debug_menu.add_action(GUI::Action::create("Dump C&ookies", g_icon_bag.cookie, [this](auto&) {
         auto& tab = active_tab();
         if (tab.on_dump_cookies)
             tab.on_dump_cookies();
@@ -430,6 +371,84 @@ void BrowserWindow::build_menus()
 
     auto& help_menu = add_menu("&Help");
     help_menu.add_action(WindowActions::the().about_action());
+}
+
+ErrorOr<void> BrowserWindow::load_search_engines(GUI::Menu& settings_menu)
+{
+    m_search_engine_actions.set_exclusive(true);
+    auto& search_engine_menu = settings_menu.add_submenu("&Search Engine");
+    search_engine_menu.set_icon(g_icon_bag.find);
+    bool search_engine_set = false;
+
+    m_disable_search_engine_action = GUI::Action::create_checkable(
+        "Disable", [](auto&) {
+            g_search_engine = {};
+            Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
+        },
+        this);
+    search_engine_menu.add_action(*m_disable_search_engine_action);
+    m_search_engine_actions.add_action(*m_disable_search_engine_action);
+    m_disable_search_engine_action->set_checked(true);
+
+    auto search_engines_file = TRY(Core::Stream::File::open(Browser::search_engines_file_path(), Core::Stream::OpenMode::Read));
+    auto file_size = TRY(search_engines_file->size());
+    auto buffer = TRY(ByteBuffer::create_uninitialized(file_size));
+    if (search_engines_file->read_or_error(buffer)) {
+        StringView buffer_contents { buffer.bytes() };
+        if (auto json = TRY(JsonValue::from_string(buffer_contents)); json.is_array()) {
+            auto json_array = json.as_array();
+            for (auto& json_item : json_array.values()) {
+                if (!json_item.is_object())
+                    continue;
+                auto search_engine = json_item.as_object();
+                auto name = search_engine.get("title").to_string();
+                auto url_format = search_engine.get("url_format").to_string();
+
+                auto action = GUI::Action::create_checkable(
+                    name, [&, url_format](auto&) {
+                        g_search_engine = url_format;
+                        Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
+                    },
+                    this);
+                search_engine_menu.add_action(action);
+                m_search_engine_actions.add_action(action);
+
+                if (g_search_engine == url_format) {
+                    action->set_checked(true);
+                    search_engine_set = true;
+                }
+                action->set_status_tip(url_format);
+            }
+        }
+    }
+
+    auto custom_search_engine_action = GUI::Action::create_checkable("Custom...", [&](auto& action) {
+        String search_engine;
+        if (GUI::InputBox::show(this, search_engine, "Enter URL template:", "Custom Search Engine", "https://host/search?q={}") != GUI::InputBox::ExecOK || search_engine.is_empty()) {
+            m_disable_search_engine_action->activate();
+            return;
+        }
+
+        auto argument_count = search_engine.count("{}"sv);
+        if (argument_count != 1) {
+            GUI::MessageBox::show(this, "Invalid format, must contain '{}' once!", "Error", GUI::MessageBox::Type::Error);
+            m_disable_search_engine_action->activate();
+            return;
+        }
+
+        g_search_engine = search_engine;
+        Config::write_string("Browser", "Preferences", "SearchEngine", g_search_engine);
+        action.set_status_tip(search_engine);
+    });
+    search_engine_menu.add_action(custom_search_engine_action);
+    m_search_engine_actions.add_action(custom_search_engine_action);
+
+    if (!search_engine_set && !g_search_engine.is_empty()) {
+        custom_search_engine_action->set_checked(true);
+        custom_search_engine_action->set_status_tip(g_search_engine);
+    }
+
+    return {};
 }
 
 GUI::TabWidget& BrowserWindow::tab_widget()

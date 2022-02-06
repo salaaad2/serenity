@@ -67,7 +67,7 @@ size_t UnsignedBigInteger::export_data(Bytes data, bool remove_leading_zeros) co
     return out;
 }
 
-UnsignedBigInteger UnsignedBigInteger::from_base(u16 N, const String& str)
+UnsignedBigInteger UnsignedBigInteger::from_base(u16 N, StringView str)
 {
     VERIFY(N <= 36);
     UnsignedBigInteger result;
@@ -143,6 +143,16 @@ void UnsignedBigInteger::set_to(const UnsignedBigInteger& other)
     __builtin_memcpy(m_words.data(), other.m_words.data(), other.m_words.size() * sizeof(u32));
     m_cached_trimmed_length = {};
     m_cached_hash = 0;
+}
+
+bool UnsignedBigInteger::is_zero() const
+{
+    for (size_t i = 0; i < length(); ++i) {
+        if (m_words[i] != 0)
+            return false;
+    }
+
+    return true;
 }
 
 size_t UnsignedBigInteger::trimmed_length() const

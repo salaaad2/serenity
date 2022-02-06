@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -93,6 +93,7 @@ StringView calendar_pattern_style_to_string(CalendarPatternStyle style)
 
 Optional<Calendar> __attribute__((weak)) calendar_from_string(StringView) { return {}; }
 Optional<HourCycleRegion> __attribute__((weak)) hour_cycle_region_from_string(StringView) { return {}; }
+Span<StringView const> __attribute__((weak)) get_available_calendars() { return {}; }
 Vector<HourCycle> __attribute__((weak)) get_regional_hour_cycles(StringView) { return {}; }
 
 // https://unicode.org/reports/tr35/tr35-dates.html#Date_Field_Symbol_Table

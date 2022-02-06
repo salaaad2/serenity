@@ -19,6 +19,7 @@
 #include <LibCore/File.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
+#include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -47,15 +48,19 @@ Sheet::Sheet(Workbook& workbook)
     global_object().define_direct_property("thisSheet", &global_object(), JS::default_attributes); // Self-reference is unfortunate, but required.
 
     // Sadly, these have to be evaluated once per sheet.
-    auto file_or_error = Core::File::open("/res/js/Spreadsheet/runtime.js", Core::OpenMode::ReadOnly);
+    constexpr StringView runtime_file_path = "/res/js/Spreadsheet/runtime.js";
+    auto file_or_error = Core::File::open(runtime_file_path, Core::OpenMode::ReadOnly);
     if (!file_or_error.is_error()) {
         auto buffer = file_or_error.value()->read_all();
-        JS::Parser parser { JS::Lexer(buffer) };
-        if (parser.has_errors()) {
+        auto script_or_error = JS::Script::parse(buffer, interpreter().realm(), runtime_file_path);
+        if (script_or_error.is_error()) {
             warnln("Spreadsheet: Failed to parse runtime code");
-            parser.print_errors();
+            for (auto& error : script_or_error.error()) {
+                // FIXME: This doesn't print hints anymore
+                warnln("SyntaxError: {}", error.to_string());
+            }
         } else {
-            (void)interpreter().run(global_object(), parser.parse_program());
+            (void)interpreter().run(script_or_error.value());
             if (auto* exception = interpreter().exception()) {
                 warnln("Spreadsheet: Failed to run runtime code:");
                 for (auto& traceback_frame : exception->traceback()) {
@@ -159,14 +164,14 @@ Sheet::ValueAndException Sheet::evaluate(StringView source, Cell* on_behalf_of)
     TemporaryChange cell_change { m_current_cell_being_evaluated, on_behalf_of };
     ScopeGuard clear_exception { [&] { interpreter().vm().clear_exception(); } };
 
-    auto parser = JS::Parser(JS::Lexer(source));
-    auto program = parser.parse_program();
-    if (parser.has_errors() || interpreter().exception())
+    auto script_or_error = JS::Script::parse(source, interpreter().realm());
+    // FIXME: Convert parser errors to exceptions to show them to the user.
+    if (script_or_error.is_error() || interpreter().exception())
         return { JS::js_undefined(), interpreter().exception() };
 
-    auto result = interpreter().run(global_object(), program);
+    auto result = interpreter().run(script_or_error.value());
     if (result.is_error()) {
-        auto exc = interpreter().exception();
+        auto* exc = interpreter().exception();
         return { JS::js_undefined(), exc };
     }
     return { result.value(), {} };
@@ -396,7 +401,7 @@ RefPtr<Sheet> Sheet::from_json(const JsonObject& object, Workbook& workbook)
                 break;
             case Cell::Formula: {
                 auto& interpreter = sheet->interpreter();
-                auto value_or_error = interpreter.vm().call(parse_function, json, JS::js_string(interpreter.heap(), obj.get("value").as_string()));
+                auto value_or_error = JS::call(interpreter.global_object(), parse_function, json, JS::js_string(interpreter.heap(), obj.get("value").as_string()));
                 VERIFY(!value_or_error.is_error());
                 cell = make<Cell>(obj.get("source").to_string(), value_or_error.release_value(), position, *sheet);
                 break;
@@ -526,7 +531,7 @@ JsonObject Sheet::to_json() const
         if (it.value->kind() == Cell::Formula) {
             data.set("source", it.value->data());
             auto json = interpreter().global_object().get_without_side_effects("JSON");
-            auto stringified_or_error = interpreter().vm().call(json.as_object().get_without_side_effects("stringify").as_function(), json, it.value->evaluated_data());
+            auto stringified_or_error = JS::call(interpreter().global_object(), json.as_object().get_without_side_effects("stringify").as_function(), json, it.value->evaluated_data());
             VERIFY(!stringified_or_error.is_error());
             data.set("value", stringified_or_error.release_value().to_string_without_side_effects());
         } else {

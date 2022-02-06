@@ -8,7 +8,7 @@
 
     @GUI::GroupBox {
         title: "Mapping"
-        fixed_height: 200
+        fixed_height: 150
 
         layout: @GUI::HorizontalBoxLayout {
             margins: [16, 8, 8]
@@ -23,10 +23,58 @@
             @GUI::Label {
                 fixed_width: 32
                 fixed_height: 32
-                name: "character_map_image_label"
+                icon: "/res/icons/32x32/app-keyboard-mapper.png"
+            }
+        }
+
+        @GUI::Widget {
+            layout: @GUI::VerticalBoxLayout {
+                spacing: 2
             }
 
-            @GUI::Widget
+            @GUI::ListView {
+                name: "selected_keymaps"
+            }
+
+            @GUI::Widget {
+                fixed_height: 24
+
+                layout: @GUI::HorizontalBoxLayout {
+                    spacing: 4
+                }
+
+                @GUI::Button {
+                    name: "add_keymap_button"
+                    text: "Add keymap"
+                }
+
+                @GUI::Button {
+                    name: "remove_keymap_button"
+                    text: "Remove keymap"
+                    enabled: false
+                }
+            }
+        }
+    }
+
+    @GUI::GroupBox {
+        title: "Test input"
+
+        layout: @GUI::HorizontalBoxLayout {
+            margins: [16, 8, 8]
+            spacing: 16
+        }
+
+        @GUI::Widget {
+            fixed_width: 32
+            layout: @GUI::VerticalBoxLayout {
+            }
+
+            @GUI::Label {
+                fixed_width: 32
+                fixed_height: 32
+                icon: "/res/icons/32x32/app-keyboard-settings.png"
+            }
         }
 
         @GUI::Widget {
@@ -35,22 +83,8 @@
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout {
-                    spacing: 16
-                }
+                fixed_height: 24
 
-                @GUI::Label {
-                    text: "Character mapping file:"
-                    fixed_width: 130
-                    text_alignment: "CenterLeft"
-                }
-
-                @GUI::ComboBox {
-                    name: "character_map_file_combo"
-                }
-            }
-
-            @GUI::Widget {
                 layout: @GUI::HorizontalBoxLayout {
                     spacing: 16
                 }
@@ -59,6 +93,7 @@
                     text: "Test your current keymap below"
                     text_alignment: "CenterLeft"
                 }
+
                 @GUI::Button {
                     text: "Clear"
                     name: "button_clear_test_typing_area"
@@ -67,7 +102,6 @@
             }
 
             @GUI::TextEditor {
-                fixed_height: 100
                 name: "test_typing_area"
             }
         }
@@ -85,7 +119,7 @@
         @GUI::Label {
             fixed_width: 32
             fixed_height: 32
-            name: "num_lock_image_label"
+            icon: "/res/icons/32x32/app-calculator.png"
         }
 
         @GUI::CheckBox {

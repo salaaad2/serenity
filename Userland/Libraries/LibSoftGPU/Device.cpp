@@ -97,11 +97,7 @@ Gfx::IntRect Device::window_coordinates_to_target_coordinates(Gfx::IntRect const
 
 void Device::setup_blend_factors()
 {
-    m_alpha_blend_factors.src_constant = { 0.0f, 0.0f, 0.0f, 0.0f };
-    m_alpha_blend_factors.src_factor_src_alpha = 0;
-    m_alpha_blend_factors.src_factor_dst_alpha = 0;
-    m_alpha_blend_factors.src_factor_src_color = 0;
-    m_alpha_blend_factors.src_factor_dst_color = 0;
+    m_alpha_blend_factors = {};
 
     switch (m_options.blend_source_factor) {
     case BlendFactor::Zero:
@@ -141,12 +137,6 @@ void Device::setup_blend_factors()
     default:
         VERIFY_NOT_REACHED();
     }
-
-    m_alpha_blend_factors.dst_constant = { 0.0f, 0.0f, 0.0f, 0.0f };
-    m_alpha_blend_factors.dst_factor_src_alpha = 0;
-    m_alpha_blend_factors.dst_factor_dst_alpha = 0;
-    m_alpha_blend_factors.dst_factor_src_color = 0;
-    m_alpha_blend_factors.dst_factor_dst_color = 0;
 
     switch (m_options.blend_destination_factor) {
     case BlendFactor::Zero:
@@ -413,7 +403,8 @@ void Device::rasterize_triangle(const Triangle& triangle)
 
                 quad.depth = interpolate(vertex0.window_coordinates.z(), vertex1.window_coordinates.z(), vertex2.window_coordinates.z(), quad.barycentrics);
                 // FIXME: Also apply depth_offset_factor which depends on the depth gradient
-                quad.depth += m_options.depth_offset_constant * NumericLimits<float>::epsilon();
+                if (m_options.depth_offset_enabled)
+                    quad.depth += m_options.depth_offset_constant * NumericLimits<float>::epsilon();
 
                 i32x4 depth_test_passed;
                 switch (m_options.depth_func) {
@@ -732,8 +723,8 @@ void Device::draw_primitives(PrimitiveType primitive_type, FloatMatrix4x4 const&
         Triangle triangle;
         triangle.vertices[0] = vertices.at(0); // Root vertex is always the vertex defined first
 
-        for (size_t i = 1; i < vertices.size() - 1; i++) // This is technically `n-2` triangles. We start at index 1
-        {
+        // This is technically `n-2` triangles. We start at index 1
+        for (size_t i = 1; i < vertices.size() - 1; i++) {
             triangle.vertices[1] = vertices.at(i);
             triangle.vertices[2] = vertices.at(i + 1);
             m_triangle_list.append(triangle);
@@ -1223,7 +1214,7 @@ void Device::draw_statistics_overlay(Gfx::Bitmap& target)
 
     Gfx::Painter painter { target };
 
-    if (milliseconds > 500) {
+    if (milliseconds > MILLISECONDS_PER_STATISTICS_PERIOD) {
 
         int num_rendertarget_pixels = m_render_target->width() * m_render_target->height();
 

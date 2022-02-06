@@ -36,6 +36,7 @@ WindowManager& WindowManager::the()
 
 WindowManager::WindowManager(Gfx::PaletteImpl const& palette)
     : m_switcher(WindowSwitcher::construct())
+    , m_keymap_switcher(KeymapSwitcher::construct())
     , m_palette(palette)
 {
     s_the = this;
@@ -51,6 +52,18 @@ WindowManager::WindowManager(Gfx::PaletteImpl const& palette)
     }
 
     reload_config();
+
+    m_keymap_switcher->on_keymap_change = [&](String const& keymap) {
+        for_each_window_manager([&keymap](WMClientConnection& conn) {
+            if (!(conn.event_mask() & WMEventMask::KeymapChanged))
+                return IterationDecision::Continue;
+            if (conn.window_id() < 0)
+                return IterationDecision::Continue;
+
+            conn.async_keymap_changed(conn.window_id(), keymap);
+            return IterationDecision::Continue;
+        });
+    };
 
     Compositor::the().did_construct_window_manager({});
 }
@@ -1099,7 +1112,7 @@ void WindowManager::process_event_for_doubleclick(Window& window, MouseEvent& ev
     } else {
         dbgln_if(DOUBLECLICK_DEBUG, "Transforming MouseUp to MouseDoubleClick ({} < {})!", metadata.clock.elapsed(), m_double_click_speed);
 
-        event = MouseEvent(Event::MouseDoubleClick, event.position(), event.buttons(), event.button(), event.modifiers(), event.wheel_delta());
+        event = MouseEvent(Event::MouseDoubleClick, event.position(), event.buttons(), event.button(), event.modifiers(), event.wheel_delta_x(), event.wheel_delta_y());
         // invalidate this now we've delivered a doubleclick, otherwise
         // tripleclick will deliver two doubleclick events (incorrectly).
         metadata.clock = {};
@@ -1554,6 +1567,11 @@ void WindowManager::process_key_event(KeyEvent& event)
     }
     if (m_switcher->is_visible()) {
         m_switcher->on_key_event(event);
+        return;
+    }
+
+    if (event.type() == Event::KeyDown && (event.modifiers() == (Mod_Alt | Mod_Shift) && (event.key() == Key_Shift || event.key() == Key_Alt))) {
+        m_keymap_switcher->next_keymap();
         return;
     }
 
@@ -2012,7 +2030,7 @@ Gfx::IntPoint WindowManager::get_recommended_window_position(Gfx::IntPoint const
 
     Window const* overlap_window = nullptr;
     current_window_stack().for_each_visible_window_of_type_from_front_to_back(WindowType::Normal, [&](Window& window) {
-        if (window.default_positioned() && (!overlap_window || overlap_window->window_id() < window.window_id())) {
+        if (window.is_default_positioned() && (!overlap_window || overlap_window->window_id() < window.window_id())) {
             overlap_window = &window;
         }
         return IterationDecision::Continue;

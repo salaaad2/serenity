@@ -6,11 +6,13 @@
  */
 
 #include <AK/AllOf.h>
+#include <AK/CharacterTypes.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf8View.h>
 #include <LibCrypto/BigInt/SignedBigInteger.h>
 #include <LibCrypto/NumberTheory/ModularFunctions.h>
+#include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/BigInt.h>
@@ -45,14 +47,6 @@ static inline bool same_type_for_equality(const Value& lhs, const Value& rhs)
 }
 
 static const Crypto::SignedBigInteger BIGINT_ZERO { 0 };
-
-static bool is_valid_bigint_value(StringView string)
-{
-    string = string.trim_whitespace();
-    if (string.length() > 1 && (string[0] == '-' || string[0] == '+'))
-        string = string.substring_view(1, string.length() - 1);
-    return all_of(string, [](auto ch) { return isdigit(ch); });
-}
 
 ALWAYS_INLINE bool both_number(const Value& lhs, const Value& rhs)
 {
@@ -421,7 +415,7 @@ ThrowCompletionOr<Value> Value::to_primitive(GlobalObject& global_object, Prefer
         auto to_primitive_method = TRY(get_method(global_object, *vm.well_known_symbol_to_primitive()));
         if (to_primitive_method) {
             auto hint = get_hint_for_preferred_type();
-            auto result = TRY(vm.call(*to_primitive_method, *this, js_string(vm, hint)));
+            auto result = TRY(call(global_object, *to_primitive_method, *this, js_string(vm, hint)));
             if (!result.is_object())
                 return result;
             return vm.throw_completion<TypeError>(global_object, ErrorType::ToPrimitiveReturnedObject, to_string_without_side_effects(), hint);
@@ -527,16 +521,91 @@ ThrowCompletionOr<BigInt*> Value::to_bigint(GlobalObject& global_object) const
     case Type::Double:
         return vm.throw_completion<TypeError>(global_object, ErrorType::Convert, "number", "BigInt");
     case Type::String: {
-        auto& string = primitive.as_string().string();
-        if (!is_valid_bigint_value(string))
-            return vm.throw_completion<SyntaxError>(global_object, ErrorType::BigIntInvalidValue, string);
-        return js_bigint(vm, Crypto::SignedBigInteger::from_base(10, string.trim_whitespace()));
+        // 1. Let n be ! StringToBigInt(prim).
+        auto bigint = primitive.string_to_bigint(global_object);
+
+        // 2. If n is undefined, throw a SyntaxError exception.
+        if (!bigint.has_value())
+            return vm.throw_completion<SyntaxError>(global_object, ErrorType::BigIntInvalidValue, primitive);
+
+        // 3. Return n.
+        return bigint.release_value();
     }
     case Type::Symbol:
         return vm.throw_completion<TypeError>(global_object, ErrorType::Convert, "symbol", "BigInt");
     default:
         VERIFY_NOT_REACHED();
     }
+}
+
+struct BigIntParseResult {
+    StringView literal;
+    u8 base { 10 };
+    bool is_negative { false };
+};
+
+static Optional<BigIntParseResult> parse_bigint_text(StringView text)
+{
+    BigIntParseResult result {};
+
+    auto parse_for_prefixed_base = [&](auto lower_prefix, auto upper_prefix, auto validator) {
+        if (text.length() <= 2)
+            return false;
+        if (!text.starts_with(lower_prefix) && !text.starts_with(upper_prefix))
+            return false;
+        return all_of(text.substring_view(2), validator);
+    };
+
+    if (parse_for_prefixed_base("0b"sv, "0B"sv, is_ascii_binary_digit)) {
+        result.literal = text.substring_view(2);
+        result.base = 2;
+    } else if (parse_for_prefixed_base("0o"sv, "0O"sv, is_ascii_octal_digit)) {
+        result.literal = text.substring_view(2);
+        result.base = 8;
+    } else if (parse_for_prefixed_base("0x"sv, "0X"sv, is_ascii_hex_digit)) {
+        result.literal = text.substring_view(2);
+        result.base = 16;
+    } else {
+        if (text.starts_with('-')) {
+            text = text.substring_view(1);
+            result.is_negative = true;
+        } else if (text.starts_with('+')) {
+            text = text.substring_view(1);
+        }
+
+        if (!all_of(text, is_ascii_digit))
+            return {};
+
+        result.literal = text;
+        result.base = 10;
+    }
+
+    return result;
+}
+
+// 7.1.14 StringToBigInt ( str ), https://tc39.es/ecma262/#sec-stringtobigint
+Optional<BigInt*> Value::string_to_bigint(GlobalObject& global_object) const
+{
+    VERIFY(is_string());
+
+    // 1. Let text be ! StringToCodePoints(str).
+    auto text = as_string().string().view().trim_whitespace();
+
+    // 2. Let literal be ParseText(text, StringIntegerLiteral).
+    auto result = parse_bigint_text(text);
+
+    // 3. If literal is a List of errors, return undefined.
+    if (!result.has_value())
+        return {};
+
+    // 4. Let mv be the MV of literal.
+    // 5. Assert: mv is an integer.
+    auto bigint = Crypto::SignedBigInteger::from_base(result->base, result->literal);
+    if (result->is_negative && (bigint != BIGINT_ZERO))
+        bigint.negate();
+
+    // 6. Return ℤ(mv).
+    return js_bigint(global_object.vm(), move(bigint));
 }
 
 // 7.1.15 ToBigInt64 ( argument ), https://tc39.es/ecma262/#sec-tobigint64
@@ -1180,7 +1249,7 @@ ThrowCompletionOr<Value> instance_of(GlobalObject& global_object, Value lhs, Val
         return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObject, rhs.to_string_without_side_effects());
     auto has_instance_method = TRY(rhs.get_method(global_object, *vm.well_known_symbol_has_instance()));
     if (has_instance_method) {
-        auto has_instance_result = TRY(vm.call(*has_instance_method, rhs, lhs));
+        auto has_instance_result = TRY(call(global_object, *has_instance_method, rhs, lhs));
         return Value(has_instance_result.to_boolean());
     }
     if (!rhs.is_function())
@@ -1308,8 +1377,6 @@ bool is_strictly_equal(Value lhs, Value rhs)
 // 7.2.14 IsLooselyEqual ( x, y ), https://tc39.es/ecma262/#sec-islooselyequal
 ThrowCompletionOr<bool> is_loosely_equal(GlobalObject& global_object, Value lhs, Value rhs)
 {
-    auto& vm = global_object.vm();
-
     // 1. If Type(x) is the same as Type(y), then
     if (same_type_for_equality(lhs, rhs)) {
         // a. Return IsStrictlyEqual(x, y).
@@ -1343,13 +1410,15 @@ ThrowCompletionOr<bool> is_loosely_equal(GlobalObject& global_object, Value lhs,
 
     // 7. If Type(x) is BigInt and Type(y) is String, then
     if (lhs.is_bigint() && rhs.is_string()) {
-        auto& rhs_string = rhs.as_string().string();
         // a. Let n be ! StringToBigInt(y).
-        // b. If n is NaN, return false.
-        if (!is_valid_bigint_value(rhs_string))
+        auto bigint = rhs.string_to_bigint(global_object);
+
+        // b. If n is undefined, return false.
+        if (!bigint.has_value())
             return false;
+
         // c. Return IsLooselyEqual(x, n).
-        return is_loosely_equal(global_object, lhs, js_bigint(vm, Crypto::SignedBigInteger::from_base(10, rhs_string)));
+        return is_loosely_equal(global_object, lhs, *bigint);
     }
 
     // 8. If Type(x) is String and Type(y) is BigInt, return IsLooselyEqual(y, x).
@@ -1436,23 +1505,23 @@ ThrowCompletionOr<TriState> is_less_than(GlobalObject& global_object, bool left_
     }
 
     if (x_primitive.is_bigint() && y_primitive.is_string()) {
-        auto& y_string = y_primitive.as_string().string();
-        if (!is_valid_bigint_value(y_string))
+        auto y_bigint = y_primitive.string_to_bigint(global_object);
+        if (!y_bigint.has_value())
             return TriState::Unknown;
-        if (x_primitive.as_bigint().big_integer() < Crypto::SignedBigInteger::from_base(10, y_string))
+
+        if (x_primitive.as_bigint().big_integer() < (*y_bigint)->big_integer())
             return TriState::True;
-        else
-            return TriState::False;
+        return TriState::False;
     }
 
     if (x_primitive.is_string() && y_primitive.is_bigint()) {
-        auto& x_string = x_primitive.as_string().string();
-        if (!is_valid_bigint_value(x_string))
+        auto x_bigint = x_primitive.string_to_bigint(global_object);
+        if (!x_bigint.has_value())
             return TriState::Unknown;
-        if (Crypto::SignedBigInteger::from_base(10, x_string) < y_primitive.as_bigint().big_integer())
+
+        if ((*x_bigint)->big_integer() < y_primitive.as_bigint().big_integer())
             return TriState::True;
-        else
-            return TriState::False;
+        return TriState::False;
     }
 
     auto x_numeric = TRY(x_primitive.to_numeric(global_object));
@@ -1507,7 +1576,7 @@ ThrowCompletionOr<Value> Value::invoke_internal(GlobalObject& global_object, JS:
     if (!property.is_function())
         return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, property.to_string_without_side_effects());
 
-    return vm.call(property.as_function(), *this, move(arguments));
+    return call(global_object, property.as_function(), *this, move(arguments));
 }
 
 }

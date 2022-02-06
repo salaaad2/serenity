@@ -33,7 +33,7 @@ ErrorOr<FlatPtr> Process::sys$setkeymap(Userspace<const Syscall::SC_setkeymap_pa
     if (map_name->length() > map_name_max_size)
         return ENAMETOOLONG;
 
-    HIDManagement::the().set_maps(character_map_data, map_name->view());
+    HIDManagement::the().set_maps(move(map_name), character_map_data);
     return 0;
 }
 
@@ -43,8 +43,8 @@ ErrorOr<FlatPtr> Process::sys$getkeymap(Userspace<const Syscall::SC_getkeymap_pa
     TRY(require_promise(Pledge::getkeymap));
     auto params = TRY(copy_typed_from_user(user_params));
 
-    String keymap_name = HIDManagement::the().keymap_name();
-    const Keyboard::CharacterMapData& character_maps = HIDManagement::the().character_maps();
+    auto keymap_name = TRY(KString::try_create(HIDManagement::the().keymap_name()));
+    Keyboard::CharacterMapData const& character_maps = HIDManagement::the().character_map();
 
     TRY(copy_to_user(params.map, character_maps.map, CHAR_MAP_SIZE * sizeof(u32)));
     TRY(copy_to_user(params.shift_map, character_maps.shift_map, CHAR_MAP_SIZE * sizeof(u32)));
@@ -52,9 +52,9 @@ ErrorOr<FlatPtr> Process::sys$getkeymap(Userspace<const Syscall::SC_getkeymap_pa
     TRY(copy_to_user(params.altgr_map, character_maps.altgr_map, CHAR_MAP_SIZE * sizeof(u32)));
     TRY(copy_to_user(params.shift_altgr_map, character_maps.shift_altgr_map, CHAR_MAP_SIZE * sizeof(u32)));
 
-    if (params.map_name.size < keymap_name.length())
+    if (params.map_name.size < keymap_name->length())
         return ENAMETOOLONG;
-    TRY(copy_to_user(params.map_name.data, keymap_name.characters(), keymap_name.length()));
+    TRY(copy_to_user(params.map_name.data, keymap_name->characters(), keymap_name->length()));
     return 0;
 }
 

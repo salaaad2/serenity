@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2021, David Tuin <davidot@serenityos.org>
+ * Copyright (c) 2021-2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +9,7 @@
 #include <AK/Demangle.h>
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
+#include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
 #include <AK/TemporaryChange.h>
@@ -243,15 +244,7 @@ Completion BlockStatement::execute(Interpreter& interpreter, GlobalObject& globa
 
 Completion Program::execute(Interpreter& interpreter, GlobalObject& global_object) const
 {
-    // FIXME: This tries to be "ScriptEvaluation" and "evaluating scriptBody" at once. It shouldn't.
-    //        Clean this up and update perform_eval() / perform_shadow_realm_eval()
-
     InterpreterNodeScope node_scope { interpreter, *this };
-
-    VERIFY(interpreter.lexical_environment() && interpreter.lexical_environment()->is_global_environment());
-    auto& global_env = static_cast<GlobalEnvironment&>(*interpreter.lexical_environment());
-
-    TRY(global_declaration_instantiation(interpreter, global_object, global_env));
 
     return evaluate_statements(interpreter, global_object);
 }
@@ -434,7 +427,7 @@ Completion CallExpression::execute(Interpreter& interpreter, GlobalObject& globa
         return perform_eval(script_value, global_object, vm.in_strict_mode() ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct);
     }
 
-    return vm.call(function, this_value, move(arg_list));
+    return call(global_object, function, this_value, move(arg_list));
 }
 
 // 13.3.7.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
@@ -1515,6 +1508,8 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
 
     auto method_value = TRY(m_function->execute(interpreter, global_object)).release_value();
 
+    auto function_handle = make_handle(&method_value.as_function());
+
     auto& method_function = static_cast<ECMAScriptFunctionObject&>(method_value.as_function());
     method_function.make_method(target);
 
@@ -1620,7 +1615,7 @@ private:
 ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& target) const
 {
     auto property_key = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
-    ECMAScriptFunctionObject* initializer = nullptr;
+    Handle<ECMAScriptFunctionObject> initializer {};
     if (m_initializer) {
         auto copy_initializer = m_initializer;
         auto name = property_key.visit(
@@ -1633,14 +1628,14 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
 
         // FIXME: A potential optimization is not creating the functions here since these are never directly accessible.
         auto function_code = create_ast_node<ClassFieldInitializerStatement>(m_initializer->source_range(), copy_initializer.release_nonnull(), name);
-        initializer = ECMAScriptFunctionObject::create(interpreter.global_object(), String::empty(), String::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false);
+        initializer = make_handle(ECMAScriptFunctionObject::create(interpreter.global_object(), String::empty(), String::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false));
         initializer->make_method(target);
     }
 
     return ClassValue {
         ClassFieldDefinition {
-            property_key,
-            initializer,
+            move(property_key),
+            move(initializer),
         }
     };
 }
@@ -1701,6 +1696,43 @@ Completion ClassExpression::execute(Interpreter& interpreter, GlobalObject& glob
     return Value { value };
 }
 
+// 15.7.15 Runtime Semantics: BindingClassDeclarationEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-bindingclassdeclarationevaluation
+static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter& interpreter, GlobalObject& global_object, ClassExpression const& class_expression)
+{
+    // ClassDeclaration : class ClassTail
+    if (!class_expression.has_name()) {
+        // 1. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments undefined and "default".
+        auto value = TRY(class_expression.class_definition_evaluation(interpreter, global_object, {}, "default"));
+
+        // 2. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
+        value->set_source_text(class_expression.source_text());
+
+        // 3. Return value.
+        return value;
+    }
+
+    // ClassDeclaration : class BindingIdentifier ClassTail
+
+    // 1. Let className be StringValue of BindingIdentifier.
+    auto class_name = class_expression.name();
+    VERIFY(!class_name.is_empty());
+
+    // 2. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments className and className.
+    auto value = TRY(class_expression.class_definition_evaluation(interpreter, global_object, class_name, class_name));
+
+    // 3. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
+    value->set_source_text(class_expression.source_text());
+
+    // 4. Let env be the running execution context's LexicalEnvironment.
+    auto* env = interpreter.lexical_environment();
+
+    // 5. Perform ? InitializeBoundName(className, value, env).
+    TRY(initialize_bound_name(global_object, class_name, value, env));
+
+    // 6. Return value.
+    return value;
+}
+
 // 15.7.16 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-class-definitions-runtime-semantics-evaluation
 // ClassDeclaration : class BindingIdentifier ClassTail
 Completion ClassDeclaration::execute(Interpreter& interpreter, GlobalObject& global_object) const
@@ -1708,7 +1740,7 @@ Completion ClassDeclaration::execute(Interpreter& interpreter, GlobalObject& glo
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Perform ? BindingClassDeclarationEvaluation of this ClassDeclaration.
-    (void)TRY(binding_class_declaration_evaluation(interpreter, global_object));
+    (void)TRY(binding_class_declaration_evaluation(interpreter, global_object, m_class_expression));
 
     // 2. Return NormalCompletion(empty).
     return normal_completion({});
@@ -1802,7 +1834,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
 
     prototype->define_direct_property(vm.names.constructor, class_constructor, Attribute::Writable | Attribute::Configurable);
 
-    using StaticElement = Variant<ClassElement::ClassFieldDefinition, ECMAScriptFunctionObject*>;
+    using StaticElement = Variant<ClassElement::ClassFieldDefinition, Handle<ECMAScriptFunctionObject>>;
 
     Vector<PrivateElement> static_private_methods;
     Vector<PrivateElement> instance_private_methods;
@@ -1845,7 +1877,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
             VERIFY(element_value.has<Completion>() && element_value.get<Completion>().value().has_value());
             auto& element_object = element_value.get<Completion>().value()->as_object();
             VERIFY(is<ECMAScriptFunctionObject>(element_object));
-            static_elements.append(static_cast<ECMAScriptFunctionObject*>(&element_object));
+            static_elements.append(make_handle(static_cast<ECMAScriptFunctionObject*>(&element_object)));
         }
     }
 
@@ -1856,7 +1888,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
         MUST(class_scope->initialize_binding(global_object, binding_name, class_constructor));
 
     for (auto& field : instance_fields)
-        class_constructor->add_field(field.name, field.initializer);
+        class_constructor->add_field(field.name, field.initializer.is_null() ? nullptr : field.initializer.cell());
 
     for (auto& private_method : instance_private_methods)
         class_constructor->add_private_method(private_method);
@@ -1866,40 +1898,18 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
 
     for (auto& element : static_elements) {
         TRY(element.visit(
-            [&](ClassElement::ClassFieldDefinition const& field) -> ThrowCompletionOr<void> {
-                return TRY(class_constructor->define_field(field.name, field.initializer));
+            [&](ClassElement::ClassFieldDefinition& field) -> ThrowCompletionOr<void> {
+                return TRY(class_constructor->define_field(field.name, field.initializer.is_null() ? nullptr : field.initializer.cell()));
             },
-            [&](ECMAScriptFunctionObject* static_block_function) -> ThrowCompletionOr<void> {
+            [&](Handle<ECMAScriptFunctionObject> static_block_function) -> ThrowCompletionOr<void> {
+                VERIFY(!static_block_function.is_null());
                 // We discard any value returned here.
-                TRY(call(global_object, static_block_function, class_constructor_value));
+                TRY(call(global_object, *static_block_function.cell(), class_constructor_value));
                 return {};
             }));
     }
 
     return class_constructor;
-}
-
-// 15.7.15 Runtime Semantics: BindingClassDeclarationEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-bindingclassdeclarationevaluation
-ThrowCompletionOr<Value> ClassDeclaration::binding_class_declaration_evaluation(Interpreter& interpreter, GlobalObject& global_object) const
-{
-    // 1. Let className be StringValue of BindingIdentifier.
-    auto class_name = m_class_expression->name();
-    VERIFY(!class_name.is_empty());
-
-    // 2. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments className and className.
-    auto* value = TRY(m_class_expression->class_definition_evaluation(interpreter, global_object, class_name, class_name));
-
-    // 3. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
-    value->set_source_text(m_class_expression->source_text());
-
-    // 4. Let env be the running execution context's LexicalEnvironment.
-    auto* env = interpreter.lexical_environment();
-
-    // 5. Perform ? InitializeBoundName(className, value, env).
-    TRY(initialize_bound_name(global_object, class_name, value, env));
-
-    // 6. Return value.
-    return value;
 }
 
 void ASTNode::dump(int indent) const
@@ -3161,8 +3171,48 @@ Completion MetaProperty::execute(Interpreter& interpreter, GlobalObject& global_
 
     // ImportMeta : import . meta
     if (m_type == MetaProperty::Type::ImportMeta) {
-        // TODO: Implement me :^)
-        return interpreter.vm().throw_completion<InternalError>(global_object, ErrorType::NotImplemented, "'import.meta' in modules");
+        // 1. Let module be ! GetActiveScriptOrModule().
+        auto script_or_module = interpreter.vm().get_active_script_or_module();
+
+        // 2. Assert: module is a Source Text Module Record.
+        VERIFY(script_or_module.has<Module*>());
+        VERIFY(is<SourceTextModule>(*script_or_module.get<Module*>()));
+        auto& module = static_cast<SourceTextModule&>(*script_or_module.get<Module*>());
+
+        // 3. Let importMeta be module.[[ImportMeta]].
+        auto* import_meta = module.import_meta();
+
+        // 4. If importMeta is empty, then
+        if (import_meta == nullptr) {
+            // a. Set importMeta to ! OrdinaryObjectCreate(null).
+            import_meta = Object::create(global_object, nullptr);
+
+            // b. Let importMetaValues be ! HostGetImportMetaProperties(module).
+            auto import_meta_values = interpreter.vm().host_get_import_meta_properties(module);
+
+            // c. For each Record { [[Key]], [[Value]] } p of importMetaValues, do
+            for (auto& entry : import_meta_values) {
+                // i. Perform ! CreateDataPropertyOrThrow(importMeta, p.[[Key]], p.[[Value]]).
+                MUST(import_meta->create_data_property_or_throw(entry.key, entry.value));
+            }
+
+            // d. Perform ! HostFinalizeImportMeta(importMeta, module).
+            interpreter.vm().host_finalize_import_meta(import_meta, module);
+
+            // e. Set module.[[ImportMeta]] to importMeta.
+            module.set_import_meta({}, import_meta);
+
+            // f. Return importMeta.
+            return Value { import_meta };
+        }
+        // 5. Else,
+        else {
+            // a. Assert: Type(importMeta) is Object.
+            // Note: This is always true by the type.
+
+            // b. Return importMeta.
+            return Value { import_meta };
+        }
     }
 
     VERIFY_NOT_REACHED();
@@ -3181,10 +3231,112 @@ void ImportCall::dump(int indent) const
 }
 
 // 13.3.10.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-import-call-runtime-semantics-evaluation
+// Also includes assertions from proposal: https://tc39.es/proposal-import-assertions/#sec-import-call-runtime-semantics-evaluation
 Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_object) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-    return interpreter.vm().throw_completion<InternalError>(global_object, ErrorType::NotImplemented, "'import(...)' in modules");
+
+    // 2.1.1.1 EvaluateImportCall ( specifierExpression [ , optionsExpression ] ), https://tc39.es/proposal-import-assertions/#sec-evaluate-import-call
+    //  1. Let referencingScriptOrModule be ! GetActiveScriptOrModule().
+    auto referencing_script_or_module = interpreter.vm().get_active_script_or_module();
+
+    // 2. Let specifierRef be the result of evaluating specifierExpression.
+    // 3. Let specifier be ? GetValue(specifierRef).
+    auto specifier = TRY(m_specifier->execute(interpreter, global_object));
+
+    auto options_value = js_undefined();
+    // 4. If optionsExpression is present, then
+    if (m_options) {
+        // a. Let optionsRef be the result of evaluating optionsExpression.
+        // b. Let options be ? GetValue(optionsRef).
+        options_value = TRY(m_options->execute(interpreter, global_object)).release_value();
+    }
+    // 5. Else,
+    // a. Let options be undefined.
+    // Note: options_value is undefined by default.
+
+    // 6. Let promiseCapability be ! NewPromiseCapability(%Promise%).
+    auto promise_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+
+    // 7. Let specifierString be ToString(specifier).
+    // 8. IfAbruptRejectPromise(specifierString, promiseCapability).
+    auto specifier_string = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, specifier->to_string(global_object));
+
+    // 9. Let assertions be a new empty List.
+    Vector<ModuleRequest::Assertion> assertions;
+
+    // 10. If options is not undefined, then
+    if (!options_value.is_undefined()) {
+        // a. If Type(options) is not Object,
+        if (!options_value.is_object()) {
+            auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAnObject.message(), "ImportOptions"));
+            // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
+            MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+
+            // ii. Return promiseCapability.[[Promise]].
+            return Value { promise_capability.promise };
+        }
+
+        // b. Let assertionsObj be Get(options, "assert").
+        // c. IfAbruptRejectPromise(assertionsObj, promiseCapability).
+        auto assertion_object = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, options_value.get(global_object, interpreter.vm().names.assert));
+
+        // d. If assertionsObj is not undefined,
+        if (!assertion_object.is_undefined()) {
+            // i. If Type(assertionsObj) is not Object,
+            if (!assertion_object.is_object()) {
+                auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAnObject.message(), "ImportOptionsAssertions"));
+                // 1. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
+                MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+
+                // 2. Return promiseCapability.[[Promise]].
+                return Value { promise_capability.promise };
+            }
+
+            // ii. Let keys be EnumerableOwnPropertyNames(assertionsObj, key).
+            // iii. IfAbruptRejectPromise(keys, promiseCapability).
+            auto keys = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, assertion_object.as_object().enumerable_own_property_names(Object::PropertyKind::Key));
+
+            // iv. Let supportedAssertions be ! HostGetSupportedImportAssertions().
+            auto supported_assertions = interpreter.vm().host_get_supported_import_assertions();
+
+            // v. For each String key of keys,
+            for (auto const& key : keys) {
+                auto property_key = MUST(key.to_property_key(global_object));
+
+                // 1. Let value be Get(assertionsObj, key).
+                // 2. IfAbruptRejectPromise(value, promiseCapability).
+                auto value = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, assertion_object.get(global_object, property_key));
+
+                // 3. If Type(value) is not String, then
+                if (!value.is_string()) {
+                    auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAString.message(), "Import Assertion option value"));
+                    // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
+                    MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+
+                    // b. Return promiseCapability.[[Promise]].
+                    return Value { promise_capability.promise };
+                }
+
+                // 4. If supportedAssertions contains key, then
+                if (supported_assertions.contains_slow(property_key.to_string())) {
+                    // a. Append { [[Key]]: key, [[Value]]: value } to assertions.
+                    assertions.empend(property_key.to_string(), value.as_string().string());
+                }
+            }
+        }
+        // e. Sort assertions by the code point order of the [[Key]] of each element. NOTE: This sorting is observable only in that hosts are prohibited from distinguishing among assertions by the order they occur in.
+        // Note: This is done when constructing the ModuleRequest.
+    }
+
+    // 11. Let moduleRequest be a new ModuleRequest Record { [[Specifier]]: specifierString, [[Assertions]]: assertions }.
+    ModuleRequest request { specifier_string, assertions };
+
+    // 12. Perform ! HostImportModuleDynamically(referencingScriptOrModule, moduleRequest, promiseCapability).
+    interpreter.vm().host_import_module_dynamically(referencing_script_or_module, move(request), promise_capability);
+
+    // 13. Return promiseCapability.[[Promise]].
+    return Value { promise_capability.promise };
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
@@ -4032,23 +4184,96 @@ void ScopeNode::add_hoisted_function(NonnullRefPtr<FunctionDeclaration> declarat
 }
 
 // 16.2.1.11 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-module-semantics-runtime-semantics-evaluation
-Completion ImportStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ImportStatement::execute(Interpreter& interpreter, GlobalObject&) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-    dbgln("Modules are not fully supported yet!");
-    return interpreter.vm().throw_completion<InternalError>(global_object, ErrorType::NotImplemented, "'import' in modules");
+
+    // 1. Return NormalCompletion(empty).
+    return normal_completion({});
 }
+
+FlyString ExportStatement::local_name_for_default = "*default*";
 
 // 16.2.3.7 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-exports-runtime-semantics-evaluation
 Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-    if (m_statement) {
-        // 1. Return the result of evaluating <Thing>.
+
+    if (!is_default_export()) {
+        if (m_statement) {
+            // 1. Return the result of evaluating <Thing>.
+            return m_statement->execute(interpreter, global_object);
+        }
+
+        // 1. Return NormalCompletion(empty).
+        return normal_completion({});
+    }
+
+    VERIFY(m_statement);
+
+    // ExportDeclaration : export default HoistableDeclaration
+    if (is<FunctionDeclaration>(*m_statement)) {
+        // 1. Return the result of evaluating HoistableDeclaration.
         return m_statement->execute(interpreter, global_object);
     }
 
-    // 1. Return NormalCompletion(empty).
+    // ExportDeclaration : export default ClassDeclaration
+    // ClassDeclaration: class BindingIdentifier[?Yield, ?Await] ClassTail[?Yield, ?Await]
+    if (is<ClassDeclaration>(*m_statement)) {
+        auto const& class_declaration = static_cast<ClassDeclaration const&>(*m_statement);
+
+        // 1. Let value be ? BindingClassDeclarationEvaluation of ClassDeclaration.
+        auto value = TRY(binding_class_declaration_evaluation(interpreter, global_object, class_declaration.m_class_expression));
+
+        // 2. Let className be the sole element of BoundNames of ClassDeclaration.
+        // 3. If className is "*default*", then
+        // Note: We never go into step 3. since a ClassDeclaration always has a name and "*default*" is not a class name.
+        (void)value;
+
+        // 4. Return NormalCompletion(empty).
+        return normal_completion({});
+    }
+
+    // ExportDeclaration : export default ClassDeclaration
+    // ClassDeclaration: [+Default] class ClassTail [?Yield, ?Await]
+    if (is<ClassExpression>(*m_statement)) {
+        auto& class_expression = static_cast<ClassExpression const&>(*m_statement);
+
+        // 1. Let value be ? BindingClassDeclarationEvaluation of ClassDeclaration.
+        auto value = TRY(binding_class_declaration_evaluation(interpreter, global_object, class_expression));
+
+        // 2. Let className be the sole element of BoundNames of ClassDeclaration.
+        // 3. If className is "*default*", then
+        if (!class_expression.has_name()) {
+            // Note: This can only occur if the class does not have a name since "*default*" is normally not valid.
+
+            // a. Let env be the running execution context's LexicalEnvironment.
+            auto* env = interpreter.lexical_environment();
+
+            // b. Perform ? InitializeBoundName("*default*", value, env).
+            TRY(initialize_bound_name(global_object, ExportStatement::local_name_for_default, value, env));
+        }
+
+        // 4. Return NormalCompletion(empty).
+        return normal_completion({});
+    }
+
+    // ExportDeclaration : export default AssignmentExpression ;
+
+    // 1. If IsAnonymousFunctionDefinition(AssignmentExpression) is true, then
+    //     a. Let value be ? NamedEvaluation of AssignmentExpression with argument "default".
+    // 2. Else,
+    //     a. Let rhs be the result of evaluating AssignmentExpression.
+    //     b. Let value be ? GetValue(rhs).
+    auto value = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, *m_statement, "default"));
+
+    // 3. Let env be the running execution context's LexicalEnvironment.
+    auto* env = interpreter.lexical_environment();
+
+    // 4. Perform ? InitializeBoundName("*default*", value, env).
+    TRY(initialize_bound_name(global_object, ExportStatement::local_name_for_default, value, env));
+
+    // 5. Return NormalCompletion(empty).
     return normal_completion({});
 }
 
@@ -4077,12 +4302,23 @@ void ExportStatement::dump(int indent) const
 
     for (auto& entry : m_entries) {
         print_indent(indent + 2);
-        out("ModuleRequest: {}", entry.module_request.module_specifier);
-        dump_assert_clauses(entry.module_request);
-        outln(", ImportName: {}, LocalName: {}, ExportName: {}",
-            entry.kind == ExportEntry::Kind::ModuleRequest ? string_or_null(entry.local_or_import_name) : "null",
-            entry.kind != ExportEntry::Kind::ModuleRequest ? string_or_null(entry.local_or_import_name) : "null",
-            string_or_null(entry.export_name));
+        out("ExportName: {}, ImportName: {}, LocalName: {}, ModuleRequest: ",
+            string_or_null(entry.export_name),
+            entry.is_module_request() ? string_or_null(entry.local_or_import_name) : "null",
+            entry.is_module_request() ? "null" : string_or_null(entry.local_or_import_name));
+        if (entry.is_module_request()) {
+            out("{}", entry.m_module_request->module_specifier);
+            dump_assert_clauses(*entry.m_module_request);
+            outln();
+        } else {
+            outln("null");
+        }
+    }
+
+    if (m_statement) {
+        print_indent(indent + 1);
+        outln("(Statement)");
+        m_statement->dump(indent + 2);
     }
 }
 
@@ -4105,14 +4341,14 @@ void ImportStatement::dump(int indent) const
     }
 }
 
-bool ExportStatement::has_export(StringView export_name) const
+bool ExportStatement::has_export(FlyString const& export_name) const
 {
     return any_of(m_entries.begin(), m_entries.end(), [&](auto& entry) {
         return entry.export_name == export_name;
     });
 }
 
-bool ImportStatement::has_bound_name(StringView name) const
+bool ImportStatement::has_bound_name(FlyString const& name) const
 {
     return any_of(m_entries.begin(), m_entries.end(), [&](auto& entry) {
         return entry.local_name == name;
@@ -4293,6 +4529,19 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
         TRY(global_environment.create_global_var_binding(var_name, false));
 
     return {};
+}
+
+ModuleRequest::ModuleRequest(FlyString module_specifier_, Vector<Assertion> assertions_)
+    : module_specifier(move(module_specifier_))
+    , assertions(move(assertions_))
+{
+    // Perform step 10.e. from EvaluateImportCall, https://tc39.es/proposal-import-assertions/#sec-evaluate-import-call
+    // or step 2. from 2.7 Static Semantics: AssertClauseToAssertions, https://tc39.es/proposal-import-assertions/#sec-assert-clause-to-assertions
+    // e. / 2. Sort assertions by the code point order of the [[Key]] of each element.
+    // NOTE: This sorting is observable only in that hosts are prohibited from distinguishing among assertions by the order they occur in.
+    quick_sort(assertions, [](Assertion const& lhs, Assertion const& rhs) {
+        return lhs.key < rhs.key;
+    });
 }
 
 }

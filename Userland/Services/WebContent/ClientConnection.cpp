@@ -154,9 +154,9 @@ void ClientConnection::mouse_up(const Gfx::IntPoint& position, unsigned int butt
     page().handle_mouseup(position, button, modifiers);
 }
 
-void ClientConnection::mouse_wheel(const Gfx::IntPoint& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers, i32 wheel_delta)
+void ClientConnection::mouse_wheel(const Gfx::IntPoint& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers, i32 wheel_delta_x, i32 wheel_delta_y)
 {
-    page().handle_mousewheel(position, button, modifiers, wheel_delta);
+    page().handle_mousewheel(position, button, modifiers, wheel_delta_x, wheel_delta_y);
 }
 
 void ClientConnection::key_down(i32 key, unsigned int modifiers, u32 code_point)
@@ -180,6 +180,15 @@ void ClientConnection::debug_request(const String& request, const String& argume
         if (auto* doc = page().top_level_browsing_context().active_document()) {
             if (auto* icb = doc->layout_node())
                 Web::dump_tree(*icb);
+        }
+    }
+
+    if (request == "dump-stacking-context-tree") {
+        if (auto* doc = page().top_level_browsing_context().active_document()) {
+            if (auto* icb = doc->layout_node()) {
+                if (auto* stacking_context = icb->stacking_context())
+                    stacking_context->dump();
+            }
         }
     }
 
@@ -329,9 +338,11 @@ void ClientConnection::run_javascript(String const& js_source)
 
     auto& interpreter = page().top_level_browsing_context().active_document()->interpreter();
 
-    auto parser = JS::Parser(JS::Lexer(js_source));
-    auto program = parser.parse_program();
-    auto result = interpreter.run(interpreter.global_object(), *program);
+    auto script_or_error = JS::Script::parse(js_source, interpreter.realm(), "");
+    if (script_or_error.is_error())
+        return;
+
+    auto result = interpreter.run(script_or_error.value());
 
     if (result.is_error()) {
         dbgln("Exception :(");

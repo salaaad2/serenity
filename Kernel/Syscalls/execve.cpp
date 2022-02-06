@@ -19,6 +19,7 @@
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
 #include <Kernel/Random.h>
+#include <Kernel/Scheduler.h>
 #include <Kernel/Time/TimeManagement.h>
 #include <LibC/limits.h>
 #include <LibELF/AuxiliaryVector.h>
@@ -40,7 +41,8 @@ struct LoadResult {
     WeakPtr<Memory::Region> stack_region;
 };
 
-static Vector<ELF::AuxiliaryValue> generate_auxiliary_vector(FlatPtr load_base, FlatPtr entry_eip, UserID uid, UserID euid, GroupID gid, GroupID egid, StringView executable_path, Optional<Process::ScopedDescriptionAllocation> const& main_program_fd_allocation);
+static constexpr size_t auxiliary_vector_size = 15;
+static Array<ELF::AuxiliaryValue, auxiliary_vector_size> generate_auxiliary_vector(FlatPtr load_base, FlatPtr entry_eip, UserID uid, UserID euid, GroupID gid, GroupID egid, StringView executable_path, Optional<Process::ScopedDescriptionAllocation> const& main_program_fd_allocation);
 
 static bool validate_stack_size(NonnullOwnPtrVector<KString> const& arguments, NonnullOwnPtrVector<KString>& environment)
 {
@@ -69,7 +71,7 @@ static bool validate_stack_size(NonnullOwnPtrVector<KString> const& arguments, N
 }
 
 static ErrorOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]] ThreadRegisters& regs, Memory::Region& region, NonnullOwnPtrVector<KString> const& arguments,
-    NonnullOwnPtrVector<KString> const& environment, Vector<ELF::AuxiliaryValue> auxiliary_values)
+    NonnullOwnPtrVector<KString> const& environment, Array<ELF::AuxiliaryValue, auxiliary_vector_size> auxiliary_values)
 {
     FlatPtr new_sp = region.range().end().get();
 
@@ -306,7 +308,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
 
     auto load_writable_section = [&](auto& program_header) -> ErrorOr<void> {
         // Writable section: create a copy in memory.
-        VERIFY(program_header.alignment() == PAGE_SIZE);
+        VERIFY(program_header.alignment() % PAGE_SIZE == 0);
 
         if (!elf_image.is_within_image(program_header.raw_data(), program_header.size_in_image())) {
             dbgln("Shenanigans! Writable ELF PT_LOAD header sneaks outside of executable.");
@@ -324,7 +326,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         size_t rounded_range_end = TRY(Memory::page_round_up(program_header.vaddr().offset(load_offset).offset(program_header.size_in_memory()).get()));
         auto range_end = VirtualAddress { rounded_range_end };
 
-        auto range = TRY(new_space->try_allocate_range(range_base, range_end.get() - range_base.get()));
+        auto range = TRY(new_space->try_allocate_range(range_base, range_end.get() - range_base.get(), program_header.alignment()));
         auto region = TRY(new_space->allocate_region(range, region_name->view(), prot, AllocationStrategy::Reserve));
 
         // It's not always the case with PIE executables (and very well shouldn't be) that the
@@ -348,7 +350,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
             return load_writable_section(program_header);
 
         // Non-writable section: map the executable itself in memory.
-        VERIFY(program_header.alignment() == PAGE_SIZE);
+        VERIFY(program_header.alignment() % PAGE_SIZE == 0);
         int prot = 0;
         if (program_header.is_readable())
             prot |= PROT_READ;
@@ -360,7 +362,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         auto range_base = VirtualAddress { Memory::page_round_down(program_header.vaddr().offset(load_offset).get()) };
         size_t rounded_range_end = TRY(Memory::page_round_up(program_header.vaddr().offset(load_offset).offset(program_header.size_in_memory()).get()));
         auto range_end = VirtualAddress { rounded_range_end };
-        auto range = TRY(new_space->try_allocate_range(range_base, range_end.get() - range_base.get()));
+        auto range = TRY(new_space->try_allocate_range(range_base, range_end.get() - range_base.get(), program_header.alignment()));
         auto region = TRY(new_space->allocate_region_with_vmobject(range, *vmobject, program_header.offset(), elf_name->view(), prot, true));
 
         if (should_allow_syscalls == ShouldAllowSyscalls::Yes)
@@ -480,7 +482,7 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
     // (For dynamically linked executable) Allocate an FD for passing the main executable to the dynamic loader.
     Optional<ScopedDescriptionAllocation> main_program_fd_allocation;
     if (has_interpreter)
-        main_program_fd_allocation = TRY(m_fds.allocate());
+        main_program_fd_allocation = TRY(allocate_fd());
 
     // We commit to the new executable at this point. There is no turning back!
 
@@ -535,14 +537,16 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
 
     clear_futex_queues_on_exec();
 
-    fds().change_each([&](auto& file_description_metadata) {
-        if (file_description_metadata.is_valid() && file_description_metadata.flags() & FD_CLOEXEC)
-            file_description_metadata = {};
+    m_fds.with_exclusive([&](auto& fds) {
+        fds.change_each([&](auto& file_description_metadata) {
+            if (file_description_metadata.is_valid() && file_description_metadata.flags() & FD_CLOEXEC)
+                file_description_metadata = {};
+        });
     });
 
     if (main_program_fd_allocation.has_value()) {
         main_program_description->set_readable(true);
-        m_fds[main_program_fd_allocation->fd].set(move(main_program_description), FD_CLOEXEC);
+        m_fds.with_exclusive([&](auto& fds) { fds[main_program_fd_allocation->fd].set(move(main_program_description), FD_CLOEXEC); });
     }
 
     new_main_thread = nullptr;
@@ -626,50 +630,45 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
         PerformanceManager::add_process_exec_event(*this);
     }
 
-    {
-        SpinlockLocker lock(g_scheduler_lock);
-        new_main_thread->set_state(Thread::State::Runnable);
-    }
     u32 lock_count_to_restore;
-    [[maybe_unused]] auto rc = big_lock().force_unlock_if_locked(lock_count_to_restore);
+    [[maybe_unused]] auto rc = big_lock().force_unlock_exclusive_if_locked(lock_count_to_restore);
     VERIFY_INTERRUPTS_DISABLED();
     VERIFY(Processor::in_critical());
     return {};
 }
 
-static Vector<ELF::AuxiliaryValue> generate_auxiliary_vector(FlatPtr load_base, FlatPtr entry_eip, UserID uid, UserID euid, GroupID gid, GroupID egid, StringView executable_path, Optional<Process::ScopedDescriptionAllocation> const& main_program_fd_allocation)
+static Array<ELF::AuxiliaryValue, auxiliary_vector_size> generate_auxiliary_vector(FlatPtr load_base, FlatPtr entry_eip, UserID uid, UserID euid, GroupID gid, GroupID egid, StringView executable_path, Optional<Process::ScopedDescriptionAllocation> const& main_program_fd_allocation)
 {
-    Vector<ELF::AuxiliaryValue> auxv;
-    // PHDR/EXECFD
-    // PH*
-    auxv.append({ ELF::AuxiliaryValue::PageSize, PAGE_SIZE });
-    auxv.append({ ELF::AuxiliaryValue::BaseAddress, (void*)load_base });
+    return { {
+        // PHDR/EXECFD
+        // PH*
+        { ELF::AuxiliaryValue::PageSize, PAGE_SIZE },
+        { ELF::AuxiliaryValue::BaseAddress, (void*)load_base },
 
-    auxv.append({ ELF::AuxiliaryValue::Entry, (void*)entry_eip });
-    // NOTELF
-    auxv.append({ ELF::AuxiliaryValue::Uid, (long)uid.value() });
-    auxv.append({ ELF::AuxiliaryValue::EUid, (long)euid.value() });
-    auxv.append({ ELF::AuxiliaryValue::Gid, (long)gid.value() });
-    auxv.append({ ELF::AuxiliaryValue::EGid, (long)egid.value() });
+        { ELF::AuxiliaryValue::Entry, (void*)entry_eip },
+        // NOTELF
+        { ELF::AuxiliaryValue::Uid, (long)uid.value() },
+        { ELF::AuxiliaryValue::EUid, (long)euid.value() },
+        { ELF::AuxiliaryValue::Gid, (long)gid.value() },
+        { ELF::AuxiliaryValue::EGid, (long)egid.value() },
 
-    auxv.append({ ELF::AuxiliaryValue::Platform, Processor::platform_string() });
-    // FIXME: This is platform specific
-    auxv.append({ ELF::AuxiliaryValue::HwCap, (long)CPUID(1).edx() });
+        { ELF::AuxiliaryValue::Platform, Processor::platform_string() },
+        // FIXME: This is platform specific
+        { ELF::AuxiliaryValue::HwCap, (long)CPUID(1).edx() },
 
-    auxv.append({ ELF::AuxiliaryValue::ClockTick, (long)TimeManagement::the().ticks_per_second() });
+        { ELF::AuxiliaryValue::ClockTick, (long)TimeManagement::the().ticks_per_second() },
 
-    // FIXME: Also take into account things like extended filesystem permissions? That's what linux does...
-    auxv.append({ ELF::AuxiliaryValue::Secure, ((uid != euid) || (gid != egid)) ? 1 : 0 });
+        // FIXME: Also take into account things like extended filesystem permissions? That's what linux does...
+        { ELF::AuxiliaryValue::Secure, ((uid != euid) || (gid != egid)) ? 1 : 0 },
 
-    auxv.append({ ELF::AuxiliaryValue::Random, nullptr });
+        { ELF::AuxiliaryValue::Random, nullptr },
 
-    auxv.append({ ELF::AuxiliaryValue::ExecFilename, executable_path });
+        { ELF::AuxiliaryValue::ExecFilename, executable_path },
 
-    if (main_program_fd_allocation.has_value())
-        auxv.append({ ELF::AuxiliaryValue::ExecFileDescriptor, main_program_fd_allocation->fd });
+        main_program_fd_allocation.has_value() ? ELF::AuxiliaryValue { ELF::AuxiliaryValue::ExecFileDescriptor, main_program_fd_allocation->fd } : ELF::AuxiliaryValue { ELF::AuxiliaryValue::Ignore, 0L },
 
-    auxv.append({ ELF::AuxiliaryValue::Null, 0L });
-    return auxv;
+        { ELF::AuxiliaryValue::Null, 0L },
+    } };
 }
 
 static ErrorOr<NonnullOwnPtrVector<KString>> find_shebang_interpreter_for_executable(char const first_page[], size_t nread)
@@ -691,7 +690,7 @@ static ErrorOr<NonnullOwnPtrVector<KString>> find_shebang_interpreter_for_execut
             if (first_page[i] == ' ') {
                 if (word_length > 0) {
                     auto word = TRY(KString::try_create(StringView { &first_page[word_start], word_length }));
-                    interpreter_words.append(move(word));
+                    TRY(interpreter_words.try_append(move(word)));
                 }
                 word_length = 0;
                 word_start = i + 1;
@@ -700,7 +699,7 @@ static ErrorOr<NonnullOwnPtrVector<KString>> find_shebang_interpreter_for_execut
 
         if (word_length > 0) {
             auto word = TRY(KString::try_create(StringView { &first_page[word_start], word_length }));
-            interpreter_words.append(move(word));
+            TRY(interpreter_words.try_append(move(word)));
         }
 
         if (!interpreter_words.is_empty())
@@ -850,6 +849,11 @@ ErrorOr<FlatPtr> Process::sys$execve(Userspace<const Syscall::SC_execve_params*>
 
         if (params.arguments.length > ARG_MAX || params.environment.length > ARG_MAX)
             return E2BIG;
+
+        // NOTE: The caller is expected to always pass at least one argument by convention,
+        //       the program path that was passed as params.path.
+        if (params.arguments.length == 0)
+            return EINVAL;
 
         auto path = TRY(get_syscall_path_argument(params.path));
 

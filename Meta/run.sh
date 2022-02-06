@@ -201,6 +201,7 @@ else
         SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk,if=none,id=disk"
         SERENITY_BOOT_DRIVE="$SERENITY_BOOT_DRIVE -device i82801b11-bridge,id=bridge4 -device sdhci-pci,bus=bridge4"
         SERENITY_BOOT_DRIVE="$SERENITY_BOOT_DRIVE -device nvme,serial=deadbeef,drive=disk,bus=bridge4"
+        SERENITY_KERNEL_CMDLINE="$SERENITY_KERNEL_CMDLINE root=/dev/nvme0n1"
     else
         SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk"
     fi
@@ -214,6 +215,7 @@ if [ -z "$SERENITY_ETHERNET_DEVICE_TYPE" ]; then
   SERENITY_ETHERNET_DEVICE_TYPE="e1000"
 fi
 
+# add -machine vmport=off below to run the machine with ps/2 mouse
 if [ -z "$SERENITY_MACHINE" ]; then
     if [ "$SERENITY_ARCH" = "aarch64" ]; then
         SERENITY_MACHINE="-M raspi3b -serial stdio"

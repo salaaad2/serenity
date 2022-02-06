@@ -83,7 +83,7 @@ void DateTime::set_time(int year, int month, int day, int hour, int minute, int 
     m_second = tm.tm_sec;
 }
 
-String DateTime::to_string(const String& format) const
+String DateTime::to_string(StringView format) const
 {
     const char wday_short_names[7][4] = {
         "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
@@ -104,6 +104,24 @@ String DateTime::to_string(const String& format) const
     localtime_r(&m_timestamp, &tm);
     StringBuilder builder;
     const int format_len = format.length();
+
+    auto format_time_zone_offset = [&](bool with_separator) {
+        auto offset_seconds = -timezone;
+        StringView offset_sign;
+
+        if (offset_seconds >= 0) {
+            offset_sign = "+"sv;
+        } else {
+            offset_sign = "-"sv;
+            offset_seconds *= -1;
+        }
+
+        auto offset_hours = offset_seconds / 3600;
+        auto offset_minutes = (offset_seconds % 3600) / 60;
+        auto separator = with_separator ? ":"sv : ""sv;
+
+        builder.appendff("{}{:02}{}{:02}", offset_sign, offset_hours, separator, offset_minutes);
+    };
 
     for (int i = 0; i < format_len; ++i) {
         if (format[i] != '%') {
@@ -217,6 +235,20 @@ String DateTime::to_string(const String& format) const
             case 'Y':
                 builder.appendff("{}", tm.tm_year + 1900);
                 break;
+            case 'z':
+                format_time_zone_offset(false);
+                break;
+            case ':':
+                if (++i == format_len)
+                    return String::empty();
+                if (format[i] != 'z')
+                    return String::empty();
+
+                format_time_zone_offset(true);
+                break;
+            case 'Z':
+                builder.append(tzname[0]);
+                break;
             case '%':
                 builder.append('%');
                 break;
@@ -229,7 +261,7 @@ String DateTime::to_string(const String& format) const
     return builder.build();
 }
 
-Optional<DateTime> DateTime::parse(const String& format, const String& string)
+Optional<DateTime> DateTime::parse(StringView format, const String& string)
 {
     unsigned format_pos = 0;
     unsigned string_pos = 0;

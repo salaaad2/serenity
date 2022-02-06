@@ -304,12 +304,16 @@ if (BUILD_LAGOM)
     )
 
     # ELF
-    file(GLOB LIBELF_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibELF/*.cpp")
-    # There's no way we can reliably make the dynamic loading classes cross platform
-    list(FILTER LIBELF_SOURCES EXCLUDE REGEX ".*Dynamic.*.cpp$")
-    lagom_lib(ELF elf
-        SOURCES ${LIBELF_SOURCES}
-    )
+    # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem 
+    #        for Lagom on Apple M1
+    if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+        file(GLOB LIBELF_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibELF/*.cpp")
+        # There's no way we can reliably make the dynamic loading classes cross platform
+        list(FILTER LIBELF_SOURCES EXCLUDE REGEX ".*Dynamic.*.cpp$")
+        lagom_lib(ELF elf
+            SOURCES ${LIBELF_SOURCES}
+        )
+    endif()
 
     # Gemini
     file(GLOB LIBGEMINI_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGemini/*.cpp")
@@ -458,10 +462,14 @@ if (BUILD_LAGOM)
     )
 
     # x86
-    file(GLOB LIBX86_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibX86/*.cpp")
-    lagom_lib(X86 x86
-        SOURCES ${LIBX86_SOURCES}
-    )
+    # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem 
+    #        for Lagom on Apple M1
+    if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+        file(GLOB LIBX86_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibX86/*.cpp")
+        lagom_lib(X86 x86
+            SOURCES ${LIBX86_SOURCES}
+        )
+    endif()
 
     if (NOT ENABLE_OSS_FUZZ AND NOT ENABLE_FUZZER_SANITIZER AND NOT ENABLE_COMPILER_EXPLORER_BUILD)
         # Lagom Examples
@@ -474,11 +482,15 @@ if (BUILD_LAGOM)
         # Lagom Utilities
         add_executable(adjtime_lagom ../../Userland/Utilities/adjtime.cpp)
         set_target_properties(adjtime_lagom PROPERTIES OUTPUT_NAME adjtime)
-        target_link_libraries(adjtime_lagom LagomCore)
+        target_link_libraries(adjtime_lagom LagomCore LagomMain)
 
-        add_executable(disasm_lagom ../../Userland/Utilities/disasm.cpp)
-        set_target_properties(disasm_lagom PROPERTIES OUTPUT_NAME disasm)
-        target_link_libraries(disasm_lagom LagomCore LagomELF LagomX86 LagomMain)
+        # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem 
+        #        for Lagom on Apple M1
+        if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            add_executable(disasm_lagom ../../Userland/Utilities/disasm.cpp)
+            set_target_properties(disasm_lagom PROPERTIES OUTPUT_NAME disasm)
+            target_link_libraries(disasm_lagom LagomCore LagomELF LagomX86 LagomMain)
+        endif()
 
         add_executable(gml-format_lagom ../../Userland/Utilities/gml-format.cpp)
         set_target_properties(gml-format_lagom PROPERTIES OUTPUT_NAME gml-format)
@@ -604,8 +616,9 @@ if (BUILD_LAGOM)
         )
         set_tests_properties(JS PROPERTIES ENVIRONMENT SERENITY_SOURCE_DIR=${SERENITY_PROJECT_ROOT})
 
-        # test-invalid-unicode-js
+        # Extra tests from Tests/LibJS
         lagom_test(../../Tests/LibJS/test-invalid-unicode-js.cpp LIBS LagomJS)
+        lagom_test(../../Tests/LibJS/test-bytecode-js.cpp LIBS LagomJS)
 
         # Markdown
         include(commonmark_spec)
@@ -630,16 +643,6 @@ if (BUILD_LAGOM)
             SKIP_RETURN_CODE 1)
 
         # Tests that are not LibTest based
-        # test-crypto
-        add_executable(test-crypto_lagom ../../Userland/Utilities/test-crypto.cpp)
-        set_target_properties(test-crypto_lagom PROPERTIES OUTPUT_NAME test-crypto)
-        target_link_libraries(test-crypto_lagom LagomCore LagomTLS LagomCrypto LagomLine)
-        add_test(
-            NAME Crypto
-            COMMAND test-crypto_lagom test -t -s google.com --ca-certs-file ../../Base/etc/ca_certs.ini
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-
         # Shell
         file(GLOB SHELL_TESTS CONFIGURE_DEPENDS "../../Userland/Shell/Tests/*.sh")
         foreach(TEST_PATH ${SHELL_TESTS})

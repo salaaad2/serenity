@@ -12,6 +12,7 @@
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
+#include <Kernel/Scheduler.h>
 
 namespace Kernel::Memory {
 
@@ -81,7 +82,7 @@ ErrorOr<void> AddressSpace::unmap_mmap_range(VirtualAddress addr, size_t size)
     }
 
     // Try again while checking multiple regions at a time.
-    auto const& regions = find_regions_intersecting(range_to_unmap);
+    auto const& regions = TRY(find_regions_intersecting(range_to_unmap));
     if (regions.is_empty())
         return {};
 
@@ -237,7 +238,7 @@ Region* AddressSpace::find_region_containing(VirtualRange const& range)
     return (*candidate)->range().contains(range) ? candidate->ptr() : nullptr;
 }
 
-Vector<Region*> AddressSpace::find_regions_intersecting(VirtualRange const& range)
+ErrorOr<Vector<Region*>> AddressSpace::find_regions_intersecting(VirtualRange const& range)
 {
     Vector<Region*> regions = {};
     size_t total_size_collected = 0;
@@ -250,7 +251,7 @@ Vector<Region*> AddressSpace::find_regions_intersecting(VirtualRange const& rang
     for (auto iter = m_regions.begin_from((*found_region)->vaddr().get()); !iter.is_end(); ++iter) {
         const auto& iter_range = (*iter)->range();
         if (iter_range.base() < range.end() && iter_range.end() > range.base()) {
-            regions.append(*iter);
+            TRY(regions.try_append(*iter));
 
             total_size_collected += (*iter)->size() - iter_range.intersect(range).size();
             if (total_size_collected == range.size())
@@ -320,10 +321,12 @@ void AddressSpace::remove_all_regions(Badge<Process>)
 {
     VERIFY(Thread::current() == g_finalizer);
     SpinlockLocker locker(m_lock);
-    SpinlockLocker pd_locker(m_page_directory->get_lock());
-    SpinlockLocker mm_locker(s_mm_lock);
-    for (auto& region : m_regions)
-        (*region).unmap_with_locks_held(Region::ShouldDeallocateVirtualRange::No, ShouldFlushTLB::No, pd_locker, mm_locker);
+    {
+        SpinlockLocker pd_locker(m_page_directory->get_lock());
+        SpinlockLocker mm_locker(s_mm_lock);
+        for (auto& region : m_regions)
+            (*region).unmap_with_locks_held(Region::ShouldDeallocateVirtualRange::No, ShouldFlushTLB::No, pd_locker, mm_locker);
+    }
     m_regions.clear();
 }
 
@@ -341,13 +344,13 @@ size_t AddressSpace::amount_dirty_private() const
     return amount;
 }
 
-size_t AddressSpace::amount_clean_inode() const
+ErrorOr<size_t> AddressSpace::amount_clean_inode() const
 {
     SpinlockLocker lock(m_lock);
     HashTable<const InodeVMObject*> vmobjects;
     for (auto const& region : m_regions) {
         if (region->vmobject().is_inode())
-            vmobjects.set(&static_cast<const InodeVMObject&>(region->vmobject()));
+            TRY(vmobjects.try_set(&static_cast<const InodeVMObject&>(region->vmobject())));
     }
     size_t amount = 0;
     for (auto& vmobject : vmobjects)

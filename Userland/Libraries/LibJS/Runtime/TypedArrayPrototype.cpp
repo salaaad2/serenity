@@ -109,7 +109,7 @@ static ThrowCompletionOr<void> for_each_item(VM& vm, GlobalObject& global_object
     for (size_t i = 0; i < initial_length; ++i) {
         auto value = TRY(typed_array->get(i));
 
-        auto callback_result = TRY(vm.call(*callback_function, this_value, value, Value((i32)i), typed_array));
+        auto callback_result = TRY(call(global_object, *callback_function, this_value, value, Value((i32)i), typed_array));
 
         if (callback(i, value, callback_result) == IterationDecision::Break)
             break;
@@ -131,7 +131,7 @@ static ThrowCompletionOr<void> for_each_item_from_last(VM& vm, GlobalObject& glo
     for (ssize_t i = (ssize_t)initial_length - 1; i >= 0; --i) {
         auto value = TRY(typed_array->get(i));
 
-        auto callback_result = TRY(vm.call(*callback_function, this_value, value, Value((i32)i), typed_array));
+        auto callback_result = TRY(call(global_object, *callback_function, this_value, value, Value((i32)i), typed_array));
 
         if (callback(i, value, callback_result) == IterationDecision::Break)
             break;
@@ -470,7 +470,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::reduce)
     for (; k < length; ++k) {
         auto k_value = MUST(typed_array->get(k));
 
-        accumulator = TRY(vm.call(*callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
+        accumulator = TRY(call(global_object, *callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
     }
 
     return accumulator;
@@ -500,7 +500,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::reduce_right)
     for (; k >= 0; --k) {
         auto k_value = MUST(typed_array->get(k));
 
-        accumulator = TRY(vm.call(*callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
+        accumulator = TRY(call(global_object, *callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
     }
 
     return accumulator;
@@ -845,7 +845,7 @@ static ThrowCompletionOr<void> typed_array_merge_sort(GlobalObject& global_objec
         double comparison_result;
 
         if (compare_function) {
-            auto result = TRY(vm.call(*compare_function, js_undefined(), x, y));
+            auto result = TRY(call(global_object, *compare_function, js_undefined(), x, y));
 
             auto value = TRY(result.to_number(global_object));
 
@@ -1214,7 +1214,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::filter)
         auto value = MUST(typed_array->get(i));
 
         // c. Let selected be ! ToBoolean(? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »)).
-        auto callback_result = TRY(vm.call(*callback_function, this_value, value, Value((i32)i), typed_array)).to_boolean();
+        auto callback_result = TRY(call(global_object, *callback_function, this_value, value, Value((i32)i), typed_array)).to_boolean();
 
         // d. If selected is true, then
         if (callback_result) {
@@ -1277,7 +1277,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::map)
         auto value = MUST(typed_array->get(i));
 
         // c. Let mappedValue be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
-        auto mapped_value = TRY(vm.call(*callback_function, this_value, value, Value((i32)i), typed_array));
+        auto mapped_value = TRY(call(global_object, *callback_function, this_value, value, Value((i32)i), typed_array));
 
         // d. Perform ? Set(A, Pk, mappedValue, true).
         TRY(return_array->set(i, mapped_value, Object::ShouldThrowExceptions::Yes));
@@ -1290,23 +1290,56 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::map)
 }
 
 // 23.2.3.29 %TypedArray%.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.tolocalestring
+// 19.5.1 Array.prototype.toLocaleString ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sup-array.prototype.tolocalestring
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::to_locale_string)
 {
+    auto locales = vm.argument(0);
+    auto options = vm.argument(1);
+
+    // This function is not generic. ValidateTypedArray is applied to the this value prior to evaluating the algorithm.
+    // If its result is an abrupt completion that exception is thrown instead of evaluating the algorithm.
     auto* typed_array = TRY(validate_typed_array_from_this(global_object));
 
+    // 1. Let array be ? ToObject(this value).
+    // NOTE: Handled by ValidateTypedArray
+
+    // 2. Let len be ? ToLength(? Get(array, "length")).
+    // The implementation of the algorithm may be optimized with the knowledge that the this value is an object that
+    // has a fixed length and whose integer-indexed properties are not sparse.
     auto length = typed_array->array_length();
 
+    // 3. Let separator be the String value for the list-separator String appropriate for the host environment's current locale (this is derived in an implementation-defined way).
+    constexpr auto separator = ',';
+
+    // 4. Let R be the empty String.
     StringBuilder builder;
-    for (u32 k = 0; k < length; ++k) {
-        if (k > 0)
-            builder.append(','); // NOTE: Until we implement ECMA-402 (Intl) this is implementation specific.
-        auto value = TRY(typed_array->get(k));
-        if (value.is_nullish())
-            continue;
-        auto locale_string_result = TRY(value.invoke(global_object, vm.names.toLocaleString));
-        auto string = TRY(locale_string_result.to_string(global_object));
-        builder.append(string);
+
+    // 5. Let k be 0.
+    // 6. Repeat, while k < len,
+    for (size_t k = 0; k < length; ++k) {
+        // a. If k > 0, then
+        if (k > 0) {
+            // i. Set R to the string-concatenation of R and separator.
+            builder.append(separator);
+        }
+
+        // b. Let nextElement be ? Get(array, ! ToString(k)).
+        auto next_element = TRY(typed_array->get(k));
+
+        // c. If nextElement is not undefined or null, then
+        if (!next_element.is_nullish()) {
+            // i. Let S be ? ToString(? Invoke(nextElement, "toLocaleString", « locales, options »)).
+            auto locale_string_value = TRY(next_element.invoke(global_object, vm.names.toLocaleString, locales, options));
+            auto locale_string = TRY(locale_string_value.to_string(global_object));
+
+            // ii. Set R to the string-concatenation of R and S.
+            builder.append(locale_string);
+        }
+
+        // d. Increase k by 1.
     }
+
+    // 7. Return R.
     return js_string(vm, builder.to_string());
 }
 

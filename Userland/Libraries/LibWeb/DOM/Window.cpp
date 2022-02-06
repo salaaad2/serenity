@@ -6,6 +6,7 @@
  */
 
 #include <LibGUI/DisplayLink.h>
+#include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/ResolvedCSSStyleDeclaration.h>
@@ -171,7 +172,7 @@ void Window::timer_did_fire(Badge<Timer>, Timer& timer)
         VERIFY(wrapper());
         auto& vm = wrapper()->vm();
 
-        [[maybe_unused]] auto rc = vm.call(strong_timer->callback(), wrapper());
+        [[maybe_unused]] auto rc = JS::call(wrapper()->global_object(), strong_timer->callback(), wrapper());
         if (vm.exception())
             vm.clear_exception();
     });
@@ -202,7 +203,7 @@ i32 Window::request_animation_frame(JS::FunctionObject& js_callback)
     auto callback = request_animation_frame_driver().add([this, handle = JS::make_handle(&js_callback)](i32 id) mutable {
         auto& function = *handle.cell();
         auto& vm = function.vm();
-        (void)vm.call(function, JS::js_undefined(), JS::Value(performance().now()));
+        (void)JS::call(function.global_object(), function, JS::js_undefined(), JS::Value(performance().now()));
         if (vm.exception())
             vm.clear_exception();
         m_request_animation_frame_callbacks.remove(id);
@@ -222,27 +223,27 @@ void Window::cancel_animation_frame(i32 id)
 
 void Window::did_set_location_href(Badge<Bindings::LocationObject>, AK::URL const& new_href)
 {
-    auto* frame = associated_document().browsing_context();
-    if (!frame)
+    auto* browsing_context = associated_document().browsing_context();
+    if (!browsing_context)
         return;
-    frame->loader().load(new_href, FrameLoader::Type::Navigation);
+    browsing_context->loader().load(new_href, FrameLoader::Type::Navigation);
 }
 
 void Window::did_call_location_reload(Badge<Bindings::LocationObject>)
 {
-    auto* frame = associated_document().browsing_context();
-    if (!frame)
+    auto* browsing_context = associated_document().browsing_context();
+    if (!browsing_context)
         return;
-    frame->loader().load(associated_document().url(), FrameLoader::Type::Reload);
+    browsing_context->loader().load(associated_document().url(), FrameLoader::Type::Reload);
 }
 
 void Window::did_call_location_replace(Badge<Bindings::LocationObject>, String url)
 {
-    auto* frame = associated_document().browsing_context();
-    if (!frame)
+    auto* browsing_context = associated_document().browsing_context();
+    if (!browsing_context)
         return;
     auto new_url = associated_document().parse_url(url);
-    frame->loader().load(move(new_url), FrameLoader::Type::Navigation);
+    browsing_context->loader().load(move(new_url), FrameLoader::Type::Navigation);
 }
 
 bool Window::dispatch_event(NonnullRefPtr<Event> event)
@@ -255,18 +256,24 @@ JS::Object* Window::create_wrapper(JS::GlobalObject& global_object)
     return &global_object;
 }
 
+// https://www.w3.org/TR/cssom-view-1/#dom-window-innerwidth
 int Window::inner_width() const
 {
-    if (!associated_document().layout_node())
-        return 0;
-    return associated_document().layout_node()->width();
+    // The innerWidth attribute must return the viewport width including the size of a rendered scroll bar (if any),
+    // or zero if there is no viewport.
+    if (auto const* browsing_context = associated_document().browsing_context())
+        return browsing_context->viewport_rect().width();
+    return 0;
 }
 
+// https://www.w3.org/TR/cssom-view-1/#dom-window-innerheight
 int Window::inner_height() const
 {
-    if (!associated_document().layout_node())
-        return 0;
-    return associated_document().layout_node()->height();
+    // The innerHeight attribute must return the viewport height including the size of a rendered scroll bar (if any),
+    // or zero if there is no viewport.
+    if (auto const* browsing_context = associated_document().browsing_context())
+        return browsing_context->viewport_rect().height();
+    return 0;
 }
 
 Page* Window::page()
@@ -393,7 +400,7 @@ void Window::queue_microtask(JS::FunctionObject& callback)
     // The queueMicrotask(callback) method must queue a microtask to invoke callback,
     HTML::queue_a_microtask(associated_document(), [&callback, handle = JS::make_handle(&callback)]() {
         auto& vm = callback.vm();
-        [[maybe_unused]] auto rc = vm.call(callback, JS::js_null());
+        [[maybe_unused]] auto rc = JS::call(callback.global_object(), callback, JS::js_null());
         // FIXME: ...and if callback throws an exception, report the exception.
         if (vm.exception())
             vm.clear_exception();

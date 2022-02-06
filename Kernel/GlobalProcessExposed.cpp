@@ -6,12 +6,10 @@
 
 #include <AK/JsonObjectSerializer.h>
 #include <AK/UBSanitizer.h>
-#include <Kernel/Arch/x86/CPU.h>
 #include <Kernel/Arch/x86/InterruptDisabler.h>
 #include <Kernel/Arch/x86/ProcessorInfo.h>
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/CommandLine.h>
-#include <Kernel/Devices/ConsoleDevice.h>
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Devices/HID/HIDManagement.h>
 #include <Kernel/FileSystem/Custody.h>
@@ -22,13 +20,13 @@
 #include <Kernel/Interrupts/InterruptManagement.h>
 #include <Kernel/KBufferBuilder.h>
 #include <Kernel/Net/LocalSocket.h>
-#include <Kernel/Net/NetworkAdapter.h>
 #include <Kernel/Net/NetworkingManagement.h>
 #include <Kernel/Net/Routing.h>
 #include <Kernel/Net/TCPSocket.h>
 #include <Kernel/Net/UDPSocket.h>
 #include <Kernel/Process.h>
 #include <Kernel/ProcessExposed.h>
+#include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/TTY/TTY.h>
 
@@ -77,7 +75,7 @@ private:
     virtual ErrorOr<void> try_generate(KBufferBuilder& builder) override
     {
         JsonArraySerializer array { builder };
-        arp_table().for_each_shared([&](const auto& it) {
+        arp_table().for_each([&](const auto& it) {
             auto obj = array.add_object();
             obj.add("mac_address", it.value.to_string());
             obj.add("ip_address", it.key.to_string());
@@ -265,20 +263,12 @@ private:
 class ProcFSUBSanDeadly : public ProcFSSystemBoolean {
 public:
     static NonnullRefPtr<ProcFSUBSanDeadly> must_create(const ProcFSSystemDirectory&);
-    virtual bool value() const override
-    {
-        MutexLocker locker(m_lock);
-        return AK::UBSanitizer::g_ubsan_is_deadly;
-    }
-    virtual void set_value(bool new_value) override
-    {
-        MutexLocker locker(m_lock);
-        AK::UBSanitizer::g_ubsan_is_deadly = new_value;
-    }
+
+    virtual bool value() const override { return AK::UBSanitizer::g_ubsan_is_deadly; }
+    virtual void set_value(bool new_value) override { AK::UBSanitizer::g_ubsan_is_deadly = new_value; }
 
 private:
     ProcFSUBSanDeadly();
-    mutable Mutex m_lock;
 };
 
 class ProcFSCapsLockRemap : public ProcFSSystemBoolean {
@@ -459,10 +449,9 @@ private:
             if (process.is_user_process()) {
                 StringBuilder pledge_builder;
 
-#define __ENUMERATE_PLEDGE_PROMISE(promise)      \
-    if (process.has_promised(Pledge::promise)) { \
-        pledge_builder.append(#promise " ");     \
-    }
+#define __ENUMERATE_PLEDGE_PROMISE(promise)    \
+    if (process.has_promised(Pledge::promise)) \
+        TRY(pledge_builder.try_append(#promise " "));
                 ENUMERATE_PLEDGE_PROMISES
 #undef __ENUMERATE_PLEDGE_PROMISE
 
@@ -491,14 +480,14 @@ private:
             process_object.add("uid", process.uid().value());
             process_object.add("gid", process.gid().value());
             process_object.add("ppid", process.ppid().value());
-            process_object.add("nfds", process.fds().open_count());
+            process_object.add("nfds", process.fds().with_shared([](auto& fds) { return fds.open_count(); }));
             process_object.add("name", process.name());
             process_object.add("executable", process.executable() ? TRY(process.executable()->try_serialize_absolute_path())->view() : ""sv);
             process_object.add("tty", process.tty() ? process.tty()->tty_name().view() : "notty"sv);
             process_object.add("amount_virtual", process.address_space().amount_virtual());
             process_object.add("amount_resident", process.address_space().amount_resident());
             process_object.add("amount_dirty_private", process.address_space().amount_dirty_private());
-            process_object.add("amount_clean_inode", process.address_space().amount_clean_inode());
+            process_object.add("amount_clean_inode", TRY(process.address_space().amount_clean_inode()));
             process_object.add("amount_shared", process.address_space().amount_shared());
             process_object.add("amount_purgeable_volatile", process.address_space().amount_purgeable_volatile());
             process_object.add("amount_purgeable_nonvolatile", process.address_space().amount_purgeable_nonvolatile());

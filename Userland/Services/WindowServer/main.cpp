@@ -21,17 +21,20 @@
 
 ErrorOr<int> serenity_main(Main::Arguments)
 {
-    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath unix proc sigaction"));
+    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath unix proc sigaction exec"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/tmp", "cw"));
     TRY(Core::System::unveil("/etc/WindowServer.ini", "rwc"));
+    TRY(Core::System::unveil("/etc/Keyboard.ini", "r"));
     TRY(Core::System::unveil("/dev", "rw"));
+    TRY(Core::System::unveil("/bin/keymap", "x"));
+    TRY(Core::System::unveil("/proc/keymap", "r"));
 
     struct sigaction act = {};
     act.sa_flags = SA_NOCLDWAIT;
     act.sa_handler = SIG_IGN;
     TRY(Core::System::sigaction(SIGCHLD, &act, nullptr));
-    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath unix proc"));
+    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath unix proc exec"));
 
     auto wm_config = Core::ConfigFile::open("/etc/WindowServer.ini");
     auto theme_name = wm_config->read_entry("Theme", "Name", "Default");
@@ -41,15 +44,15 @@ ErrorOr<int> serenity_main(Main::Arguments)
     Gfx::set_system_theme(theme);
     auto palette = Gfx::PaletteImpl::create_with_anonymous_buffer(theme);
 
-    auto default_font_query = wm_config->read_entry("Fonts", "Default", "Katica 10 400");
-    auto fixed_width_font_query = wm_config->read_entry("Fonts", "FixedWidth", "Csilla 10 400");
+    auto default_font_query = wm_config->read_entry("Fonts", "Default", "Katica 10 400 0");
+    auto fixed_width_font_query = wm_config->read_entry("Fonts", "FixedWidth", "Csilla 10 400 0");
 
     Gfx::FontDatabase::set_default_font_query(default_font_query);
     Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
 
     WindowServer::EventLoop loop;
 
-    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath proc"));
+    TRY(Core::System::pledge("stdio video thread sendfd recvfd accept rpath wpath cpath proc exec"));
 
     // First check which screens are explicitly configured
     {

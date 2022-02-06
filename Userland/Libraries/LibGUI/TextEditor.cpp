@@ -170,7 +170,7 @@ TextPosition TextEditor::text_position_at_content_position(Gfx::IntPoint const& 
                 int glyph_x = 0;
                 size_t i = 0;
                 for (; i < view.length(); ++i) {
-                    int advance = font().glyph_width(view.code_points()[i]) + font().glyph_spacing();
+                    int advance = font().glyph_or_emoji_width(view.code_points()[i]) + font().glyph_spacing();
                     if ((glyph_x + (advance / 2)) >= position.x())
                         break;
                     glyph_x += advance;
@@ -401,11 +401,17 @@ void TextEditor::paint_event(PaintEvent& event)
 
     // NOTE: This lambda and TextEditor::text_width_for_font() are used to substitute all glyphs with m_substitution_code_point if necessary.
     //       Painter::draw_text() and Gfx::Font::width() should not be called directly, but using this lambda and TextEditor::text_width_for_font().
-    auto draw_text = [&](Gfx::IntRect const& rect, auto const& raw_text, Gfx::Font const& font, Gfx::TextAlignment alignment, Gfx::Color color, bool substitue = true) {
+    auto draw_text = [&](Gfx::IntRect const& rect, auto const& raw_text, Gfx::Font const& font, Gfx::TextAlignment alignment, Gfx::TextAttributes attributes, bool substitue = true) {
         if (m_substitution_code_point && substitue) {
-            painter.draw_text(rect, substitution_code_point_view(raw_text.length()), font, alignment, color);
+            painter.draw_text(rect, substitution_code_point_view(raw_text.length()), font, alignment, attributes.color);
         } else {
-            painter.draw_text(rect, raw_text, font, alignment, color);
+            painter.draw_text(rect, raw_text, font, alignment, attributes.color);
+        }
+        if (attributes.underline) {
+            if (attributes.underline_style == Gfx::TextAttributes::UnderlineStyle::Solid)
+                painter.draw_line(rect.bottom_left().translated(0, 1), rect.bottom_right().translated(0, 1), attributes.underline_color.value_or(attributes.color));
+            if (attributes.underline_style == Gfx::TextAttributes::UnderlineStyle::Wavy)
+                painter.draw_triangle_wave(rect.bottom_left().translated(0, 1), rect.bottom_right().translated(0, 1), attributes.underline_color.value_or(attributes.color), 2);
         }
     };
 
@@ -518,13 +524,13 @@ void TextEditor::paint_event(PaintEvent& event)
             if (!placeholder().is_empty() && document().is_empty() && line_index == 0) {
                 auto line_rect = visual_line_rect;
                 line_rect.set_width(text_width_for_font(placeholder(), font()));
-                draw_text(line_rect, placeholder(), font(), m_text_alignment, palette().color(Gfx::ColorRole::PlaceholderText), false);
+                draw_text(line_rect, placeholder(), font(), m_text_alignment, { palette().color(Gfx::ColorRole::PlaceholderText) }, false);
             } else if (!document().has_spans()) {
                 // Fast-path for plain text
                 auto color = palette().color(is_enabled() ? foreground_role() : Gfx::ColorRole::DisabledText);
                 if (is_displayonly() && is_focused())
                     color = palette().color(is_enabled() ? Gfx::ColorRole::SelectionText : Gfx::ColorRole::DisabledText);
-                draw_text(visual_line_rect, visual_line_text, font(), m_text_alignment, color);
+                draw_text(visual_line_rect, visual_line_text, font(), m_text_alignment, { color });
             } else {
                 auto unspanned_color = palette().color(is_enabled() ? foreground_role() : Gfx::ColorRole::DisabledText);
                 if (is_displayonly() && is_focused())
@@ -534,19 +540,16 @@ void TextEditor::paint_event(PaintEvent& event)
                 size_t next_column = 0;
                 Gfx::IntRect span_rect = { visual_line_rect.location(), { 0, line_height() } };
 
-                auto draw_text_helper = [&](size_t start, size_t end, RefPtr<Gfx::Font>& font, Color& color, Optional<Color> background_color = {}, bool underline = false) {
+                auto draw_text_helper = [&](size_t start, size_t end, RefPtr<Gfx::Font>& font, Gfx::TextAttributes text_attributes) {
                     size_t length = end - start;
                     if (length == 0)
                         return;
                     auto text = visual_line_text.substring_view(start, length);
                     span_rect.set_width(font->width(text));
-                    if (background_color.has_value()) {
-                        painter.fill_rect(span_rect, background_color.value());
+                    if (text_attributes.background_color.has_value()) {
+                        painter.fill_rect(span_rect, text_attributes.background_color.value());
                     }
-                    draw_text(span_rect, text, *font, m_text_alignment, color);
-                    if (underline) {
-                        painter.draw_line(span_rect.bottom_left().translated(0, 1), span_rect.bottom_right().translated(0, 1), color);
-                    }
+                    draw_text(span_rect, text, *font, m_text_alignment, text_attributes);
                     span_rect.translate_by(span_rect.width(), 0);
                 };
                 for (;;) {
@@ -569,7 +572,7 @@ void TextEditor::paint_event(PaintEvent& event)
                         break;
                     }
                     if (span.range.start().line() == span.range.end().line() && span.range.end().column() < span.range.start().column()) {
-                        dbgln_if(TEXTEDITOR_DEBUG, "span form {}:{} to {}:{} has negative length => ignoring", span.range.start().line(), span.range.start().column(), span.range.end().line(), span.range.end().column());
+                        dbgln_if(TEXTEDITOR_DEBUG, "span from {}:{} to {}:{} has negative length => ignoring", span.range.start().line(), span.range.start().column(), span.range.end().line(), span.range.end().column());
                         ++span_index;
                         continue;
                     }
@@ -602,14 +605,14 @@ void TextEditor::paint_event(PaintEvent& event)
 
                     if (span_start != next_column) {
                         // draw unspanned text between spans
-                        draw_text_helper(next_column, span_start, unspanned_font, unspanned_color);
+                        draw_text_helper(next_column, span_start, unspanned_font, { unspanned_color });
                     }
                     auto font = unspanned_font;
                     if (span.attributes.bold) {
-                        if (auto bold_font = Gfx::FontDatabase::the().get(font->family(), font->presentation_size(), 700))
+                        if (auto bold_font = Gfx::FontDatabase::the().get(font->family(), font->presentation_size(), 700, 0))
                             font = bold_font;
                     }
-                    draw_text_helper(span_start, span_end, font, span.attributes.color, span.attributes.background_color, span.attributes.underline);
+                    draw_text_helper(span_start, span_end, font, span.attributes);
                     next_column = span_end;
                     if (!span_consumned) {
                         // continue with same span on next line
@@ -620,7 +623,7 @@ void TextEditor::paint_event(PaintEvent& event)
                 }
                 // draw unspanned text after last span
                 if (next_column < visual_line_text.length()) {
-                    draw_text_helper(next_column, visual_line_text.length(), unspanned_font, unspanned_color);
+                    draw_text_helper(next_column, visual_line_text.length(), unspanned_font, { unspanned_color });
                 }
                 // consume all spans that should end this line
                 // this is necessary since the spans can include the new line character
@@ -704,7 +707,7 @@ void TextEditor::paint_event(PaintEvent& event)
                             end_of_selection_within_visual_line - start_of_selection_within_visual_line
                         };
 
-                        draw_text(selection_rect, visual_selected_text, font(), Gfx::TextAlignment::CenterLeft, text_color);
+                        draw_text(selection_rect, visual_selected_text, font(), Gfx::TextAlignment::CenterLeft, { text_color });
                     }
                 }
             }
@@ -1260,19 +1263,17 @@ void TextEditor::timer_event(Core::TimerEvent&)
 
 bool TextEditor::write_to_file(String const& path)
 {
-    int fd = open(path.characters(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0) {
-        perror("open");
+    auto file = Core::File::construct(path);
+    if (!file->open(Core::OpenMode::WriteOnly | Core::OpenMode::Truncate)) {
+        warnln("Error opening {}: {}", path, strerror(file->error()));
         return false;
     }
 
-    return write_to_file_and_close(fd);
+    return write_to_file(*file);
 }
 
-bool TextEditor::write_to_file_and_close(int fd)
+bool TextEditor::write_to_file(Core::File& file)
 {
-    ScopeGuard fd_guard = [fd] { close(fd); };
-
     off_t file_size = 0;
     if (line_count() == 1 && line(0).is_empty()) {
         // Truncate to zero.
@@ -1284,7 +1285,7 @@ bool TextEditor::write_to_file_and_close(int fd)
         file_size += line_count();
     }
 
-    if (ftruncate(fd, file_size) < 0) {
+    if (!file.truncate(file_size)) {
         perror("ftruncate");
         return false;
     }
@@ -1296,14 +1297,14 @@ bool TextEditor::write_to_file_and_close(int fd)
             auto& line = this->line(i);
             if (line.length()) {
                 auto line_as_utf8 = line.to_utf8();
-                ssize_t nwritten = write(fd, line_as_utf8.characters(), line_as_utf8.length());
+                ssize_t nwritten = file.write(line_as_utf8);
                 if (nwritten < 0) {
                     perror("write");
                     return false;
                 }
             }
             char ch = '\n';
-            ssize_t nwritten = write(fd, &ch, 1);
+            ssize_t nwritten = file.write((u8*)&ch, 1);
             if (nwritten != 1) {
                 perror("write");
                 return false;

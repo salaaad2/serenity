@@ -28,7 +28,7 @@
 
 HexEditor::HexEditor()
     : m_blink_timer(Core::Timer::construct())
-    , m_document(make<HexDocumentMemory>(ByteBuffer::create_zeroed(0).release_value()))
+    , m_document(make<HexDocumentMemory>(ByteBuffer::create_zeroed(0).release_value_but_fixme_should_propagate_errors()))
 {
     set_should_hide_unnecessary_scrollbars(true);
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
@@ -60,7 +60,7 @@ void HexEditor::set_readonly(bool readonly)
 bool HexEditor::open_new_file(size_t size)
 {
     auto maybe_buffer = ByteBuffer::create_zeroed(size);
-    if (!maybe_buffer.has_value()) {
+    if (maybe_buffer.is_error()) {
         return false;
     }
 
@@ -115,13 +115,8 @@ void HexEditor::set_position(size_t position)
     update_status();
 }
 
-bool HexEditor::save_as(int fd)
+bool HexEditor::save_as(NonnullRefPtr<Core::File> new_file)
 {
-    auto new_file = Core::File::construct();
-    if (!new_file->open(fd, Core::OpenMode::ReadWrite, Core::File::ShouldCloseFileDescriptor::Yes)) {
-        return false;
-    }
-
     if (m_document->type() == HexDocument::Type::File) {
         HexDocumentFile* fileDocument = static_cast<HexDocumentFile*>(m_document.ptr());
         if (!fileDocument->write_to_file(new_file))

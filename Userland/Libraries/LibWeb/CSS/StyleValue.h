@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -231,6 +231,14 @@ enum class TextDecorationLine {
     Overline,
     LineThrough,
     Blink,
+};
+
+enum class TextDecorationStyle {
+    Solid,
+    Double,
+    Dotted,
+    Dashed,
+    Wavy,
 };
 
 enum class TextTransform {
@@ -479,10 +487,7 @@ public:
     Repeat repeat_x() const { return m_repeat_x; }
     Repeat repeat_y() const { return m_repeat_y; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("{} {}", CSS::to_string(m_repeat_x), CSS::to_string(m_repeat_y));
-    }
+    virtual String to_string() const override;
 
 private:
     BackgroundRepeatStyleValue(Repeat repeat_x, Repeat repeat_y)
@@ -508,10 +513,7 @@ public:
     LengthPercentage size_x() const { return m_size_x; }
     LengthPercentage size_y() const { return m_size_y; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("{} {}", m_size_x.to_string(), m_size_y.to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     BackgroundSizeStyleValue(LengthPercentage size_x, LengthPercentage size_y)
@@ -540,10 +542,7 @@ public:
     NonnullRefPtr<StyleValue> border_style() const { return m_border_style; }
     NonnullRefPtr<StyleValue> border_color() const { return m_border_color; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("Border border_width: {}, border_style: {}, border_color: {}", m_border_width->to_string(), m_border_style->to_string(), m_border_color->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     BorderStyleValue(
@@ -574,10 +573,7 @@ public:
     LengthPercentage const& vertical_radius() const { return m_vertical_radius; }
     bool is_elliptical() const { return m_is_elliptical; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("{} / {}", m_horizontal_radius.to_string(), m_vertical_radius.to_string());
-    }
+    virtual String to_string() const override;
 
     virtual bool equals(StyleValue const& other) const override
     {
@@ -625,13 +621,13 @@ public:
     }
     virtual ~BoxShadowStyleValue() override { }
 
+    // FIXME: Spread-distance and "inset" flag
     Length const& offset_x() const { return m_offset_x; }
     Length const& offset_y() const { return m_offset_y; }
     Length const& blur_radius() const { return m_blur_radius; }
     Color const& color() const { return m_color; }
 
-    String to_string() const override { return String::formatted("BoxShadow offset_x: {}, offset_y: {}, blur_radius: {}, color: {}",
-        m_offset_x.to_string(), m_offset_y.to_string(), m_blur_radius.to_string(), m_color.to_string()); }
+    virtual String to_string() const override;
 
 private:
     explicit BoxShadowStyleValue(Length const& offset_x, Length const& offset_y, Length const& blur_radius, Color const& color)
@@ -658,6 +654,48 @@ private:
 
 class CalculatedStyleValue : public StyleValue {
 public:
+    enum class ResolvedType {
+        Angle,
+        Frequency,
+        Integer,
+        Length,
+        Number,
+        Percentage,
+        Time,
+    };
+
+    enum class SumOperation {
+        Add,
+        Subtract,
+    };
+    enum class ProductOperation {
+        Multiply,
+        Divide,
+    };
+
+    struct Number {
+        bool is_integer;
+        float value;
+    };
+
+    class CalculationResult {
+    public:
+        CalculationResult(Variant<Number, Length, Percentage> value)
+            : m_value(move(value))
+        {
+        }
+        void add(CalculationResult const& other, Layout::Node const*, Length const& percentage_basis);
+        void subtract(CalculationResult const& other, Layout::Node const*, Length const& percentage_basis);
+        void multiply_by(CalculationResult const& other, Layout::Node const*);
+        void divide_by(CalculationResult const& other, Layout::Node const*);
+
+        Variant<Number, Length, Percentage> const& value() const { return m_value; }
+
+    private:
+        void add_or_subtract_internal(SumOperation op, CalculationResult const& other, Layout::Node const*, Length const& percentage_basis);
+        Variant<Number, Length, Percentage> m_value;
+    };
+
     struct CalcSum;
     struct CalcSumPartWithOperator;
     struct CalcProduct;
@@ -667,8 +705,19 @@ public:
     struct CalcNumberProduct;
     struct CalcNumberProductPartWithOperator;
 
-    using CalcNumberValue = Variant<float, NonnullOwnPtr<CalcNumberSum>>;
-    using CalcValue = Variant<float, CSS::Length, NonnullOwnPtr<CalcSum>>;
+    struct CalcNumberValue {
+        Variant<Number, NonnullOwnPtr<CalcNumberSum>> value;
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
+    };
+
+    struct CalcValue {
+        Variant<Number, Length, Percentage, NonnullOwnPtr<CalcSum>> value;
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
+    };
 
     // This represents that: https://www.w3.org/TR/css-values-3/#calc-syntax
     struct CalcSum {
@@ -678,6 +727,10 @@ public:
 
         NonnullOwnPtr<CalcProduct> first_calc_product;
         NonnullOwnPtrVector<CalcSumPartWithOperator> zero_or_more_additional_calc_products;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcNumberSum {
@@ -687,79 +740,97 @@ public:
 
         NonnullOwnPtr<CalcNumberProduct> first_calc_number_product;
         NonnullOwnPtrVector<CalcNumberSumPartWithOperator> zero_or_more_additional_calc_number_products;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcProduct {
         CalcValue first_calc_value;
         NonnullOwnPtrVector<CalcProductPartWithOperator> zero_or_more_additional_calc_values;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcSumPartWithOperator {
-        enum Operation {
-            Add,
-            Subtract,
-        };
-
-        CalcSumPartWithOperator(Operation op, NonnullOwnPtr<CalcProduct> calc_product)
+        CalcSumPartWithOperator(SumOperation op, NonnullOwnPtr<CalcProduct> calc_product)
             : op(op)
-            , calc_product(move(calc_product)) {};
+            , value(move(calc_product)) {};
 
-        Operation op;
-        NonnullOwnPtr<CalcProduct> calc_product;
+        SumOperation op;
+        NonnullOwnPtr<CalcProduct> value;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcProductPartWithOperator {
-        enum {
-            Multiply,
-            Divide,
-        } op;
+        ProductOperation op;
         Variant<CalcValue, CalcNumberValue> value;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcNumberProduct {
         CalcNumberValue first_calc_number_value;
         NonnullOwnPtrVector<CalcNumberProductPartWithOperator> zero_or_more_additional_calc_number_values;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcNumberProductPartWithOperator {
-        enum {
-            Multiply,
-            Divide,
-        } op;
+        ProductOperation op;
         CalcNumberValue value;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
     struct CalcNumberSumPartWithOperator {
-        enum Operation {
-            Add,
-            Subtract,
-        };
-
-        CalcNumberSumPartWithOperator(Operation op, NonnullOwnPtr<CalcNumberProduct> calc_number_product)
+        CalcNumberSumPartWithOperator(SumOperation op, NonnullOwnPtr<CalcNumberProduct> calc_number_product)
             : op(op)
-            , calc_number_product(move(calc_number_product)) {};
+            , value(move(calc_number_product)) {};
 
-        Operation op;
-        NonnullOwnPtr<CalcNumberProduct> calc_number_product;
+        SumOperation op;
+        NonnullOwnPtr<CalcNumberProduct> value;
+
+        String to_string() const;
+        Optional<ResolvedType> resolved_type() const;
+        CalculationResult resolve(Layout::Node const*, Length const& percentage_basis) const;
     };
 
-    static NonnullRefPtr<CalculatedStyleValue> create(String const& expression_string, NonnullOwnPtr<CalcSum> calc_sum)
+    static NonnullRefPtr<CalculatedStyleValue> create(NonnullOwnPtr<CalcSum> calc_sum, ResolvedType resolved_type)
     {
-        return adopt_ref(*new CalculatedStyleValue(expression_string, move(calc_sum)));
+        return adopt_ref(*new CalculatedStyleValue(move(calc_sum), resolved_type));
     }
 
-    String to_string() const override { return m_expression_string; }
+    String to_string() const override;
+    ResolvedType resolved_type() const { return m_resolved_type; }
     NonnullOwnPtr<CalcSum> const& expression() const { return m_expression; }
+    Optional<Length> resolve_length(Layout::Node const& layout_node) const;
+    Optional<LengthPercentage> resolve_length_percentage(Layout::Node const&, Length const& percentage_basis) const;
+    Optional<Percentage> resolve_percentage() const;
+    Optional<float> resolve_number();
+    Optional<i64> resolve_integer();
 
 private:
-    explicit CalculatedStyleValue(String const& expression_string, NonnullOwnPtr<CalcSum> calc_sum)
+    explicit CalculatedStyleValue(NonnullOwnPtr<CalcSum> calc_sum, ResolvedType resolved_type)
         : StyleValue(Type::Calculated)
-        , m_expression_string(expression_string)
+        , m_resolved_type(resolved_type)
         , m_expression(move(calc_sum))
     {
     }
 
-    String m_expression_string;
+    ResolvedType m_resolved_type;
     NonnullOwnPtr<CalcSum> m_expression;
 };
 
@@ -806,10 +877,7 @@ public:
     NonnullRefPtr<BorderRadiusStyleValue> bottom_right() const { return m_bottom_right; }
     NonnullRefPtr<BorderRadiusStyleValue> bottom_left() const { return m_bottom_left; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("{} {} {} {} / {} {} {} {}", m_top_left->horizontal_radius().to_string(), m_top_right->horizontal_radius().to_string(), m_bottom_right->horizontal_radius().to_string(), m_bottom_left->horizontal_radius().to_string(), m_top_left->vertical_radius().to_string(), m_top_right->vertical_radius().to_string(), m_bottom_right->vertical_radius().to_string(), m_bottom_left->vertical_radius().to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     CombinedBorderRadiusStyleValue(NonnullRefPtr<BorderRadiusStyleValue> top_left, NonnullRefPtr<BorderRadiusStyleValue> top_right, NonnullRefPtr<BorderRadiusStyleValue> bottom_right, NonnullRefPtr<BorderRadiusStyleValue> bottom_left)
@@ -842,10 +910,7 @@ public:
     NonnullRefPtr<StyleValue> shrink() const { return m_shrink; }
     NonnullRefPtr<StyleValue> basis() const { return m_basis; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("Flex grow: {}, shrink: {}, basis: {}", m_grow->to_string(), m_shrink->to_string(), m_basis->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     FlexStyleValue(
@@ -875,10 +940,7 @@ public:
     NonnullRefPtr<StyleValue> flex_direction() const { return m_flex_direction; }
     NonnullRefPtr<StyleValue> flex_wrap() const { return m_flex_wrap; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("FlexFlow flex_direction: {}, flex_wrap: {}", m_flex_direction->to_string(), m_flex_wrap->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     FlexFlowStyleValue(NonnullRefPtr<StyleValue> flex_direction, NonnullRefPtr<StyleValue> flex_wrap)
@@ -903,11 +965,7 @@ public:
     NonnullRefPtr<StyleValue> line_height() const { return m_line_height; }
     NonnullRefPtr<StyleValue> font_families() const { return m_font_families; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("Font style: {}, weight: {}, size: {}, line_height: {}, families: {}",
-            m_font_style->to_string(), m_font_weight->to_string(), m_font_size->to_string(), m_line_height->to_string(), m_font_families->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     FontStyleValue(NonnullRefPtr<StyleValue> font_style, NonnullRefPtr<StyleValue> font_weight, NonnullRefPtr<StyleValue> font_size, NonnullRefPtr<StyleValue> line_height, NonnullRefPtr<StyleValue> font_families)
@@ -969,7 +1027,7 @@ public:
     static NonnullRefPtr<ImageStyleValue> create(AK::URL const& url) { return adopt_ref(*new ImageStyleValue(url)); }
     virtual ~ImageStyleValue() override { }
 
-    String to_string() const override { return String::formatted("Image({})", m_url.to_string()); }
+    virtual String to_string() const override;
 
     void load_bitmap(DOM::Document& document);
     Gfx::Bitmap const* bitmap() const { return m_bitmap; }
@@ -1075,10 +1133,7 @@ public:
     NonnullRefPtr<StyleValue> image() const { return m_image; }
     NonnullRefPtr<StyleValue> style_type() const { return m_style_type; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("ListStyle position: {}, image: {}, style_type: {}", m_position->to_string(), m_image->to_string(), m_style_type->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     ListStyleStyleValue(
@@ -1123,16 +1178,7 @@ public:
     virtual bool has_integer() const override { return m_value.has<i64>(); }
     virtual float to_integer() const override { return m_value.get<i64>(); }
 
-    String to_string() const override
-    {
-        return m_value.visit(
-            [](float value) {
-                return String::formatted("{}", value);
-            },
-            [](i64 value) {
-                return String::formatted("{}", value);
-            });
-    }
+    virtual String to_string() const override;
 
     virtual bool equals(StyleValue const& other) const override
     {
@@ -1166,10 +1212,7 @@ public:
     NonnullRefPtr<StyleValue> overflow_x() const { return m_overflow_x; }
     NonnullRefPtr<StyleValue> overflow_y() const { return m_overflow_y; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("{} {}", m_overflow_x->to_string(), m_overflow_y->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     OverflowStyleValue(NonnullRefPtr<StyleValue> overflow_x, NonnullRefPtr<StyleValue> overflow_y)
@@ -1194,10 +1237,7 @@ public:
     Percentage const& percentage() const { return m_percentage; }
     Percentage& percentage() { return m_percentage; }
 
-    virtual String to_string() const override
-    {
-        return m_percentage.to_string();
-    }
+    virtual String to_string() const override;
 
 private:
     PercentageStyleValue(Percentage&& percentage)
@@ -1275,10 +1315,7 @@ public:
     NonnullRefPtr<StyleValue> style() const { return m_style; }
     NonnullRefPtr<StyleValue> color() const { return m_color; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("TextDecoration line: {}, style: {}, color: {}", m_line->to_string(), m_style->to_string(), m_color->to_string());
-    }
+    virtual String to_string() const override;
 
 private:
     TextDecorationStyleValue(
@@ -1308,10 +1345,7 @@ public:
     CSS::TransformFunction transform_function() const { return m_transform_function; }
     NonnullRefPtrVector<StyleValue> values() const { return m_values; }
 
-    virtual String to_string() const override
-    {
-        return String::formatted("TransformationStyleValue");
-    }
+    virtual String to_string() const override;
 
 private:
     TransformationStyleValue(CSS::TransformFunction transform_function, NonnullRefPtrVector<StyleValue>&& values)
@@ -1370,7 +1404,11 @@ private:
 
 class StyleValueList final : public StyleValue {
 public:
-    static NonnullRefPtr<StyleValueList> create(NonnullRefPtrVector<StyleValue>&& values) { return adopt_ref(*new StyleValueList(move(values))); }
+    enum class Separator {
+        Space,
+        Comma,
+    };
+    static NonnullRefPtr<StyleValueList> create(NonnullRefPtrVector<StyleValue>&& values, Separator separator) { return adopt_ref(*new StyleValueList(move(values), separator)); }
 
     size_t size() const { return m_values.size(); }
     NonnullRefPtrVector<StyleValue> const& values() const { return m_values; }
@@ -1381,27 +1419,26 @@ public:
         return m_values[i];
     }
 
-    virtual String to_string() const override
-    {
-        StringBuilder builder;
-        builder.appendff("List[{}](", m_values.size());
-        for (size_t i = 0; i < m_values.size(); ++i) {
-            if (i)
-                builder.append(',');
-            builder.append(m_values[i].to_string());
-        }
-        builder.append(')');
-        return builder.to_string();
-    }
+    virtual String to_string() const override;
 
 private:
-    StyleValueList(NonnullRefPtrVector<StyleValue>&& values)
+    StyleValueList(NonnullRefPtrVector<StyleValue>&& values, Separator separator)
         : StyleValue(Type::ValueList)
+        , m_separator(separator)
         , m_values(move(values))
     {
     }
 
+    Separator m_separator;
     NonnullRefPtrVector<StyleValue> m_values;
 };
 
 }
+
+template<>
+struct AK::Formatter<Web::CSS::StyleValue> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::StyleValue const& style_value)
+    {
+        return Formatter<StringView>::format(builder, style_value.to_string());
+    }
+};

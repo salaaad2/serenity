@@ -44,10 +44,8 @@ void Clipboard::initialize(Badge<Application>)
 
 Clipboard& Clipboard::the()
 {
-    static Clipboard* s_the;
-    if (!s_the)
-        s_the = new Clipboard;
-    return *s_the;
+    static Clipboard s_the;
+    return s_the;
 }
 
 Clipboard::DataAndType Clipboard::fetch_data_and_type() const
@@ -56,7 +54,7 @@ Clipboard::DataAndType Clipboard::fetch_data_and_type() const
     if (!response.data().is_valid())
         return {};
     auto data = ByteBuffer::copy(response.data().data<void>(), response.data().size());
-    if (!data.has_value())
+    if (data.is_error())
         return {};
 
     auto type = response.mime_type();

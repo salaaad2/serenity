@@ -165,14 +165,14 @@ extern "C" {
 #define GL_FRONT_AND_BACK 0x0408
 
 // Error codes
-#define GL_NO_ERROR 0
-#define GL_INVALID_ENUM 0x500
-#define GL_INVALID_VALUE 0x501
-#define GL_INVALID_OPERATION 0x502
+#define GL_NO_ERROR 0x0000
+#define GL_INVALID_ENUM 0x0500
+#define GL_INVALID_VALUE 0x0501
+#define GL_INVALID_OPERATION 0x0502
 #define GL_STACK_OVERFLOW 0x0503
 #define GL_STACK_UNDERFLOW 0x0504
-#define GL_OUT_OF_MEMORY 0x505
-#define GL_INVALID_FRAMEBUFFER_OPERATION 0x506
+#define GL_OUT_OF_MEMORY 0x0505
+#define GL_INVALID_FRAMEBUFFER_OPERATION 0x0506
 
 // Triangle winding order
 #define GL_CW 0x0900
@@ -243,8 +243,8 @@ extern "C" {
 #define GL_LUMINANCE8 0x8040
 #define GL_LUMINANCE_ALPHA 0x190A
 #define GL_LUMINANCE8_ALPHA8 0x8045
-#define GL_BGR 0x190B
-#define GL_BGRA 0x190C
+#define GL_BGR 0x80E0
+#define GL_BGRA 0x80E1
 #define GL_BITMAP 0x1A00
 
 #define GL_LUMINANCE8 0x8040
@@ -420,7 +420,7 @@ extern "C" {
 // Texture Environment and Parameters
 #define GL_MODULATE 0x2100
 #define GL_TEXTURE_ENV_MODE 0x2200
-#define GL_DECAL 0x2102
+#define GL_DECAL 0x2101
 #define GL_TEXTURE_ENV 0x2300
 #define GL_NEAREST 0x2600
 #define GL_LINEAR 0x2601
@@ -481,6 +481,7 @@ GLAPI void glColor3f(GLfloat r, GLfloat g, GLfloat b);
 GLAPI void glColor3fv(const GLfloat* v);
 GLAPI void glColor3ub(GLubyte r, GLubyte g, GLubyte b);
 GLAPI void glColor3ubv(GLubyte const* v);
+GLAPI void glColor4b(GLbyte r, GLbyte g, GLbyte b, GLbyte a);
 GLAPI void glColor4dv(GLdouble const* v);
 GLAPI void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 GLAPI void glColor4fv(const GLfloat* v);
@@ -585,6 +586,10 @@ GLAPI void glGetBooleanv(GLenum pname, GLboolean* data);
 GLAPI void glGetDoublev(GLenum pname, GLdouble* params);
 GLAPI void glGetFloatv(GLenum pname, GLfloat* params);
 GLAPI void glGetIntegerv(GLenum pname, GLint* data);
+GLAPI void glGetLightfv(GLenum light, GLenum pname, GLfloat* params);
+GLAPI void glGetLightiv(GLenum light, GLenum pname, GLint* params);
+GLAPI void glGetMaterialfv(GLenum face, GLenum pname, GLfloat* params);
+GLAPI void glGetMaterialiv(GLenum face, GLenum pname, GLint* params);
 GLAPI void glDepthMask(GLboolean flag);
 GLAPI void glEnableClientState(GLenum cap);
 GLAPI void glDisableClientState(GLenum cap);
@@ -607,10 +612,13 @@ GLAPI void glFogi(GLenum pname, GLint param);
 GLAPI void glPixelStorei(GLenum pname, GLint param);
 GLAPI void glScissor(GLint x, GLint y, GLsizei width, GLsizei height);
 GLAPI void glLightf(GLenum light, GLenum pname, GLfloat param);
-GLAPI void glLightfv(GLenum light, GLenum pname, GLfloat const* param);
+GLAPI void glLightfv(GLenum light, GLenum pname, GLfloat const* params);
+GLAPI void glLighti(GLenum light, GLenum pname, GLint param);
+GLAPI void glLightiv(GLenum light, GLenum pname, GLint const* params);
 GLAPI void glLightModelf(GLenum pname, GLfloat param);
 GLAPI void glLightModelfv(GLenum pname, GLfloat const* params);
 GLAPI void glLightModeli(GLenum pname, GLint param);
+GLAPI void glLightModeliv(GLenum pname, GLint const* params);
 GLAPI void glStencilFunc(GLenum func, GLint ref, GLuint mask);
 GLAPI void glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask);
 GLAPI void glStencilMask(GLuint mask);
@@ -623,6 +631,8 @@ GLAPI void glNormalPointer(GLenum type, GLsizei stride, void const* pointer);
 GLAPI void glRasterPos2i(GLint x, GLint y);
 GLAPI void glMaterialf(GLenum face, GLenum pname, GLfloat param);
 GLAPI void glMaterialfv(GLenum face, GLenum pname, GLfloat const* params);
+GLAPI void glMateriali(GLenum face, GLenum pname, GLint param);
+GLAPI void glMaterialiv(GLenum face, GLenum pname, GLint const* params);
 GLAPI void glLineWidth(GLfloat width);
 GLAPI void glPushAttrib(GLbitfield mask);
 GLAPI void glPopAttrib();

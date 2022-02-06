@@ -451,11 +451,6 @@ void Document::update_style()
     set_needs_layout();
 }
 
-RefPtr<Layout::Node> Document::create_layout_node()
-{
-    return adopt_ref(*new Layout::InitialContainingBlock(*this, style_computer().create_document_style()));
-}
-
 void Document::set_link_color(Color color)
 {
     m_link_color = color;
@@ -679,15 +674,17 @@ JS::Interpreter& Document::interpreter()
 
 JS::Value Document::run_javascript(StringView source, StringView filename)
 {
-    auto parser = JS::Parser(JS::Lexer(source, filename));
-    auto program = parser.parse_program();
-    if (parser.has_errors()) {
-        parser.print_errors(false);
+    // FIXME: The only user of this function now is javascript: URLs. Refactor them to follow the spec: https://html.spec.whatwg.org/multipage/browsing-the-web.html#javascript-protocol
+    auto& interpreter = document().interpreter();
+    auto script_or_error = JS::Script::parse(source, interpreter.realm(), filename);
+    if (script_or_error.is_error()) {
+        // FIXME: Add error logging back.
         return JS::js_undefined();
     }
-    auto& interpreter = document().interpreter();
+
+    auto result = interpreter.run(script_or_error.value());
+
     auto& vm = interpreter.vm();
-    auto result = interpreter.run(interpreter.global_object(), *program);
     if (result.is_error()) {
         // FIXME: I'm sure the spec could tell us something about error propagation here!
         vm.clear_exception();
@@ -1143,6 +1140,12 @@ void Document::evaluate_media_queries_and_report_changes()
 NonnullRefPtr<DOMImplementation> Document::implementation() const
 {
     return *m_implementation;
+}
+
+bool Document::has_focus() const
+{
+    // FIXME: Return whether we actually have focus.
+    return true;
 }
 
 }

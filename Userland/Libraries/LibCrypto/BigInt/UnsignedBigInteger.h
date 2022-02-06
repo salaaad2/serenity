@@ -53,7 +53,7 @@ public:
 
     size_t export_data(Bytes, bool remove_leading_zeros = false) const;
 
-    static UnsignedBigInteger from_base(u16 N, const String& str);
+    static UnsignedBigInteger from_base(u16 N, StringView str);
     String to_base(u16 N) const;
 
     u64 to_u64() const;
@@ -72,6 +72,7 @@ public:
         m_cached_hash = 0;
     }
 
+    bool is_zero() const;
     bool is_odd() const { return m_words.size() && (m_words[0] & 1); }
     bool is_invalid() const { return m_is_invalid; }
 

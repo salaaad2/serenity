@@ -21,6 +21,7 @@ set(KERNEL_SOURCES
     AddressSanitizer.cpp
     Bus/PCI/Controller/HostBridge.cpp
     Bus/PCI/Controller/MemoryBackedHostBridge.cpp
+    Bus/PCI/Controller/VolumeManagementDevice.cpp
     Bus/PCI/Access.cpp
     Bus/PCI/API.cpp
     Bus/PCI/Device.cpp
@@ -50,6 +51,7 @@ set(KERNEL_SOURCES
     Devices/CharacterDevice.cpp
     Devices/ConsoleDevice.cpp
     Devices/Device.cpp
+    Devices/DeviceControlDevice.cpp
     Devices/DeviceManagement.cpp
     Devices/FullDevice.cpp
     Devices/KCOVDevice.cpp
@@ -71,6 +73,7 @@ set(KERNEL_SOURCES
     Devices/HID/VMWareMouseDevice.cpp
     GlobalProcessExposed.cpp
     Graphics/Bochs/GraphicsAdapter.cpp
+    Graphics/Console/BootFramebufferConsole.cpp
     Graphics/Console/GenericFramebufferConsole.cpp
     Graphics/Console/ContiguousFramebufferConsole.cpp
     Graphics/Console/TextModeConsole.cpp
@@ -101,6 +104,8 @@ set(KERNEL_SOURCES
     Storage/Partition/PartitionTable.cpp
     Storage/NVMe/NVMeController.cpp
     Storage/NVMe/NVMeNameSpace.cpp
+    Storage/NVMe/NVMeInterruptQueue.cpp
+    Storage/NVMe/NVMePollQueue.cpp
     Storage/NVMe/NVMeQueue.cpp
     Storage/StorageDevice.cpp
     Storage/RamdiskController.cpp
@@ -296,6 +301,7 @@ if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
         ${KERNEL_SOURCES}
         Arch/x86/common/ScopedCritical.cpp
         Arch/x86/common/SmapDisabler.cpp
+        Arch/x86/common/Spinlock.cpp
     )
 
     set(KERNEL_SOURCES
@@ -341,6 +347,12 @@ set(AK_SOURCES
     ../AK/Utf16View.cpp
 )
 
+set(EDID_SOURCES
+    ../Userland/Libraries/LibEDID/DMT.cpp
+    ../Userland/Libraries/LibEDID/EDID.cpp
+    ../Userland/Libraries/LibEDID/VIC.cpp
+)
+
 set(ELF_SOURCES
     ../Userland/Libraries/LibELF/Image.cpp
     ../Userland/Libraries/LibELF/Validation.cpp
@@ -352,10 +364,6 @@ set(VT_SOURCES
     ../Userland/Libraries/LibVT/Terminal.cpp
     ../Userland/Libraries/LibVT/Line.cpp
     ../Userland/Libraries/LibVT/EscapeSequenceParser.cpp
-)
-
-set(KEYBOARD_SOURCES
-    ../Userland/Libraries/LibKeyboard/CharacterMap.cpp
 )
 
 set(CRYPTO_SOURCES
@@ -370,9 +378,9 @@ if (NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
     set(SOURCES
         ${KERNEL_SOURCES}
         ${SOURCES}
+        ${EDID_SOURCES}
         ${ELF_SOURCES}
         ${VT_SOURCES}
-        ${KEYBOARD_SOURCES}
         ${CRYPTO_SOURCES}
     )
 else()

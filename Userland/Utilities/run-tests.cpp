@@ -8,6 +8,7 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/File.h>
+#include <LibCoredump/Backtrace.h>
 #include <LibRegex/Regex.h>
 #include <LibTest/TestRunner.h>
 #include <signal.h>
@@ -27,21 +28,25 @@ struct FileResult {
     double time_taken { 0 };
     Test::Result result { Test::Result::Pass };
     int stdout_err_fd { -1 };
+    pid_t child_pid { 0 };
 };
 
 String g_currently_running_test;
 
 class TestRunner : public ::Test::TestRunner {
 public:
-    TestRunner(String test_root, Regex<PosixExtended> exclude_regex, NonnullRefPtr<Core::ConfigFile> config, Regex<PosixExtended> skip_regex, bool print_progress, bool print_json, bool print_all_output, bool print_times = true)
+    TestRunner(String test_root, Regex<PosixExtended> exclude_regex, NonnullRefPtr<Core::ConfigFile> config, Regex<PosixExtended> skip_regex, bool run_skipped_tests, bool print_progress, bool print_json, bool print_all_output, bool print_times = true)
         : ::Test::TestRunner(move(test_root), print_times, print_progress, print_json)
         , m_exclude_regex(move(exclude_regex))
         , m_config(move(config))
         , m_skip_regex(move(skip_regex))
+        , m_run_skipped_tests(run_skipped_tests)
         , m_print_all_output(print_all_output)
     {
-        m_skip_directories = m_config->read_entry("Global", "SkipDirectories", "").split(' ');
-        m_skip_files = m_config->read_entry("Global", "SkipTests", "").split(' ');
+        if (!run_skipped_tests) {
+            m_skip_directories = m_config->read_entry("Global", "SkipDirectories", "").split(' ');
+            m_skip_files = m_config->read_entry("Global", "SkipTests", "").split(' ');
+        }
     }
 
     virtual ~TestRunner() = default;
@@ -61,6 +66,7 @@ protected:
     Vector<String> m_skip_files;
     Vector<String> m_failed_test_names;
     Regex<PosixExtended> m_skip_regex;
+    bool m_run_skipped_tests { false };
     bool m_print_all_output { false };
 };
 
@@ -80,6 +86,9 @@ Vector<String> TestRunner::get_test_paths() const
 
 bool TestRunner::should_skip_test(const LexicalPath& test_path)
 {
+    if (m_run_skipped_tests)
+        return false;
+
     for (const String& dir : m_skip_directories) {
         if (test_path.dirname().contains(dir))
             return true;
@@ -129,6 +138,32 @@ void TestRunner::do_run_single_test(const String& test_path, size_t current_test
         print_modifiers({ Test::BG_RED, Test::FG_BLACK, Test::FG_BOLD });
         out("{}", test_result.result == Test::Result::Fail ? " FAIL  " : "CRASHED");
         print_modifiers({ Test::CLEAR });
+        if (test_result.result == Test::Result::Crashed) {
+            auto pid_search_string = String::formatted("_{}_", test_result.child_pid);
+            Core::DirIterator iterator("/tmp/coredump"sv);
+            if (!iterator.has_error()) {
+                while (iterator.has_next()) {
+                    auto path = iterator.next_full_path();
+                    if (!path.contains(pid_search_string))
+                        continue;
+
+                    auto reader = Coredump::Reader::create(path);
+                    if (!reader)
+                        break;
+
+                    dbgln("Last crash backtrace for {} (was pid {}):", test_path, test_result.child_pid);
+                    reader->for_each_thread_info([&](auto thread_info) {
+                        Coredump::Backtrace thread_backtrace(*reader, thread_info);
+                        auto tid = thread_info.tid; // Note: Yoinking this out of the struct because we can't pass a reference to it (as it's a misaligned field in a packed struct)
+                        dbgln("Thread {}", tid);
+                        for (auto const& entry : thread_backtrace.entries())
+                            dbgln("- {}", entry.to_string(true));
+                        return IterationDecision::Continue;
+                    });
+                    break;
+                }
+            }
+        }
     } else {
         print_modifiers({ Test::BG_GREEN, Test::FG_BLACK, Test::FG_BOLD });
         out(" PASS  ");
@@ -251,7 +286,7 @@ FileResult TestRunner::run_test_file(const String& test_path)
     ret = unlink(child_out_err_path);
     VERIFY(ret == 0);
 
-    return FileResult { move(path_for_test), get_time_in_ms() - start_time, test_result, child_out_err_file };
+    return FileResult { move(path_for_test), get_time_in_ms() - start_time, test_result, child_out_err_file, child_pid };
 }
 
 int main(int argc, char** argv)
@@ -277,6 +312,7 @@ int main(int argc, char** argv)
     bool print_json = false;
     bool print_all_output = false;
     bool run_benchmarks = false;
+    bool run_skipped_tests = false;
     const char* specified_test_root = nullptr;
     String test_glob;
     String exclude_pattern;
@@ -301,6 +337,7 @@ int main(int argc, char** argv)
     args_parser.add_option(print_json, "Show results as JSON", "json", 'j');
     args_parser.add_option(print_all_output, "Show all test output", "verbose", 'v');
     args_parser.add_option(run_benchmarks, "Run benchmarks as well", "benchmarks", 'b');
+    args_parser.add_option(run_skipped_tests, "Run all matching tests, even those marked as 'skip'", "all", 'a');
     args_parser.add_option(test_glob, "Only run tests matching the given glob", "filter", 'f', "glob");
     args_parser.add_option(exclude_pattern, "Regular expression to use to exclude paths from being considered tests", "exclude-pattern", 'e', "pattern");
     args_parser.add_option(config_file, "Configuration file to use", "config-file", 'c', "filename");
@@ -361,7 +398,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    TestRunner test_runner(test_root, move(exclude_regex), move(config), move(skip_regex), print_progress, print_json, print_all_output);
+    TestRunner test_runner(test_root, move(exclude_regex), move(config), move(skip_regex), run_skipped_tests, print_progress, print_json, print_all_output);
     test_runner.run(test_glob);
 
     return test_runner.counts().tests_failed;

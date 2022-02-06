@@ -7,6 +7,7 @@
 #include <AK/Debug.h>
 #include <AK/Endian.h>
 #include <AK/MemoryStream.h>
+#include <LibCore/EventLoop.h>
 #include <LibCore/Timer.h>
 #include <LibCrypto/PK/Code/EMSA_PSS.h>
 #include <LibTLS/TLSv12.h>
@@ -32,7 +33,7 @@ void TLSv12::alert(AlertLevel level, AlertDescription code)
 {
     auto the_alert = build_alert(level == AlertLevel::Critical, (u8)code);
     write_packet(the_alert);
-    flush();
+    MUST(flush());
 }
 
 void TLSv12::write_packet(ByteBuffer& packet)
@@ -41,7 +42,7 @@ void TLSv12::write_packet(ByteBuffer& packet)
         if (m_context.connection_status > ConnectionStatus::Disconnected) {
             if (!m_has_scheduled_write_flush && !immediate) {
                 dbgln_if(TLS_DEBUG, "Scheduling write of {}", m_context.tls_buffer.size());
-                deferred_invoke([this] { write_into_socket(); });
+                Core::deferred_invoke([this] { write_into_socket(); });
                 m_has_scheduled_write_flush = true;
             } else {
                 // multiple packet are available, let's flush some out
@@ -104,7 +105,7 @@ void TLSv12::update_packet(ByteBuffer& packet)
             if (m_context.crypto.created == 1) {
                 // `buffer' will continue to be encrypted
                 auto buffer_result = ByteBuffer::create_uninitialized(length);
-                if (!buffer_result.has_value()) {
+                if (buffer_result.is_error()) {
                     dbgln("LibTLS: Failed to allocate enough memory");
                     VERIFY_NOT_REACHED();
                 }
@@ -124,7 +125,7 @@ void TLSv12::update_packet(ByteBuffer& packet)
                         VERIFY(is_aead());
                         // We need enough space for a header, the data, a tag, and the IV
                         auto ct_buffer_result = ByteBuffer::create_uninitialized(length + header_size + iv_size + 16);
-                        if (!ct_buffer_result.has_value()) {
+                        if (ct_buffer_result.is_error()) {
                             dbgln("LibTLS: Failed to allocate enough memory for the ciphertext");
                             VERIFY_NOT_REACHED();
                         }
@@ -178,7 +179,7 @@ void TLSv12::update_packet(ByteBuffer& packet)
                         VERIFY(!is_aead());
                         // We need enough space for a header, iv_length bytes of IV and whatever the packet contains
                         auto ct_buffer_result = ByteBuffer::create_uninitialized(length + header_size + iv_size);
-                        if (!ct_buffer_result.has_value()) {
+                        if (ct_buffer_result.is_error()) {
                             dbgln("LibTLS: Failed to allocate enough memory for the ciphertext");
                             VERIFY_NOT_REACHED();
                         }
@@ -201,7 +202,7 @@ void TLSv12::update_packet(ByteBuffer& packet)
                         VERIFY(buffer_position == buffer.size());
 
                         auto iv_buffer_result = ByteBuffer::create_uninitialized(iv_size);
-                        if (!iv_buffer_result.has_value()) {
+                        if (iv_buffer_result.is_error()) {
                             dbgln("LibTLS: Failed to allocate memory for IV");
                             VERIFY_NOT_REACHED();
                         }
@@ -293,14 +294,14 @@ ByteBuffer TLSv12::hmac_message(ReadonlyBytes buf, const Optional<ReadonlyBytes>
     }
     auto digest = hmac.digest();
     auto mac_result = ByteBuffer::copy(digest.immutable_data(), digest.data_length());
-    if (!mac_result.has_value()) {
+    if (mac_result.is_error()) {
         dbgln("Failed to calculate message HMAC: Not enough memory");
         return {};
     }
 
     if constexpr (TLS_DEBUG) {
         dbgln("HMAC of the block for sequence number {}", sequence_number);
-        print_buffer(*mac_result);
+        print_buffer(mac_result.value());
     }
 
     return mac_result.release_value();
@@ -367,7 +368,7 @@ ssize_t TLSv12::handle_message(ReadonlyBytes buffer)
                 auto packet_length = length - iv_length() - 16;
                 auto payload = plain;
                 auto decrypted_result = ByteBuffer::create_uninitialized(packet_length);
-                if (!decrypted_result.has_value()) {
+                if (decrypted_result.is_error()) {
                     dbgln("Failed to allocate memory for the packet");
                     return_value = Error::DecryptionFailed;
                     return;
@@ -431,7 +432,7 @@ ssize_t TLSv12::handle_message(ReadonlyBytes buffer)
                 auto iv_size = iv_length();
 
                 auto decrypted_result = cbc.create_aligned_buffer(length - iv_size);
-                if (!decrypted_result.has_value()) {
+                if (decrypted_result.is_error()) {
                     dbgln("Failed to allocate memory for the packet");
                     return_value = Error::DecryptionFailed;
                     return;
@@ -540,15 +541,17 @@ ssize_t TLSv12::handle_message(ReadonlyBytes buffer)
             if (code == (u8)AlertDescription::CloseNotify) {
                 res += 2;
                 alert(AlertLevel::Critical, AlertDescription::CloseNotify);
-                m_context.connection_finished = true;
                 if (!m_context.cipher_spec_set) {
                     // AWS CloudFront hits this.
                     dbgln("Server sent a close notify and we haven't agreed on a cipher suite. Treating it as a handshake failure.");
                     m_context.critical_error = (u8)AlertDescription::HandshakeFailure;
                     try_disambiguate_error();
                 }
+                m_context.close_notify = true;
             }
             m_context.error_code = (Error)code;
+            check_connection_state(false);
+            notify_client_for_app_data(); // Give the user one more chance to observe the EOF
         }
         break;
     default:

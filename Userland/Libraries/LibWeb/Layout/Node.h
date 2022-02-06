@@ -89,7 +89,7 @@ public:
     virtual void handle_mousedown(Badge<EventHandler>, const Gfx::IntPoint&, unsigned button, unsigned modifiers);
     virtual void handle_mouseup(Badge<EventHandler>, const Gfx::IntPoint&, unsigned button, unsigned modifiers);
     virtual void handle_mousemove(Badge<EventHandler>, const Gfx::IntPoint&, unsigned buttons, unsigned modifiers);
-    virtual bool handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&, unsigned buttons, unsigned modifiers, int wheel_delta);
+    virtual bool handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&, unsigned buttons, unsigned modifiers, int wheel_delta_x, int wheel_delta_y);
 
     virtual void before_children_paint(PaintContext&, PaintPhase) {};
     virtual void paint(PaintContext&, PaintPhase) = 0;
@@ -133,8 +133,6 @@ public:
     void inserted_into(Node&) { }
     void removed_from(Node&) { }
     void children_changed() { }
-
-    virtual void split_into_lines(InlineFormattingContext&, LayoutMode);
 
     bool is_visible() const { return m_visible; }
     void set_visible(bool visible) { m_visible = visible; }

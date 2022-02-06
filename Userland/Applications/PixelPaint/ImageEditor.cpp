@@ -257,7 +257,8 @@ GUI::MouseEvent ImageEditor::event_with_pan_and_scale_applied(GUI::MouseEvent co
         event.buttons(),
         event.button(),
         event.modifiers(),
-        event.wheel_delta()
+        event.wheel_delta_x(),
+        event.wheel_delta_y(),
     };
 }
 
@@ -271,7 +272,8 @@ GUI::MouseEvent ImageEditor::event_adjusted_for_layer(GUI::MouseEvent const& eve
         event.buttons(),
         event.button(),
         event.modifiers(),
-        event.wheel_delta()
+        event.wheel_delta_x(),
+        event.wheel_delta_y(),
     };
 }
 
@@ -585,16 +587,16 @@ bool ImageEditor::request_close()
 
 void ImageEditor::save_project()
 {
-    if (path().is_empty()) {
+    if (path().is_empty() || m_loaded_from_image) {
         save_project_as();
         return;
     }
-    auto response = FileSystemAccessClient::Client::the().request_file(window()->window_id(), path(), Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
-    if (response.error != 0)
+    auto response = FileSystemAccessClient::Client::the().try_request_file(window(), path(), Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
+    if (response.is_error())
         return;
-    auto result = save_project_to_fd_and_close(*response.fd);
+    auto result = save_project_to_file(*response.value());
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", *response.chosen_file, result.error()));
+        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", path(), result.error()));
         return;
     }
     undo_stack().set_current_unmodified();
@@ -602,19 +604,21 @@ void ImageEditor::save_project()
 
 void ImageEditor::save_project_as()
 {
-    auto save_result = FileSystemAccessClient::Client::the().save_file(window()->window_id(), "untitled", "pp");
-    if (save_result.error != 0)
+    auto response = FileSystemAccessClient::Client::the().try_save_file(window(), "untitled", "pp");
+    if (response.is_error())
         return;
-    auto result = save_project_to_fd_and_close(*save_result.fd);
+    auto file = response.value();
+    auto result = save_project_to_file(*file);
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", *save_result.chosen_file, result.error()));
+        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", file->filename(), result.error()));
         return;
     }
-    set_path(*save_result.chosen_file);
+    set_path(file->filename());
+    set_loaded_from_image(false);
     undo_stack().set_current_unmodified();
 }
 
-Result<void, String> ImageEditor::save_project_to_fd_and_close(int fd) const
+Result<void, String> ImageEditor::save_project_to_file(Core::File& file) const
 {
     StringBuilder builder;
     JsonObjectSerializer json(builder);
@@ -632,13 +636,8 @@ Result<void, String> ImageEditor::save_project_to_fd_and_close(int fd) const
     json_guides.finish();
     json.finish();
 
-    auto file = Core::File::construct();
-    file->open(fd, Core::OpenMode::WriteOnly | Core::OpenMode::Truncate, Core::File::ShouldCloseFileDescriptor::Yes);
-    if (file->has_error())
-        return String { file->error_string() };
-
-    if (!file->write(builder.string_view()))
-        return String { file->error_string() };
+    if (!file.write(builder.string_view()))
+        return String { file.error_string() };
     return {};
 }
 
@@ -649,6 +648,11 @@ void ImageEditor::set_show_active_layer_boundary(bool show)
 
     m_show_active_layer_boundary = show;
     update();
+}
+
+void ImageEditor::set_loaded_from_image(bool loaded_from_image)
+{
+    m_loaded_from_image = loaded_from_image;
 }
 
 }

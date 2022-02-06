@@ -44,10 +44,10 @@ public:
     static ErrorOr<NonnullRefPtr<InodeWatcher>> try_create();
     virtual ~InodeWatcher() override;
 
-    virtual bool can_read(const OpenFileDescription&, size_t) const override;
+    virtual bool can_read(const OpenFileDescription&, u64) const override;
     virtual ErrorOr<size_t> read(OpenFileDescription&, u64, UserOrKernelBuffer&, size_t) override;
     // Can't write to an inode watcher.
-    virtual bool can_write(const OpenFileDescription&, size_t) const override { return true; }
+    virtual bool can_write(const OpenFileDescription&, u64) const override { return true; }
     virtual ErrorOr<size_t> write(OpenFileDescription&, u64, const UserOrKernelBuffer&, size_t) override { return EIO; }
     virtual ErrorOr<void> close() override;
 
@@ -69,7 +69,7 @@ private:
     struct Event {
         int wd { 0 };
         InodeWatcherEvent::Type type { InodeWatcherEvent::Type::Invalid };
-        String path;
+        OwnPtr<KString> path;
     };
     CircularQueue<Event, 32> m_queue;
     Checked<int> m_wd_counter { 1 };

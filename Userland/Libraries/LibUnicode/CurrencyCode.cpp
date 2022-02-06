@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -202,5 +202,7 @@ Optional<CurrencyCode> get_currency_code(StringView currency)
     static auto const& currency_codes = ensure_currency_codes();
     return currency_codes.get(currency);
 }
+
+Span<StringView const> __attribute__((weak)) get_available_currencies() { return {}; }
 
 }

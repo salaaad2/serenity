@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -188,6 +188,8 @@ StringView calendar_pattern_style_to_string(CalendarPatternStyle style);
 
 Optional<Calendar> calendar_from_string(StringView calendar);
 Optional<HourCycleRegion> hour_cycle_region_from_string(StringView hour_cycle_region);
+
+Span<StringView const> get_available_calendars();
 
 Vector<HourCycle> get_regional_hour_cycles(StringView region);
 Vector<Unicode::HourCycle> get_locale_hour_cycles(StringView locale);

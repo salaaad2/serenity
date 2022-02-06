@@ -6,10 +6,10 @@
 
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/Custody.h>
-#include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/Memory/Region.h>
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
+#include <Kernel/Scheduler.h>
 
 namespace Kernel {
 
@@ -23,7 +23,11 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     child->m_veil_state = m_veil_state;
     child->m_unveiled_paths = m_unveiled_paths.deep_copy();
 
-    TRY(child->m_fds.try_clone(m_fds));
+    TRY(child->m_fds.with_exclusive([&](auto& child_fds) {
+        return m_fds.with_exclusive([&](auto& parent_fds) {
+            return child_fds.try_clone(parent_fds);
+        });
+    }));
 
     child->m_pg = m_pg;
 

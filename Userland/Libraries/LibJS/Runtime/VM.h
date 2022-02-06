@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2021, David Tuin <davidot@serenityos.org>
+ * Copyright (c) 2021-2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -83,11 +83,9 @@ public:
 
     bool did_reach_stack_space_limit() const
     {
-#ifdef HAS_ADDRESS_SANITIZER
+        // Address sanitizer (ASAN) used to check for more space but
+        // currently we can't detect the stack size with it enabled.
         return m_stack_info.size_free() < 32 * KiB;
-#else
-        return m_stack_info.size_free() < 16 * KiB;
-#endif
     }
 
     ThrowCompletionOr<void> push_execution_context(ExecutionContext& context, GlobalObject& global_object)
@@ -202,18 +200,6 @@ public:
 
     Value get_new_target();
 
-    template<typename... Args>
-    [[nodiscard]] ALWAYS_INLINE ThrowCompletionOr<Value> call(FunctionObject& function, Value this_value, Args... args)
-    {
-        if constexpr (sizeof...(Args) > 0) {
-            MarkedValueList arguments_list { heap() };
-            (..., arguments_list.append(move(args)));
-            return call(function, this_value, move(arguments_list));
-        }
-
-        return call(function, this_value);
-    }
-
     CommonPropertyNames names;
 
     void run_queued_promise_jobs();
@@ -241,13 +227,33 @@ public:
     void save_execution_context_stack();
     void restore_execution_context_stack();
 
+    // Do not call this method unless you are sure this is the only and first module to be loaded in this vm.
+    ThrowCompletionOr<void> link_and_eval_module(Badge<Interpreter>, SourceTextModule& module);
+
+    ScriptOrModule get_active_script_or_module() const;
+
+    Function<ThrowCompletionOr<NonnullRefPtr<Module>>(ScriptOrModule, ModuleRequest const&)> host_resolve_imported_module;
+    Function<void(ScriptOrModule, ModuleRequest, PromiseCapability)> host_import_module_dynamically;
+    Function<void(ScriptOrModule, ModuleRequest const&, PromiseCapability, Promise*)> host_finish_dynamic_import;
+
+    Function<HashMap<PropertyKey, Value>(SourceTextModule const&)> host_get_import_meta_properties;
+    Function<void(Object*, SourceTextModule const&)> host_finalize_import_meta;
+
+    Function<Vector<String>()> host_get_supported_import_assertions;
+
+    void enable_default_host_import_module_dynamically_hook();
+
 private:
     explicit VM(OwnPtr<CustomData>);
 
-    [[nodiscard]] ThrowCompletionOr<Value> call_internal(FunctionObject&, Value this_value, Optional<MarkedValueList> arguments);
-
     ThrowCompletionOr<void> property_binding_initialization(BindingPattern const& binding, Value value, Environment* environment, GlobalObject& global_object);
     ThrowCompletionOr<void> iterator_binding_initialization(BindingPattern const& binding, Iterator& iterator_record, Environment* environment, GlobalObject& global_object);
+
+    ThrowCompletionOr<NonnullRefPtr<Module>> resolve_imported_module(ScriptOrModule referencing_script_or_module, ModuleRequest const& module_request);
+    ThrowCompletionOr<void> link_and_eval_module(Module& module);
+
+    void import_module_dynamically(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability promise_capability);
+    void finish_dynamic_import(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability promise_capability, Promise* inner_promise);
 
     Exception* m_exception { nullptr };
 
@@ -271,6 +277,18 @@ private:
     PrimitiveString* m_empty_string { nullptr };
     PrimitiveString* m_single_ascii_character_strings[128] {};
 
+    struct StoredModule {
+        ScriptOrModule referencing_script_or_module;
+        String filepath;
+        String type;
+        NonnullRefPtr<Module> module;
+        bool has_once_started_linking { false };
+    };
+
+    StoredModule* get_stored_module(ScriptOrModule const& script_or_module, String const& filepath, String const& type);
+
+    Vector<StoredModule> m_loaded_modules;
+
 #define __JS_ENUMERATE(SymbolName, snake_name) \
     Symbol* m_well_known_symbol_##snake_name { nullptr };
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
@@ -280,15 +298,6 @@ private:
 
     OwnPtr<CustomData> m_custom_data;
 };
-
-template<>
-[[nodiscard]] ALWAYS_INLINE ThrowCompletionOr<Value> VM::call(FunctionObject& function, Value this_value, MarkedValueList arguments) { return call_internal(function, this_value, move(arguments)); }
-
-template<>
-[[nodiscard]] ALWAYS_INLINE ThrowCompletionOr<Value> VM::call(FunctionObject& function, Value this_value, Optional<MarkedValueList> arguments) { return call_internal(function, this_value, move(arguments)); }
-
-template<>
-[[nodiscard]] ALWAYS_INLINE ThrowCompletionOr<Value> VM::call(FunctionObject& function, Value this_value) { return call(function, this_value, Optional<MarkedValueList> {}); }
 
 ALWAYS_INLINE Heap& Cell::heap() const
 {

@@ -287,6 +287,9 @@ public:
         char* line = nullptr;
         size_t n = 0;
         ssize_t size = getline(&line, &n, m_file);
+        ScopeGuard guard([line] {
+            free(line);
+        });
 
         if (size == -1)
             return false;
@@ -296,7 +299,6 @@ public:
             --size;
 
         m_lines.append(String(line, size));
-        free(line);
         return true;
     }
 
@@ -620,9 +622,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                     else
                         pager.bottom();
                 }
-            } else if (sequence == " " || sequence == "\e[6~") {
+            } else if (sequence == " " || sequence == "f" || sequence == "\e[6~") {
                 pager.down_page();
-            } else if (sequence == "\e[5~" && !emulate_more) {
+            } else if ((sequence == "\e[5~" || sequence == "b") && !emulate_more) {
                 pager.up_page();
             } else if (sequence == "d") {
                 pager.down_half_page();

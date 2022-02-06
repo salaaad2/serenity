@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -486,5 +486,33 @@ static constexpr Array<Span<@type@ const>, @size@> @name@ { {
 
     generator.append(R"~~~(
 } };
+)~~~");
+}
+
+template<typename T>
+void generate_available_values(SourceGenerator& generator, StringView name, Vector<T> const& values, Vector<Alias> const& aliases = {})
+{
+    generator.set("name", name);
+    generator.set("size", String::number(values.size()));
+
+    generator.append(R"~~~(
+Span<StringView const> @name@()
+{
+    static constexpr Array<StringView, @size@> values { {)~~~");
+
+    bool first = true;
+    for (auto const& value : values) {
+        generator.append(first ? " " : ", ");
+        first = false;
+
+        if (auto it = aliases.find_if([&](auto const& alias) { return alias.name == value; }); it != aliases.end())
+            generator.append(String::formatted("\"{}\"sv", it->alias));
+        else
+            generator.append(String::formatted("\"{}\"sv", value));
+    }
+
+    generator.append(R"~~~( } };
+    return values.span();
+}
 )~~~");
 }

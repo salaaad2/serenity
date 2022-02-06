@@ -37,6 +37,7 @@ set(SOURCES
     CSS/Parser/StyleRules.cpp
     CSS/Parser/Token.cpp
     CSS/Parser/Tokenizer.cpp
+    CSS/Percentage.cpp
     CSS/PreferredColorScheme.cpp
     CSS/PropertyID.cpp
     CSS/PropertyID.h
@@ -45,7 +46,6 @@ set(SOURCES
     CSS/Selector.cpp
     CSS/SelectorEngine.cpp
     CSS/StyleComputer.cpp
-    CSS/StyleInvalidator.cpp
     CSS/StyleProperties.cpp
     CSS/StyleSheet.cpp
     CSS/StyleSheetList.cpp
@@ -80,6 +80,7 @@ set(SOURCES
     DOM/LiveNodeList.cpp
     DOM/NamedNodeMap.cpp
     DOM/Node.cpp
+    DOM/NodeOperations.cpp
     DOM/ParentNode.cpp
     DOM/Position.cpp
     DOM/ProcessingInstruction.cpp
@@ -98,6 +99,7 @@ set(SOURCES
     HTML/AttributeNames.cpp
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextContainer.cpp
+    HTML/CanvasGradient.cpp
     HTML/CanvasRenderingContext2D.cpp
     HTML/DOMParser.cpp
     HTML/DOMStringMap.cpp
@@ -215,11 +217,13 @@ set(SOURCES
     Layout/ImageBox.cpp
     Layout/InitialContainingBlock.cpp
     Layout/InlineFormattingContext.cpp
+    Layout/InlineLevelIterator.cpp
     Layout/InlineNode.cpp
     Layout/Label.cpp
     Layout/LayoutPosition.cpp
     Layout/LineBox.cpp
     Layout/LineBoxFragment.cpp
+    Layout/LineBuilder.cpp
     Layout/ListItemBox.cpp
     Layout/ListItemMarkerBox.cpp
     Layout/Node.cpp
@@ -403,6 +407,7 @@ libweb_js_wrapper(DOM/Text)
 libweb_js_wrapper(Encoding/TextEncoder)
 libweb_js_wrapper(Geometry/DOMRect)
 libweb_js_wrapper(Geometry/DOMRectReadOnly)
+libweb_js_wrapper(HTML/CanvasGradient)
 libweb_js_wrapper(HTML/CanvasRenderingContext2D)
 libweb_js_wrapper(HTML/CloseEvent)
 libweb_js_wrapper(HTML/DOMParser)

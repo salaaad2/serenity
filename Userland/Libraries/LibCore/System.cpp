@@ -2,6 +2,7 @@
  * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Kenneth Myhra <kennethmyhra@gmail.com>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Matthias Zimmerman <matthias291999@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,8 +16,13 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
+
+#ifdef __serenity__
+#    include <serenity.h>
+#endif
 
 #define HANDLE_SYSCALL_RETURN_VALUE(syscall_name, rc, success_value) \
     if ((rc) < 0) {                                                  \
@@ -40,7 +46,7 @@ ErrorOr<void> beep()
 {
     auto rc = ::sysbeep();
     if (rc < 0)
-        return Error::from_syscall("beep", rc);
+        return Error::from_syscall("beep"sv, -errno);
     return {};
 }
 
@@ -116,12 +122,27 @@ ErrorOr<void> mount(int source_fd, StringView target, StringView fs_type, int fl
     HANDLE_SYSCALL_RETURN_VALUE("mount", rc, {});
 }
 
+ErrorOr<void> umount(StringView mount_point)
+{
+    if (mount_point.is_null())
+        return Error::from_errno(EFAULT);
+
+    int rc = syscall(SC_umount, mount_point.characters_without_null_termination(), mount_point.length());
+    HANDLE_SYSCALL_RETURN_VALUE("umount", rc, {});
+}
+
 ErrorOr<long> ptrace(int request, pid_t tid, void* address, void* data)
 {
     auto rc = ::ptrace(request, tid, address, data);
     if (rc < 0)
         return Error::from_syscall("ptrace"sv, -errno);
     return rc;
+}
+
+ErrorOr<void> disown(pid_t pid)
+{
+    int rc = ::disown(pid);
+    HANDLE_SYSCALL_RETURN_VALUE("disown", rc, {});
 }
 #endif
 
@@ -540,6 +561,14 @@ ErrorOr<pid_t> posix_spawnp(StringView const path, posix_spawn_file_actions_t* c
     return child_pid;
 }
 
+ErrorOr<off_t> lseek(int fd, off_t offset, int whence)
+{
+    off_t rc = ::lseek(fd, offset, whence);
+    if (rc < 0)
+        return Error::from_syscall("lseek", -errno);
+    return rc;
+}
+
 ErrorOr<WaitPidResult> waitpid(pid_t waitee, int options)
 {
     int wstatus;
@@ -733,6 +762,18 @@ ErrorOr<struct utsname> uname()
     return uts;
 }
 
+ErrorOr<void> adjtime(const struct timeval* delta, struct timeval* old_delta)
+{
+#ifdef __serenity__
+    int rc = syscall(SC_adjtime, delta, old_delta);
+    HANDLE_SYSCALL_RETURN_VALUE("adjtime"sv, rc, {});
+#else
+    if (::adjtime(delta, old_delta) < 0)
+        return Error::from_syscall("adjtime"sv, -errno);
+    return {};
+#endif
+}
+
 ErrorOr<int> socket(int domain, int type, int protocol)
 {
     auto fd = ::socket(domain, type, protocol);
@@ -885,6 +926,28 @@ ErrorOr<Vector<gid_t>> getgroups()
     if (::getgroups(count, groups.data()) < 0)
         return Error::from_syscall("getgroups"sv, -errno);
     return groups;
+}
+
+ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev)
+{
+    if (pathname.is_null())
+        return Error::from_syscall("mknod"sv, -EFAULT);
+
+#ifdef __serenity__
+    Syscall::SC_mknod_params params { { pathname.characters_without_null_termination(), pathname.length() }, mode, dev };
+    int rc = syscall(SC_mknod, &params);
+    HANDLE_SYSCALL_RETURN_VALUE("mknod"sv, rc, {});
+#else
+    String path_string = pathname;
+    if (::mknod(path_string.characters(), mode, dev) < 0)
+        return Error::from_syscall("mknod"sv, -errno);
+    return {};
+#endif
+}
+
+ErrorOr<void> mkfifo(StringView pathname, mode_t mode)
+{
+    return mknod(pathname, mode | S_IFIFO, 0);
 }
 
 }

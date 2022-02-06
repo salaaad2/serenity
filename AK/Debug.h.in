@@ -26,14 +26,6 @@
 #cmakedefine01 CALLBACK_MACHINE_DEBUG
 #endif
 
-#ifndef CHTTPJOB_DEBUG
-#cmakedefine01 CHTTPJOB_DEBUG
-#endif
-
-#ifndef CNETWORKJOB_DEBUG
-#cmakedefine01 CNETWORKJOB_DEBUG
-#endif
-
 #ifndef COMPOSE_DEBUG
 #cmakedefine01 COMPOSE_DEBUG
 #endif
@@ -202,6 +194,10 @@
 #cmakedefine01 HTML_SCRIPT_DEBUG
 #endif
 
+#ifndef HTTPJOB_DEBUG
+#cmakedefine01 HTTPJOB_DEBUG
+#endif
+
 #ifndef HTTPSJOB_DEBUG
 #cmakedefine01 HTTPSJOB_DEBUG
 #endif
@@ -238,6 +234,10 @@
 #cmakedefine01 JS_BYTECODE_DEBUG
 #endif
 
+#ifndef JS_MODULE_DEBUG
+#cmakedefine01 JS_MODULE_DEBUG
+#endif
+
 #ifndef KEYBOARD_SHORTCUTS_DEBUG
 #cmakedefine01 KEYBOARD_SHORTCUTS_DEBUG
 #endif
@@ -248,6 +248,10 @@
 
 #ifndef LEXER_DEBUG
 #cmakedefine01 LEXER_DEBUG
+#endif
+
+#ifndef LIBWEB_CSS_DEBUG
+#cmakedefine01 LIBWEB_CSS_DEBUG
 #endif
 
 #ifndef LINE_EDITOR_DEBUG
@@ -298,6 +302,10 @@
 #cmakedefine01 MOVE_DEBUG
 #endif
 
+#ifndef NETWORKJOB_DEBUG
+#cmakedefine01 NETWORKJOB_DEBUG
+#endif
+
 #ifndef NT_DEBUG
 #cmakedefine01 NT_DEBUG
 #endif
@@ -340,6 +348,10 @@
 
 #ifndef REGEX_DEBUG
 #cmakedefine01 REGEX_DEBUG
+#endif
+
+#ifndef REQUESTSERVER_DEBUG
+#cmakedefine01 REQUESTSERVER_DEBUG
 #endif
 
 #ifndef RESIZE_DEBUG

@@ -366,7 +366,7 @@ void Window::handle_mouse_event(MouseEvent& event)
     if (m_automatic_cursor_tracking_widget) {
         auto window_relative_rect = m_automatic_cursor_tracking_widget->window_relative_rect();
         Gfx::IntPoint local_point { event.x() - window_relative_rect.x(), event.y() - window_relative_rect.y() };
-        auto local_event = MouseEvent((Event::Type)event.type(), local_point, event.buttons(), event.button(), event.modifiers(), event.wheel_delta());
+        auto local_event = MouseEvent((Event::Type)event.type(), local_point, event.buttons(), event.button(), event.modifiers(), event.wheel_delta_x(), event.wheel_delta_y());
         m_automatic_cursor_tracking_widget->dispatch_event(local_event, this);
         if (event.buttons() == 0)
             m_automatic_cursor_tracking_widget = nullptr;
@@ -375,7 +375,7 @@ void Window::handle_mouse_event(MouseEvent& event)
     if (!m_main_widget)
         return;
     auto result = m_main_widget->hit_test(event.position());
-    auto local_event = MouseEvent((Event::Type)event.type(), result.local_position, event.buttons(), event.button(), event.modifiers(), event.wheel_delta());
+    auto local_event = MouseEvent((Event::Type)event.type(), result.local_position, event.buttons(), event.button(), event.modifiers(), event.wheel_delta_x(), event.wheel_delta_y());
     VERIFY(result.widget);
     set_hovered_widget(result.widget);
     if (event.buttons() != 0 && !m_automatic_cursor_tracking_widget)
@@ -452,6 +452,10 @@ void Window::handle_key_event(KeyEvent& event)
     if (!m_focused_widget && event.type() == Event::KeyDown && event.key() == Key_Tab && !event.ctrl() && !event.alt() && !event.super()) {
         focus_a_widget_if_possible(FocusSource::Keyboard);
     }
+
+    if (m_default_return_key_widget && event.key() == Key_Return)
+        if (!m_focused_widget || !is<Button>(m_focused_widget.ptr()))
+            return default_return_key_widget()->dispatch_event(event, this);
 
     if (m_focused_widget)
         return m_focused_widget->dispatch_event(event, this);
@@ -732,6 +736,13 @@ void Window::set_main_widget(Widget* widget)
     update();
 }
 
+void Window::set_default_return_key_widget(Widget* widget)
+{
+    if (m_default_return_key_widget == widget)
+        return;
+    m_default_return_key_widget = widget;
+}
+
 void Window::set_focused_widget(Widget* widget, FocusSource source)
 {
     if (m_focused_widget == widget)
@@ -742,6 +753,9 @@ void Window::set_focused_widget(Widget* widget, FocusSource source)
 
     if (!m_focused_widget && m_previously_focused_widget)
         m_focused_widget = m_previously_focused_widget;
+
+    if (m_default_return_key_widget && m_default_return_key_widget->on_focus_change)
+        m_default_return_key_widget->on_focus_change(m_default_return_key_widget->is_focused(), source);
 
     if (previously_focused_widget) {
         Core::EventLoop::current().post_event(*previously_focused_widget, make<FocusEvent>(Event::FocusOut, source));

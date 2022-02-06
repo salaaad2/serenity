@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,7 +7,6 @@
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Intl/AbstractOperations.h>
 #include <LibJS/Runtime/Intl/DisplayNames.h>
-#include <LibUnicode/Locale.h>
 
 namespace JS::Intl {
 
@@ -15,32 +14,6 @@ namespace JS::Intl {
 DisplayNames::DisplayNames(Object& prototype)
     : Object(prototype)
 {
-}
-
-void DisplayNames::set_style(StringView style)
-{
-    if (style == "narrow"sv)
-        m_style = Style::Narrow;
-    else if (style == "short"sv)
-        m_style = Style::Short;
-    else if (style == "long"sv)
-        m_style = Style::Long;
-    else
-        VERIFY_NOT_REACHED();
-}
-
-StringView DisplayNames::style_string() const
-{
-    switch (m_style) {
-    case Style::Narrow:
-        return "narrow"sv;
-    case Style::Short:
-        return "short"sv;
-    case Style::Long:
-        return "long"sv;
-    default:
-        VERIFY_NOT_REACHED();
-    }
 }
 
 void DisplayNames::set_type(StringView type)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -35,6 +35,7 @@ public:
 
 private:
     virtual const char* class_name() const override { return "PromiseValueList"; }
+    virtual void visit_edges(Visitor&) override;
 
     Vector<Value> m_values;
 };

@@ -37,6 +37,11 @@ UNMAP_AFTER_INIT void DeviceManagement::attach_null_device(NullDevice const& dev
     m_null_device = device;
 }
 
+UNMAP_AFTER_INIT void DeviceManagement::attach_device_control_device(DeviceControlDevice const& device)
+{
+    m_device_control_device = device;
+}
+
 DeviceManagement& DeviceManagement::the()
 {
     return *s_the;
@@ -44,7 +49,7 @@ DeviceManagement& DeviceManagement::the()
 
 Device* DeviceManagement::get_device(MajorNumber major, MinorNumber minor)
 {
-    return m_devices.with_exclusive([&](auto& map) -> Device* {
+    return m_devices.with([&](auto& map) -> Device* {
         auto it = map.find(encoded_device(major.value(), minor.value()));
         if (it == map.end())
             return nullptr;
@@ -52,19 +57,35 @@ Device* DeviceManagement::get_device(MajorNumber major, MinorNumber minor)
     });
 }
 
+Optional<DeviceEvent> DeviceManagement::dequeue_top_device_event(Badge<DeviceControlDevice>)
+{
+    SpinlockLocker locker(m_event_queue_lock);
+    if (m_event_queue.is_empty())
+        return {};
+    return m_event_queue.dequeue();
+}
+
 void DeviceManagement::before_device_removal(Badge<Device>, Device& device)
 {
     u64 device_id = encoded_device(device.major(), device.minor());
-    m_devices.with_exclusive([&](auto& map) -> void {
+    m_devices.with([&](auto& map) -> void {
         VERIFY(map.contains(device_id));
         map.remove(encoded_device(device.major(), device.minor()));
     });
+
+    {
+        DeviceEvent event { DeviceEvent::State::Removed, device.is_block_device(), device.major().value(), device.minor().value() };
+        SpinlockLocker locker(m_event_queue_lock);
+        m_event_queue.enqueue(event);
+    }
+    if (m_device_control_device)
+        m_device_control_device->evaluate_block_conditions();
 }
 
 void DeviceManagement::after_inserting_device(Badge<Device>, Device& device)
 {
     u64 device_id = encoded_device(device.major(), device.minor());
-    m_devices.with_exclusive([&](auto& map) -> void {
+    m_devices.with([&](auto& map) -> void {
         if (map.contains(device_id)) {
             dbgln("Already registered {},{}: {}", device.major(), device.minor(), device.class_name());
             VERIFY_NOT_REACHED();
@@ -75,11 +96,19 @@ void DeviceManagement::after_inserting_device(Badge<Device>, Device& device)
             VERIFY_NOT_REACHED();
         }
     });
+
+    {
+        DeviceEvent event { DeviceEvent::State::Inserted, device.is_block_device(), device.major().value(), device.minor().value() };
+        SpinlockLocker locker(m_event_queue_lock);
+        m_event_queue.enqueue(event);
+    }
+    if (m_device_control_device)
+        m_device_control_device->evaluate_block_conditions();
 }
 
 void DeviceManagement::for_each(Function<void(Device&)> callback)
 {
-    m_devices.with_exclusive([&](auto& map) -> void {
+    m_devices.with([&](auto& map) -> void {
         for (auto& entry : map)
             callback(*entry.value);
     });

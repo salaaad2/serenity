@@ -92,7 +92,7 @@ public:
     Function<void(Action&)> on_activation;
 
     void activate(Core::Object* activator = nullptr);
-    void flash_menubar_menu();
+    void flash_menubar_menu(GUI::Window& window);
 
     bool is_enabled() const { return m_enabled; }
     void set_enabled(bool);
@@ -117,6 +117,8 @@ public:
 
     const ActionGroup* group() const { return m_action_group.ptr(); }
     void set_group(Badge<ActionGroup>, ActionGroup*);
+
+    HashTable<MenuItem*> menu_items() const { return m_menu_items; }
 
 private:
     Action(String, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);

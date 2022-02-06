@@ -117,8 +117,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_load_from_file(String const& path, in
         auto fd = TRY(Core::System::open(highdpi_icon_string, O_RDONLY));
 
         auto bitmap = TRY(try_load_from_fd_and_close(fd, highdpi_icon_string));
-        VERIFY(bitmap->width() % scale_factor == 0);
-        VERIFY(bitmap->height() % scale_factor == 0);
+        if (bitmap->width() % scale_factor != 0 || bitmap->height() % scale_factor != 0)
+            return Error::from_string_literal("Bitmap::try_load_from_file: HighDPI image size should be divisible by scale factor");
         bitmap->m_size.set_width(bitmap->width() / scale_factor);
         bitmap->m_size.set_height(bitmap->height() / scale_factor);
         bitmap->m_scale = scale_factor;
@@ -241,7 +241,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_from_serialized_byte_buffer(By
 ByteBuffer Bitmap::serialize_to_byte_buffer() const
 {
     // FIXME: Somehow handle possible OOM situation here.
-    auto buffer = ByteBuffer::create_uninitialized(sizeof(size_t) + 4 * sizeof(unsigned) + sizeof(BitmapFormat) + sizeof(RGBA32) * palette_size(m_format) + size_in_bytes()).release_value();
+    auto buffer = ByteBuffer::create_uninitialized(sizeof(size_t) + 4 * sizeof(unsigned) + sizeof(BitmapFormat) + sizeof(RGBA32) * palette_size(m_format) + size_in_bytes()).release_value_but_fixme_should_propagate_errors();
     OutputMemoryStream stream { buffer };
 
     auto write = [&]<typename T>(T value) {

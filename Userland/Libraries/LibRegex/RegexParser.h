@@ -54,6 +54,7 @@ public:
         Error error;
         Token error_token;
         Vector<FlyString> capture_groups;
+        AllOptions options;
     };
 
     explicit Parser(Lexer& lexer)
@@ -71,6 +72,7 @@ public:
     Result parse(Optional<AllOptions> regex_options = {});
     bool has_error() const { return m_parser_state.error != Error::NoError; }
     Error error() const { return m_parser_state.error; }
+    AllOptions options() const { return m_parser_state.regex_options; }
 
 protected:
     virtual bool parse_internal(ByteCode&, size_t& match_length_minimum) = 0;
@@ -170,14 +172,16 @@ private:
 };
 
 class PosixExtendedParser final : public AbstractPosixParser {
+    constexpr static auto default_options = static_cast<PosixFlags>(AllFlags::SingleLine) | static_cast<PosixFlags>(AllFlags::Internal_ConsiderNewline);
+
 public:
     explicit PosixExtendedParser(Lexer& lexer)
-        : AbstractPosixParser(lexer)
+        : AbstractPosixParser(lexer, default_options)
     {
     }
 
     PosixExtendedParser(Lexer& lexer, Optional<typename ParserTraits<PosixExtendedParser>::OptionsType> regex_options)
-        : AbstractPosixParser(lexer, regex_options.value_or({}))
+        : AbstractPosixParser(lexer, regex_options.value_or({}) | default_options.value())
     {
     }
 
@@ -195,15 +199,17 @@ private:
 };
 
 class ECMA262Parser final : public Parser {
+    constexpr static ECMAScriptOptions default_options = static_cast<ECMAScriptFlags>(AllFlags::Internal_ConsiderNewline);
+
 public:
     explicit ECMA262Parser(Lexer& lexer)
-        : Parser(lexer)
+        : Parser(lexer, default_options)
     {
         m_capture_groups_in_scope.empend();
     }
 
     ECMA262Parser(Lexer& lexer, Optional<typename ParserTraits<ECMA262Parser>::OptionsType> regex_options)
-        : Parser(lexer, regex_options.value_or({}))
+        : Parser(lexer, regex_options.value_or({}) | default_options.value())
     {
         m_should_use_browser_extended_grammar = regex_options.has_value() && regex_options->has_flag_set(ECMAScriptFlags::BrowserExtended);
         m_capture_groups_in_scope.empend();
@@ -253,6 +259,20 @@ private:
     Optional<u8> parse_legacy_octal_escape();
 
     size_t ensure_total_number_of_capturing_parenthesis();
+
+    void enter_capture_group_scope() { m_capture_groups_in_scope.empend(); }
+
+    void exit_capture_group_scope()
+    {
+        auto last = m_capture_groups_in_scope.take_last();
+        m_capture_groups_in_scope.last().extend(move(last));
+    }
+
+    void clear_all_capture_groups_in_scope(ByteCode& stack)
+    {
+        for (auto& index : m_capture_groups_in_scope.last())
+            stack.insert_bytecode_clear_capture_group(index);
+    };
 
     // ECMA-262's flavour of regex is a bit weird in that it allows backrefs to reference "future" captures, and such backrefs
     // always match the empty string. So we have to know how many capturing parenthesis there are, but we don't want to always

@@ -13,14 +13,15 @@
 namespace Core {
 
 enum State {
-    Reference,
+    Classes,
     Mode
 };
 
 enum ClassFlag {
     Other = 1,
     Group = 2,
-    User = 4
+    User = 4,
+    All = 7
 };
 
 enum Operation {
@@ -48,14 +49,14 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
 {
     auto mask = FilePermissionsMask();
 
-    u8 state = State::Reference;
+    u8 state = State::Classes;
     u8 classes = 0;
     u8 operation = 0;
 
     for (auto ch : string) {
         switch (state) {
-        case State::Reference: {
-            // one or more [ugoa] terminated by one operator [+-=]
+        case State::Classes: {
+            // zero or more [ugoa] terminated by one operator [+-=]
             if (ch == 'u')
                 classes |= ClassFlag::User;
             else if (ch == 'g')
@@ -63,19 +64,22 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
             else if (ch == 'o')
                 classes |= ClassFlag::Other;
             else if (ch == 'a')
-                classes = ClassFlag::User | ClassFlag::Group | ClassFlag::Other;
+                classes = ClassFlag::All;
             else {
-                if (classes == 0)
-                    return Error::from_string_literal("invalid access class: expected 'u', 'g', 'o' or 'a' "sv);
-
                 if (ch == '+')
                     operation = Operation::Add;
                 else if (ch == '-')
                     operation = Operation::Remove;
                 else if (ch == '=')
                     operation = Operation::Assign;
+                else if (classes == 0)
+                    return Error::from_string_literal("invalid class: expected 'u', 'g', 'o' or 'a'"sv);
                 else
                     return Error::from_string_literal("invalid operation: expected '+', '-' or '='"sv);
+
+                // if an operation was specified without a class, assume all
+                if (classes == 0)
+                    classes = ClassFlag::All;
 
                 state = State::Mode;
             }
@@ -86,9 +90,9 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
         case State::Mode: {
             // one or more [rwx] terminated by a comma
 
-            // End of mode part, expect reference next
+            // End of mode part, expect class next
             if (ch == ',') {
-                state = State::Reference;
+                state = State::Classes;
                 classes = operation = 0;
                 continue;
             }
@@ -102,7 +106,7 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
             else if (ch == 'x')
                 write_bits = 1;
             else
-                return Error::from_string_literal("invalid symbolic permission"sv);
+                return Error::from_string_literal("invalid symbolic permission: expected 'r', 'w' or 'x'"sv);
 
             mode_t clear_bits = operation == Operation::Assign ? 7 : write_bits;
 

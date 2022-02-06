@@ -105,6 +105,7 @@ namespace JS {
     P(console)                               \
     P(construct)                             \
     P(constructor)                           \
+    P(containing)                            \
     P(compare)                               \
     P(copyWithin)                            \
     P(cos)                                   \
@@ -240,6 +241,7 @@ namespace JS {
     P(getYear)                               \
     P(global)                                \
     P(globalThis)                            \
+    P(granularity)                           \
     P(group)                                 \
     P(groupBy)                               \
     P(groupByToMap)                          \
@@ -258,6 +260,7 @@ namespace JS {
     P(hypot)                                 \
     P(id)                                    \
     P(ignoreCase)                            \
+    P(ignorePunctuation)                     \
     P(imul)                                  \
     P(importValue)                           \
     P(includes)                              \
@@ -289,6 +292,7 @@ namespace JS {
     P(isoNanosecond)                         \
     P(isoSecond)                             \
     P(isoYear)                               \
+    P(isWordLike)                            \
     P(italics)                               \
     P(join)                                  \
     P(keyFor)                                \
@@ -357,6 +361,7 @@ namespace JS {
     P(plainDateTimeISO)                      \
     P(plainTime)                             \
     P(plainTimeISO)                          \
+    P(pluralCategories)                      \
     P(pop)                                   \
     P(pow)                                   \
     P(preventExtensions)                     \
@@ -386,6 +391,8 @@ namespace JS {
     P(seal)                                  \
     P(second)                                \
     P(seconds)                               \
+    P(segment)                               \
+    P(sensitivity)                           \
     P(set)                                   \
     P(setBigInt64)                           \
     P(setBigUint64)                          \
@@ -444,6 +451,7 @@ namespace JS {
     P(subtract)                              \
     P(sup)                                   \
     P(supportedLocalesOf)                    \
+    P(supportedValuesOf)                     \
     P(tan)                                   \
     P(tanh)                                  \
     P(test)                                  \
@@ -497,6 +505,7 @@ namespace JS {
     P(until)                                 \
     P(unregister)                            \
     P(unshift)                               \
+    P(usage)                                 \
     P(useGrouping)                           \
     P(value)                                 \
     P(valueOf)                               \

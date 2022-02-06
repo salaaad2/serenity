@@ -10,6 +10,7 @@
 #include <AK/AnyOf.h>
 #include <AK/CharacterTypes.h>
 #include <AK/GenericLexer.h>
+#include <AK/ScopeGuard.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringUtils.h>
@@ -193,7 +194,8 @@ Parser::Result Parser::parse(Optional<AllOptions> regex_options)
         move(m_parser_state.match_length_minimum),
         move(m_parser_state.error),
         move(m_parser_state.error_token),
-        m_parser_state.named_capture_groups.keys()
+        m_parser_state.named_capture_groups.keys(),
+        m_parser_state.regex_options,
     };
 }
 
@@ -1065,9 +1067,17 @@ bool ECMA262Parser::parse_assertion(ByteCode& stack, [[maybe_unused]] size_t& ma
             return true;
         }
         if (should_parse_forward_assertion && try_skip("!")) {
+            enter_capture_group_scope();
+            ScopeGuard quit_scope {
+                [this] {
+                    exit_capture_group_scope();
+                }
+            };
             if (!parse_inner_disjunction(assertion_stack, length_dummy, unicode, named))
                 return false;
             stack.insert_bytecode_lookaround(move(assertion_stack), ByteCode::LookAroundType::NegatedLookAhead);
+            clear_all_capture_groups_in_scope(stack);
+
             return true;
         }
         if (m_should_use_browser_extended_grammar) {
@@ -1086,9 +1096,16 @@ bool ECMA262Parser::parse_assertion(ByteCode& stack, [[maybe_unused]] size_t& ma
             return true;
         }
         if (try_skip("<!")) {
+            enter_capture_group_scope();
+            ScopeGuard quit_scope {
+                [this] {
+                    exit_capture_group_scope();
+                }
+            };
             if (!parse_inner_disjunction(assertion_stack, length_dummy, unicode, named))
                 return false;
             stack.insert_bytecode_lookaround(move(assertion_stack), ByteCode::LookAroundType::NegatedLookBehind, length_dummy);
+            clear_all_capture_groups_in_scope(stack);
             return true;
         }
 
@@ -1124,10 +1141,17 @@ bool ECMA262Parser::parse_quantifiable_assertion(ByteCode& stack, size_t&, bool 
         return true;
     }
     if (try_skip("!")) {
+        enter_capture_group_scope();
+        ScopeGuard quit_scope {
+            [this] {
+                exit_capture_group_scope();
+            }
+        };
         if (!parse_inner_disjunction(assertion_stack, match_length_minimum, false, named))
             return false;
 
         stack.insert_bytecode_lookaround(move(assertion_stack), ByteCode::LookAroundType::NegatedLookAhead);
+        clear_all_capture_groups_in_scope(stack);
         return true;
     }
 
@@ -2189,19 +2213,8 @@ bool ECMA262Parser::parse_capture_group(ByteCode& stack, size_t& match_length_mi
 {
     consume(TokenType::LeftParen, Error::InvalidPattern);
 
-    auto enter_capture_group_scope = [&] {
-        m_capture_groups_in_scope.empend();
-    };
-    auto exit_capture_group_scope = [&] {
-        auto last = m_capture_groups_in_scope.take_last();
-        m_capture_groups_in_scope.last().extend(move(last));
-    };
     auto register_capture_group_in_current_scope = [&](auto identifier) {
         m_capture_groups_in_scope.last().empend(identifier);
-    };
-    auto clear_all_capture_groups_in_scope = [&] {
-        for (auto& index : m_capture_groups_in_scope.last())
-            stack.insert_bytecode_clear_capture_group(index);
     };
 
     if (match(TokenType::Questionmark)) {
@@ -2216,7 +2229,7 @@ bool ECMA262Parser::parse_capture_group(ByteCode& stack, size_t& match_length_mi
             enter_capture_group_scope();
             if (!parse_disjunction(noncapture_group_bytecode, length, unicode, named))
                 return set_error(Error::InvalidPattern);
-            clear_all_capture_groups_in_scope();
+            clear_all_capture_groups_in_scope(stack);
             exit_capture_group_scope();
 
             consume(TokenType::RightParen, Error::MismatchingParen);
@@ -2246,7 +2259,7 @@ bool ECMA262Parser::parse_capture_group(ByteCode& stack, size_t& match_length_mi
             enter_capture_group_scope();
             if (!parse_disjunction(capture_group_bytecode, length, unicode, named))
                 return set_error(Error::InvalidPattern);
-            clear_all_capture_groups_in_scope();
+            clear_all_capture_groups_in_scope(stack);
             exit_capture_group_scope();
 
             register_capture_group_in_current_scope(group_index);
@@ -2277,7 +2290,7 @@ bool ECMA262Parser::parse_capture_group(ByteCode& stack, size_t& match_length_mi
     if (!parse_disjunction(capture_group_bytecode, length, unicode, named))
         return set_error(Error::InvalidPattern);
 
-    clear_all_capture_groups_in_scope();
+    clear_all_capture_groups_in_scope(stack);
     exit_capture_group_scope();
 
     register_capture_group_in_current_scope(group_index);

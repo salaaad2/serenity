@@ -18,8 +18,8 @@ List of options:
 * **`acpi`** - This parameter expects one of the following values. **`on`** - Boot with full ACPI support, using ACPI 
    Machine Language interpretation (default). **`limited`** - Boot with limited ACPI support. **`off`** - Don't initialize ACPI at all.
 
-* **`ahci_reset_mode`** - This parameter expects one of the following values. **`controller`** - Reset just the AHCI controller on boot.
-   **`none`** - Don't perform any AHCI reset.  **`complete`** - Reset the AHCI controller, and all AHCI ports on boot.
+* **`ahci_reset_mode`** - This parameter expects one of the following values. **`controllers`** - Reset just the AHCI controller on boot (default).
+   **`aggressive`** - Reset the AHCI controller, and all AHCI ports on boot.
 
 * **`boot_prof`** - If present on the command line, global system profiling will be enabled
    as soon as possible during the boot sequence. Allowing you to profile startup of all applications.
@@ -60,11 +60,15 @@ List of options:
 
 * **`root`** - This parameter configures the device to use as the root file system. It defaults to **`/dev/hda`** if unspecified.
 
+* **`pcspeaker`** - This parameter controls whether the kernel can use the PC speaker or not. It defaults to **`off`** and can be set to **`on`** to enable the PC speaker.
+
 * **`smp`** - This parameter expects a binary value of **`on`** or **`off`**. If enabled kernel will
   enable available APs (application processors) and use them with the BSP (Bootstrap processor) to
   schedule and run threads.
   This parameter defaults to **`off`**. This parameter requires **`enable_ioapic`** to be enabled
-  and and a `MADT` (APIC) table to be available.
+  and a `MADT` (APIC) table to be available.
+
+* **`nvme_poll`** - This parameter configures the NVMe drive to use polling instead of interrupt driven completion.
 
 * **`system_mode`** - This parameter is not interpreted by the Kernel, and is made available at `/proc/system_mode`. SystemServer uses it to select the set of services that should be started. Common values are:
   - **`graphical`** (default) - Boots the system in the normal graphical mode.

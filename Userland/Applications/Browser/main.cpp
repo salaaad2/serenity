@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "Browser.h"
-#include "BrowserWindow.h"
-#include "CookieJar.h"
-#include "Tab.h"
-#include "WindowActions.h"
 #include <AK/StringBuilder.h>
+#include <Applications/Browser/Browser.h>
+#include <Applications/Browser/BrowserWindow.h>
+#include <Applications/Browser/CookieJar.h>
+#include <Applications/Browser/Tab.h>
+#include <Applications/Browser/WindowActions.h>
 #include <LibConfig/Client.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
@@ -21,7 +21,6 @@
 #include <LibGUI/Icon.h>
 #include <LibGUI/TabWidget.h>
 #include <LibMain/Main.h>
-#include <stdio.h>
 #include <unistd.h>
 
 namespace Browser {
@@ -29,7 +28,23 @@ namespace Browser {
 String g_search_engine;
 String g_home_url;
 Vector<String> g_content_filters;
+IconBag g_icon_bag;
 
+}
+
+static ErrorOr<void> load_content_filters()
+{
+    auto file = TRY(Core::Stream::File::open(String::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::Stream::OpenMode::Read));
+    auto ad_filter_list = TRY(Core::Stream::BufferedFile::create(move(file)));
+    auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
+    while (TRY(ad_filter_list->can_read_line())) {
+        auto length = TRY(ad_filter_list->read_line(buffer));
+        StringView line { buffer.data(), length };
+        if (!line.is_empty())
+            Browser::g_content_filters.append(line);
+    }
+
+    return {};
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -60,6 +75,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/home", "rwc"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/passwd", "r"));
+    TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/tmp/portal/image", "rw"));
     TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
     TRY(Core::System::unveil("/tmp/portal/request", "rw"));
@@ -70,16 +86,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Browser::g_home_url = Config::read_string("Browser", "Preferences", "Home", "file:///res/html/misc/welcome.html");
     Browser::g_search_engine = Config::read_string("Browser", "Preferences", "SearchEngine", {});
 
-    auto ad_filter_list_or_error = Core::File::open(String::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::OpenMode::ReadOnly);
-    if (!ad_filter_list_or_error.is_error()) {
-        auto& ad_filter_list = *ad_filter_list_or_error.value();
-        while (!ad_filter_list.eof()) {
-            auto line = ad_filter_list.read_line();
-            if (line.is_empty())
-                continue;
-            Browser::g_content_filters.append(move(line));
-        }
-    }
+    Browser::g_icon_bag = TRY(Browser::IconBag::try_create());
+
+    TRY(load_content_filters());
 
     URL first_url = Browser::g_home_url;
     if (specified_url) {

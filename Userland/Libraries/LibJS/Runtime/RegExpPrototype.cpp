@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
  * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2021, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -208,46 +208,36 @@ static ThrowCompletionOr<Value> regexp_builtin_exec(GlobalObject& global_object,
 
     RegexResult result;
 
+    // NOTE: For optimisation purposes, this whole loop is implemented in LibRegex.
     // 12. Let matchSucceeded be false.
     // 13. Let Input be a List consisting of all of the characters, in order, of S. If fullUnicode is true, each character is a code unit, otherwise each character is a code point.
-    // 14. Repeat, while matchSucceeded is false,
-    while (true) {
-        // a. If lastIndex > length, then
-        if (last_index > string.length_in_code_units()) {
-            // i. If global is true or sticky is true, then
-            if (global || sticky) {
-                // 1. Perform ? Set(R, "lastIndex", +0𝔽, true).
-                TRY(regexp_object.set(vm.names.lastIndex, Value(0), Object::ShouldThrowExceptions::Yes));
-            }
+    // 14. Repeat, while matchSucceeded is false
+    //   a. If lastIndex > length, then
+    //       i. If global is true or sticky is true, then
+    //           1. Perform ? Set(R, "lastIndex", 0, true).
+    //       ii. Return null.
+    //   b. Let r be matcher(Input, lastIndex).
+    //   c. If r is failure, then
+    //       i. If sticky is true, then
+    //           1. Perform ? Set(R, "lastIndex", 0, true).
+    //           2. Return null.
+    //       ii. Set lastIndex to AdvanceStringIndex(S, lastIndex, fullUnicode).
+    //   d. Else,
+    //       i. Assert: r is a State.
+    //       ii. Set matchSucceeded to true.
 
-            // ii. Return null.
-            return js_null();
-        }
+    // 14.b
+    regex.start_offset = full_unicode ? string.view().code_point_offset_of(last_index) : last_index;
+    result = regex.match(string.view());
 
-        // b. Let r be matcher(Input, lastIndex).
-        regex.start_offset = full_unicode ? string.view().code_point_offset_of(last_index) : last_index;
-        result = regex.match(string.view());
+    // 14.c and 14.a
+    if (!result.success) {
+        // 14.c.i, 14.a.i
+        if (sticky || global)
+            TRY(regexp_object.set(vm.names.lastIndex, Value(0), Object::ShouldThrowExceptions::Yes));
 
-        // c. If r is failure, then
-        if (!result.success) {
-            // i. If sticky is true, then
-            if (sticky) {
-                // 1. Perform ? Set(R, "lastIndex", +0𝔽, true).
-                TRY(regexp_object.set(vm.names.lastIndex, Value(0), Object::ShouldThrowExceptions::Yes));
-
-                // 2. Return null.
-                return js_null();
-            }
-
-            // ii. Set lastIndex to AdvanceStringIndex(S, lastIndex, fullUnicode).
-            last_index = advance_string_index(string.view(), last_index, full_unicode);
-        }
-        // d. Else,
-        else {
-            // i. Assert: r is a State.
-            // ii. Set matchSucceeded to true.
-            break;
-        }
+        // 14.a.ii, 14.c.i.2
+        return js_null();
     }
 
     auto& match = result.matches[0];
@@ -387,7 +377,7 @@ ThrowCompletionOr<Value> regexp_exec(GlobalObject& global_object, Object& regexp
     // 2. If IsCallable(exec) is true, then
     if (exec.is_function()) {
         // a. Let result be ? Call(exec, R, « S »).
-        auto result = TRY(vm.call(exec.as_function(), &regexp_object, js_string(vm, move(string))));
+        auto result = TRY(call(global_object, exec.as_function(), &regexp_object, js_string(vm, move(string))));
 
         // b. If Type(result) is neither Object nor Null, throw a TypeError exception.
         if (!result.is_object() && !result.is_null())
@@ -600,10 +590,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match_all)
     bool full_unicode = flags.contains('u');
 
     // 6. Let matcher be ? Construct(C, « R, flags »).
-    MarkedValueList arguments(vm.heap());
-    arguments.append(regexp_object);
-    arguments.append(js_string(vm, move(flags)));
-    auto* matcher = TRY(construct(global_object, *constructor, move(arguments)));
+    auto* matcher = TRY(construct(global_object, *constructor, regexp_object, js_string(vm, move(flags))));
 
     // 7. Let lastIndex be ? ToLength(? Get(R, "lastIndex")).
     auto last_index_value = TRY(regexp_object->get(vm.names.lastIndex));
@@ -763,7 +750,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
             }
 
             // v. Let replValue be ? Call(replaceValue, undefined, replacerArgs).
-            auto replace_result = TRY(vm.call(replace_value.as_function(), js_undefined(), move(replacer_args)));
+            auto replace_result = TRY(call(global_object, replace_value.as_function(), js_undefined(), move(replacer_args)));
 
             // vi. Let replacement be ? ToString(replValue).
             replacement = TRY(replace_result.to_string(global_object));
@@ -894,10 +881,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
     auto new_flags = flags.find('y').has_value() ? move(flags) : String::formatted("{}y", flags);
 
     // 10. Let splitter be ? Construct(C, « rx, newFlags »).
-    MarkedValueList arguments(vm.heap());
-    arguments.append(regexp_object);
-    arguments.append(js_string(vm, move(new_flags)));
-    auto* splitter = TRY(construct(global_object, *constructor, move(arguments)));
+    auto* splitter = TRY(construct(global_object, *constructor, regexp_object, js_string(vm, move(new_flags))));
 
     // 11. Let A be ! ArrayCreate(0).
     auto* array = MUST(Array::create(global_object, 0));

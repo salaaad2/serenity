@@ -23,7 +23,7 @@
             @GUI::Label {
                 fixed_width: 32
                 fixed_height: 32
-                name: "cursor_speed_image_label"
+                icon: "/res/graphics/mouse-cursor-speed.png"
             }
 
             @GUI::Label {
@@ -72,7 +72,7 @@
             @GUI::Label {
                 fixed_width: 32
                 fixed_height: 32
-                name: "scroll_step_size_image_label"
+                icon: "/res/graphics/scroll-wheel-step-size.png"
             }
 
             @GUI::Label {
@@ -176,21 +176,13 @@
             @GUI::Label {
                 fixed_width: 32
                 fixed_height: 32
-                name: "switch_buttons_image_label"
-            }
-
-            @GUI::Label {
-                text: "Switch primary and secondary buttons"
-                fixed_width: 201
-                text_alignment: "CenterLeft"
-                name: "switch_buttons_label"
+                icon: "/res/graphics/switch-mouse-buttons.png"
             }
 
             @GUI::CheckBox {
                 name: "switch_buttons_input"
-                fixed_width: 14
-
+                text: "Switch primary and secondary buttons"
             }
         }
-    }    
+    }
 }

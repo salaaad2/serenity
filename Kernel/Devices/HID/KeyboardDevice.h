@@ -26,9 +26,9 @@ public:
 
     // ^CharacterDevice
     virtual ErrorOr<size_t> read(OpenFileDescription&, u64, UserOrKernelBuffer&, size_t) override;
-    virtual bool can_read(const OpenFileDescription&, size_t) const override;
+    virtual bool can_read(const OpenFileDescription&, u64) const override;
     virtual ErrorOr<size_t> write(OpenFileDescription&, u64, const UserOrKernelBuffer&, size_t) override { return EINVAL; }
-    virtual bool can_write(const OpenFileDescription&, size_t) const override { return true; }
+    virtual bool can_write(const OpenFileDescription&, u64) const override { return true; }
 
     // ^HIDDevice
     virtual Type instrument_type() const override { return Type::Keyboard; }
@@ -58,6 +58,8 @@ protected:
     bool m_has_e0_prefix { false };
     bool m_left_shift_pressed { false };
     bool m_right_shift_pressed { false };
+    bool m_left_super_pressed { false };
+    bool m_right_super_pressed { false };
 
     void key_state_changed(u8 raw, bool pressed);
 };

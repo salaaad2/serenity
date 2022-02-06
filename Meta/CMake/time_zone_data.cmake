@@ -35,6 +35,9 @@ set(TZDB_NORTH_AMERICA_PATH "${TZDB_PATH}/${TZDB_NORTH_AMERICA_SOURCE}")
 set(TZDB_SOUTH_AMERICA_SOURCE southamerica)
 set(TZDB_SOUTH_AMERICA_PATH "${TZDB_PATH}/${TZDB_SOUTH_AMERICA_SOURCE}")
 
+set(TZDB_ZONE_1970_SOURCE zone1970.tab)
+set(TZDB_ZONE_1970_PATH "${TZDB_PATH}/${TZDB_ZONE_1970_SOURCE}")
+
 function(extract_tzdb_file source path)
     if(EXISTS "${TZDB_ZIP_PATH}" AND NOT EXISTS "${path}")
         message(STATUS "Extracting TZDB ${source} from ${TZDB_ZIP_PATH}...")
@@ -48,11 +51,7 @@ endfunction()
 if (ENABLE_TIME_ZONE_DATABASE_DOWNLOAD)
     remove_path_if_version_changed("${TZDB_VERSION}" "${TZDB_VERSION_FILE}" "${TZDB_PATH}")
 
-    if (NOT EXISTS "${TZDB_ZIP_PATH}")
-        message(STATUS "Downloading time zone database from ${TZDB_ZIP_URL}...")
-        file(DOWNLOAD "${TZDB_ZIP_URL}" "${TZDB_ZIP_PATH}" INACTIVITY_TIMEOUT 10)
-    endif()
-
+    download_file("${TZDB_ZIP_URL}" "${TZDB_ZIP_PATH}")
     extract_tzdb_file("${TZDB_AFRICA_SOURCE}" "${TZDB_AFRICA_PATH}")
     extract_tzdb_file("${TZDB_ANTARCTICA_SOURCE}" "${TZDB_ANTARCTICA_PATH}")
     extract_tzdb_file("${TZDB_ASIA_SOURCE}" "${TZDB_ASIA_PATH}")
@@ -62,6 +61,7 @@ if (ENABLE_TIME_ZONE_DATABASE_DOWNLOAD)
     extract_tzdb_file("${TZDB_EUROPE_SOURCE}" "${TZDB_EUROPE_PATH}")
     extract_tzdb_file("${TZDB_NORTH_AMERICA_SOURCE}" "${TZDB_NORTH_AMERICA_PATH}")
     extract_tzdb_file("${TZDB_SOUTH_AMERICA_SOURCE}" "${TZDB_SOUTH_AMERICA_PATH}")
+    extract_tzdb_file("${TZDB_ZONE_1970_SOURCE}" "${TZDB_ZONE_1970_PATH}")
 
     set(TIME_ZONE_DATA_HEADER LibTimeZone/TimeZoneData.h)
     set(TIME_ZONE_DATA_IMPLEMENTATION LibTimeZone/TimeZoneData.cpp)
@@ -82,7 +82,7 @@ if (ENABLE_TIME_ZONE_DATABASE_DOWNLOAD)
         "${TIME_ZONE_META_TARGET_PREFIX}"
         "${TIME_ZONE_DATA_HEADER}"
         "${TIME_ZONE_DATA_IMPLEMENTATION}"
-        arguments "${TZDB_AFRICA_PATH}" "${TZDB_ANTARCTICA_PATH}" "${TZDB_ASIA_PATH}" "${TZDB_AUSTRALASIA_PATH}" "${TZDB_BACKWARD_PATH}" "${TZDB_ETCETERA_PATH}" "${TZDB_EUROPE_PATH}" "${TZDB_NORTH_AMERICA_PATH}" "${TZDB_SOUTH_AMERICA_PATH}"
+        arguments -z "${TZDB_ZONE_1970_PATH}" "${TZDB_AFRICA_PATH}" "${TZDB_ANTARCTICA_PATH}" "${TZDB_ASIA_PATH}" "${TZDB_AUSTRALASIA_PATH}" "${TZDB_BACKWARD_PATH}" "${TZDB_ETCETERA_PATH}" "${TZDB_EUROPE_PATH}" "${TZDB_NORTH_AMERICA_PATH}" "${TZDB_SOUTH_AMERICA_PATH}"
     )
 
     set(TIME_ZONE_DATA_SOURCES

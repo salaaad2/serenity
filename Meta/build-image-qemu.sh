@@ -1,5 +1,12 @@
 #!/bin/sh
 
+# Note: This is done before `set -e` to let `command` fail if needed
+FUSE2FS_PATH=$(command -v fuse2fs)
+
+if [ -z "$FUSE2FS_PATH" ]; then
+    FUSE2FS_PATH=/usr/sbin/fuse2fs
+fi
+
 set -e
 
 die() {
@@ -10,7 +17,7 @@ die() {
 USE_FUSE2FS=0
 
 if [ "$(id -u)" != 0 ]; then
-    if [ -x /usr/sbin/fuse2fs ] && /usr/sbin/fuse2fs --help 2>&1 |grep fakeroot > /dev/null; then
+    if [ -x "$FUSE2FS_PATH" ] && $FUSE2FS_PATH --help 2>&1 |grep fakeroot > /dev/null; then
         USE_FUSE2FS=1
     else
         sudo -E -- "$0" "$@" || die "this script needs to run as root"
@@ -39,7 +46,7 @@ PATH="$SCRIPT_DIR/../Toolchain/Local/i686/bin:$PATH"
 
 # We depend on GNU coreutils du for the --apparent-size extension.
 # GNU coreutils is a build dependency.
-if type gdu > /dev/null 2>&1; then
+if command -v gdu > /dev/null 2>&1 && gdu --version | grep -q "GNU coreutils"; then
     GNUDU="gdu"
 else
     GNUDU="du"
@@ -67,6 +74,12 @@ DISK_SIZE_BYTES=$((($(disk_usage "$SERENITY_SOURCE_DIR/Base") + $(disk_usage Roo
 DISK_SIZE_BYTES=$(((DISK_SIZE_BYTES + (INODE_COUNT * INODE_SIZE * 2)) * 3))
 INODE_COUNT=$((INODE_COUNT * 7))
 
+E2FSCK="/usr/sbin/e2fsck"
+
+if [ ! -f "$E2FSCK" ]; then
+    E2FSCK=/sbin/e2fsck
+fi
+
 USE_EXISTING=0
 
 if [ -f _disk_image ]; then
@@ -74,7 +87,7 @@ if [ -f _disk_image ]; then
 
     echo "checking existing image"
     result=0
-    /usr/sbin/e2fsck -f -y _disk_image || result=$?
+    "$E2FSCK" -f -y _disk_image || result=$?
     if [ $result -ge 4 ]; then
         rm -f _disk_image
         USE_EXISTING=0
@@ -123,7 +136,7 @@ printf "mounting filesystem... "
 mkdir -p mnt
 use_genext2fs=0
 if [ $USE_FUSE2FS -eq 1 ]; then
-    mount_cmd="/usr/sbin/fuse2fs _disk_image mnt/ -o fakeroot,rw"
+    mount_cmd="$FUSE2FS_PATH _disk_image mnt/ -o fakeroot,rw"
 elif [ "$(uname -s)" = "Darwin" ]; then
     mount_cmd="fuse-ext2 _disk_image mnt -o rw+,allow_other,uid=501,gid=20"
 elif [ "$(uname -s)" = "OpenBSD" ]; then

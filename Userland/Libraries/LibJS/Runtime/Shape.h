@@ -19,7 +19,7 @@
 namespace JS {
 
 struct PropertyMetadata {
-    size_t offset { 0 };
+    u32 offset { 0 };
     PropertyAttributes attributes { 0 };
 };
 
@@ -70,7 +70,7 @@ public:
 
     Optional<PropertyMetadata> lookup(const StringOrSymbol&) const;
     const HashMap<StringOrSymbol, PropertyMetadata>& property_table() const;
-    size_t property_count() const;
+    u32 property_count() const { return m_property_count; }
 
     struct Property {
         StringOrSymbol key;
@@ -89,29 +89,25 @@ private:
     virtual const char* class_name() const override { return "Shape"; }
     virtual void visit_edges(Visitor&) override;
 
-#ifdef JS_TRACK_ZOMBIE_CELLS
-    virtual void did_become_zombie() override;
-#endif
-
     Shape* get_or_prune_cached_forward_transition(TransitionKey const&);
     Shape* get_or_prune_cached_prototype_transition(Object* prototype);
 
     void ensure_property_table() const;
 
-    PropertyAttributes m_attributes { 0 };
-    TransitionType m_transition_type : 6 { TransitionType::Invalid };
-    bool m_unique : 1 { false };
-
     Object* m_global_object { nullptr };
 
     mutable OwnPtr<HashMap<StringOrSymbol, PropertyMetadata>> m_property_table;
 
-    HashMap<TransitionKey, WeakPtr<Shape>> m_forward_transitions;
-    HashMap<Object*, WeakPtr<Shape>> m_prototype_transitions;
+    OwnPtr<HashMap<TransitionKey, WeakPtr<Shape>>> m_forward_transitions;
+    OwnPtr<HashMap<Object*, WeakPtr<Shape>>> m_prototype_transitions;
     Shape* m_previous { nullptr };
     StringOrSymbol m_property_name;
     Object* m_prototype { nullptr };
-    size_t m_property_count { 0 };
+    u32 m_property_count { 0 };
+
+    PropertyAttributes m_attributes { 0 };
+    TransitionType m_transition_type : 6 { TransitionType::Invalid };
+    bool m_unique : 1 { false };
 };
 
 }

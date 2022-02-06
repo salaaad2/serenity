@@ -49,7 +49,7 @@ struct [[gnu::packed]] GUIDPartitionHeader {
 
 Result<NonnullOwnPtr<GUIDPartitionTable>, PartitionTable::Error> GUIDPartitionTable::try_to_initialize(const StorageDevice& device)
 {
-    auto table = make<GUIDPartitionTable>(device);
+    auto table = adopt_nonnull_own_or_enomem(new (nothrow) GUIDPartitionTable(device)).release_value_but_fixme_should_propagate_errors();
     if (!table->is_valid())
         return { PartitionTable::Error::Invalid };
     return table;
@@ -59,7 +59,7 @@ GUIDPartitionTable::GUIDPartitionTable(const StorageDevice& device)
     : MBRPartitionTable(device)
 {
     // FIXME: Handle OOM failure here.
-    m_cached_header = ByteBuffer::create_zeroed(m_device->block_size()).release_value();
+    m_cached_header = ByteBuffer::create_zeroed(m_device->block_size()).release_value_but_fixme_should_propagate_errors();
     VERIFY(partitions_count() == 0);
     if (!initialize())
         m_valid = false;
@@ -89,7 +89,7 @@ bool GUIDPartitionTable::initialize()
     }
 
     auto entries_buffer_result = ByteBuffer::create_zeroed(m_device->block_size());
-    if (!entries_buffer_result.has_value()) {
+    if (entries_buffer_result.is_error()) {
         dbgln("GUIPartitionTable: not enough memory for entries buffer");
         return false;
     }

@@ -41,7 +41,7 @@ Regex<Parser>::Regex(String pattern, typename ParserTraits<Parser>::OptionsType 
 
     run_optimization_passes();
     if (parser_result.error == regex::Error::NoError)
-        matcher = make<Matcher<Parser>>(this, regex_options);
+        matcher = make<Matcher<Parser>>(this, static_cast<decltype(regex_options.value())>(parser_result.options.value()));
 }
 
 template<class Parser>
@@ -51,7 +51,7 @@ Regex<Parser>::Regex(regex::Parser::Result parse_result, String pattern, typenam
 {
     run_optimization_passes();
     if (parser_result.error == regex::Error::NoError)
-        matcher = make<Matcher<Parser>>(this, regex_options);
+        matcher = make<Matcher<Parser>>(this, regex_options | static_cast<decltype(regex_options.value())>(parse_result.options.value()));
 }
 
 template<class Parser>
@@ -104,8 +104,10 @@ RegexResult Matcher<Parser>::match(RegexStringView view, Optional<typename Parse
 {
     AllOptions options = m_regex_options | regex_options.value_or({}).value();
 
-    if (options.has_flag_set(AllFlags::Multiline))
-        return match(view.lines(), regex_options); // FIXME: how do we know, which line ending a line has (1char or 2char)? This is needed to get the correct match offsets from start of string...
+    if constexpr (!IsSame<Parser, ECMA262>) {
+        if (options.has_flag_set(AllFlags::Multiline))
+            return match(view.lines(), regex_options); // FIXME: how do we know, which line ending a line has (1char or 2char)? This is needed to get the correct match offsets from start of string...
+    }
 
     Vector<RegexStringView> views;
     views.append(view);
@@ -178,8 +180,10 @@ RegexResult Matcher<Parser>::match(Vector<RegexStringView> const& views, Optiona
 #endif
 
     bool continue_search = input.regex_options.has_flag_set(AllFlags::Global) || input.regex_options.has_flag_set(AllFlags::Multiline);
-    if (input.regex_options.has_flag_set(AllFlags::Internal_Stateful))
+    if (input.regex_options.has_flag_set(AllFlags::Sticky))
         continue_search = false;
+
+    auto single_match_only = input.regex_options.has_flag_set(AllFlags::SingleMatch);
 
     for (auto const& view : views) {
         if (lines_to_skip != 0) {
@@ -212,19 +216,20 @@ RegexResult Matcher<Parser>::match(Vector<RegexStringView> const& views, Optiona
 
             auto success = execute(input, state, temp_operations);
             // This success is acceptable only if it doesn't read anything from the input (input length is 0).
-            if (state.string_position <= view_index) {
-                if (success.has_value() && success.value()) {
-                    operations = temp_operations;
-                    if (!match_count) {
-                        // Nothing was *actually* matched, so append an empty match.
-                        append_match(input, state, view_index);
-                        ++match_count;
-                    }
+            if (success && (state.string_position <= view_index)) {
+                operations = temp_operations;
+                if (!match_count) {
+                    // Nothing was *actually* matched, so append an empty match.
+                    append_match(input, state, view_index);
+                    ++match_count;
                 }
             }
         }
 
-        for (; view_index < view_length; ++view_index) {
+        for (; view_index <= view_length; ++view_index) {
+            if (view_index == view_length && input.regex_options.has_flag_set(AllFlags::Multiline))
+                break;
+
             auto& match_length_minimum = m_pattern->parser_result.match_length_minimum;
             // FIXME: More performant would be to know the remaining minimum string
             //        length needed to match from the current position onwards within
@@ -244,10 +249,7 @@ RegexResult Matcher<Parser>::match(Vector<RegexStringView> const& views, Optiona
             state.repetition_marks.clear();
 
             auto success = execute(input, state, operations);
-            if (!success.has_value())
-                return { false, 0, {}, {}, {}, operations };
-
-            if (success.value()) {
+            if (success) {
                 succeeded = true;
 
                 if (input.regex_options.has_flag_set(AllFlags::MatchNotEndOfLine) && state.string_position == input.view.length()) {
@@ -271,6 +273,8 @@ RegexResult Matcher<Parser>::match(Vector<RegexStringView> const& views, Optiona
 
                     bool has_zero_length = state.string_position == view_index;
                     view_index = state.string_position - (has_zero_length ? 0 : 1);
+                    if (single_match_only)
+                        break;
                     continue;
                 }
                 if (input.regex_options.has_flag_set(AllFlags::Internal_Stateful)) {
@@ -408,7 +412,7 @@ private:
 };
 
 template<class Parser>
-Optional<bool> Matcher<Parser>::execute(MatchInput const& input, MatchState& state, size_t& operations) const
+bool Matcher<Parser>::execute(MatchInput const& input, MatchState& state, size_t& operations) const
 {
     BumpAllocatedLinkedList<MatchState> states_to_try_next;
     size_t recursion_level = 0;
@@ -446,6 +450,8 @@ Optional<bool> Matcher<Parser>::execute(MatchInput const& input, MatchState& sta
                         (*it) = state;
                         it->instruction_position = state.fork_at_position;
                         it->initiating_fork = *input.fork_to_replace;
+                        it->capture_group_matches = state.capture_group_matches;
+                        it->matches = state.matches;
                         found = true;
                         break;
                     }
@@ -492,8 +498,6 @@ Optional<bool> Matcher<Parser>::execute(MatchInput const& input, MatchState& sta
             return false;
         case ExecutionResult::Failed_ExecuteLowPrioForks: {
             if (states_to_try_next.is_empty()) {
-                if (input.regex_options.has_flag_set(AllFlags::Internal_Stateful))
-                    return {};
                 return false;
             }
             state = states_to_try_next.take_last();

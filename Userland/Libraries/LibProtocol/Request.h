@@ -15,6 +15,7 @@
 #include <AK/String.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Notifier.h>
+#include <LibCore/Stream.h>
 #include <LibIPC/Forward.h>
 
 namespace Protocol {
@@ -38,6 +39,7 @@ public:
     bool stop();
 
     void stream_into(OutputStream&);
+    void stream_into(Core::Stream::Stream&);
 
     bool should_buffer_all_input() const { return m_should_buffer_all_input; }
     /// Note: Will override `on_finish', and `on_headers_received', and expects `on_buffered_request_finish' to be set!
@@ -60,6 +62,9 @@ public:
 
 private:
     explicit Request(RequestClient&, i32 request_id);
+    template<typename T>
+    void stream_into_impl(T&);
+
     WeakPtr<RequestClient> m_client;
     int m_request_id { -1 };
     RefPtr<Core::Notifier> m_write_notifier;
@@ -67,28 +72,24 @@ private:
     bool m_should_buffer_all_input { false };
 
     struct InternalBufferedData {
-        InternalBufferedData(int fd)
-            : read_stream(fd)
-        {
-        }
-
-        InputFileStream read_stream;
         DuplexMemoryStream payload_stream;
         HashMap<String, String, CaseInsensitiveStringTraits> response_headers;
         Optional<u32> response_code;
     };
 
     struct InternalStreamData {
-        InternalStreamData(int fd)
-            : read_stream(fd)
+        InternalStreamData(NonnullOwnPtr<Core::Stream::Stream> stream)
+            : read_stream(move(stream))
         {
         }
 
-        InputFileStream read_stream;
+        NonnullOwnPtr<Core::Stream::Stream> read_stream;
         RefPtr<Core::Notifier> read_notifier;
         bool success;
         u32 total_size { 0 };
         bool request_done { false };
+        Function<void()> on_finish {};
+        bool user_finish_called { false };
     };
 
     OwnPtr<InternalBufferedData> m_internal_buffered_data;

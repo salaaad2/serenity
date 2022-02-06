@@ -41,6 +41,32 @@ concept HashCompatible = IsHashCompatible<Detail::Decay<T>, Detail::Decay<U>>;
 
 // FIXME: remove once Clang formats these properly.
 // clang-format off
+
+// Any indexable, sized, contiguous data structure.
+template<typename ArrayT, typename ContainedT, typename SizeT = size_t>
+concept ArrayLike = requires(ArrayT array, SizeT index)
+{
+    {
+        array[index]
+    }
+    -> SameAs<RemoveReference<ContainedT>&>;
+
+    {
+        array.size()
+    }
+    -> SameAs<SizeT>;
+
+    {
+        array.span()
+    }
+    -> SameAs<Span<RemoveReference<ContainedT>>>;
+
+    {
+        array.data()
+    }
+    -> SameAs<RemoveReference<ContainedT>*>;
+};
+
 template<typename Func, typename... Args>
 concept VoidFunction = requires(Func func, Args... args)
 {
@@ -77,12 +103,14 @@ concept IterableContainer = requires
 }
 
 using AK::Concepts::Arithmetic;
+using AK::Concepts::ArrayLike;
 using AK::Concepts::Enum;
 using AK::Concepts::FloatingPoint;
 using AK::Concepts::Integral;
 using AK::Concepts::IterableContainer;
 using AK::Concepts::IteratorFunction;
 using AK::Concepts::IteratorPairWith;
+using AK::Concepts::SameAs;
 using AK::Concepts::Signed;
 using AK::Concepts::Unsigned;
 using AK::Concepts::VoidFunction;

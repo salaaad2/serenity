@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -86,6 +87,9 @@ public:
 
     [[nodiscard]] bool is_mmap() const { return m_mmap; }
     void set_mmap(bool mmap) { m_mmap = mmap; }
+
+    [[nodiscard]] bool is_write_combine() const { return m_write_combine; }
+    ErrorOr<void> set_write_combine(bool);
 
     [[nodiscard]] bool is_user() const { return !is_kernel(); }
     [[nodiscard]] bool is_kernel() const { return vaddr().get() < USER_RANGE_BASE || vaddr().get() >= kernel_mapping_base; }
@@ -220,6 +224,7 @@ private:
     bool m_stack : 1 { false };
     bool m_mmap : 1 { false };
     bool m_syscall_region : 1 { false };
+    bool m_write_combine : 1 { false };
 
     IntrusiveRedBlackTreeNode<FlatPtr, Region, RawPtr<Region>> m_tree_node;
     IntrusiveListNode<Region> m_vmobject_list_node;
@@ -230,7 +235,7 @@ public:
 
 AK_ENUM_BITWISE_OPERATORS(Region::Access)
 
-inline constexpr Region::Access prot_to_region_access_flags(int prot)
+constexpr Region::Access prot_to_region_access_flags(int prot)
 {
     Region::Access access = Region::Access::None;
     if ((prot & PROT_READ) == PROT_READ)
@@ -242,7 +247,7 @@ inline constexpr Region::Access prot_to_region_access_flags(int prot)
     return access;
 }
 
-inline constexpr int region_access_flags_to_prot(Region::Access access)
+constexpr int region_access_flags_to_prot(Region::Access access)
 {
     int prot = 0;
     if ((access & Region::Access::Read) == Region::Access::Read)

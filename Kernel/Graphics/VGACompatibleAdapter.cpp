@@ -40,8 +40,7 @@ UNMAP_AFTER_INIT VGACompatibleAdapter::VGACompatibleAdapter(PCI::Address address
     : PCI::Device(address)
 {
     m_framebuffer_console = Graphics::TextModeConsole::initialize(*this);
-    // FIXME: This is a very wrong way to do this...
-    GraphicsManagement::the().m_console = m_framebuffer_console;
+    GraphicsManagement::the().set_console(*m_framebuffer_console);
 }
 
 UNMAP_AFTER_INIT VGACompatibleAdapter::VGACompatibleAdapter(PCI::Address address, PhysicalAddress framebuffer_address, size_t framebuffer_width, size_t framebuffer_height, size_t framebuffer_pitch)
@@ -52,8 +51,7 @@ UNMAP_AFTER_INIT VGACompatibleAdapter::VGACompatibleAdapter(PCI::Address address
     , m_framebuffer_pitch(framebuffer_pitch)
 {
     m_framebuffer_console = Graphics::ContiguousFramebufferConsole::initialize(framebuffer_address, framebuffer_width, framebuffer_height, framebuffer_pitch);
-    // FIXME: This is a very wrong way to do this...
-    GraphicsManagement::the().m_console = m_framebuffer_console;
+    GraphicsManagement::the().set_console(*m_framebuffer_console);
 }
 
 void VGACompatibleAdapter::enable_consoles()
@@ -78,6 +76,11 @@ bool VGACompatibleAdapter::try_to_set_resolution(size_t, size_t, size_t)
 bool VGACompatibleAdapter::set_y_offset(size_t, size_t)
 {
     return false;
+}
+
+ErrorOr<ByteBuffer> VGACompatibleAdapter::get_edid(size_t) const
+{
+    return Error::from_errno(ENOTSUP);
 }
 
 }

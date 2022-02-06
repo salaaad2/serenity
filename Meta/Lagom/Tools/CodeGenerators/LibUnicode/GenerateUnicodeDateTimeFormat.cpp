@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Tim Flynn <trflynn89@pm.me>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -598,7 +598,7 @@ static Optional<Unicode::DayPeriod> day_period_from_string(StringView day_period
     if (day_period == "night2"sv)
         return Unicode::DayPeriod::Night2;
     return {};
-};
+}
 
 static ErrorOr<void> parse_hour_cycles(String core_path, UnicodeLocaleData& locale_data)
 {
@@ -643,7 +643,7 @@ static ErrorOr<void> parse_hour_cycles(String core_path, UnicodeLocaleData& loca
     });
 
     return {};
-};
+}
 
 static ErrorOr<void> parse_meta_zones(String core_path, UnicodeLocaleData& locale_data)
 {
@@ -675,7 +675,7 @@ static ErrorOr<void> parse_meta_zones(String core_path, UnicodeLocaleData& local
         locale_data.meta_zones.set("UTC"sv, { *time_zone });
 
     return {};
-};
+}
 
 static constexpr auto is_char(char ch)
 {
@@ -1576,7 +1576,7 @@ static ErrorOr<void> parse_day_periods(String core_path, UnicodeLocaleData& loca
     });
 
     return {};
-};
+}
 
 static ErrorOr<void> parse_all_locales(String core_path, String dates_path, UnicodeLocaleData& locale_data)
 {
@@ -1862,6 +1862,8 @@ struct DayPeriodData {
     u8 end { 0 };
 };
 )~~~");
+
+    generate_available_values(generator, "get_available_calendars"sv, locale_data.calendars, locale_data.calendar_aliases);
 
     locale_data.unique_formats.generate(generator, "CalendarFormatImpl"sv, "s_calendar_formats"sv, 10);
     locale_data.unique_symbol_lists.generate(generator, s_string_index_type, "s_symbol_lists"sv);

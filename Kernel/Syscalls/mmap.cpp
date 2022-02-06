@@ -7,6 +7,7 @@
 
 #include <Kernel/Arch/SmapDisabler.h>
 #include <Kernel/Arch/x86/MSR.h>
+#include <Kernel/Arch/x86/SafeMem.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -217,7 +218,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<const Syscall::SC_mmap_params*> use
             return EINVAL;
         if (static_cast<size_t>(offset) & ~PAGE_MASK)
             return EINVAL;
-        auto description = TRY(fds().open_file_description(fd));
+        auto description = TRY(open_file_description(fd));
         if (description->is_directory())
             return ENODEV;
         // Require read access even when read protection is not requested.
@@ -323,7 +324,7 @@ ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int p
         return 0;
     }
 
-    if (const auto& regions = address_space().find_regions_intersecting(range_to_mprotect); regions.size()) {
+    if (const auto& regions = TRY(address_space().find_regions_intersecting(range_to_mprotect)); regions.size()) {
         size_t full_size_found = 0;
         // Check that all intersecting regions are compatible.
         for (const auto* region : regions) {

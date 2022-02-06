@@ -29,11 +29,13 @@
 #include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
+#include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Thread.h>
 #include <Kernel/ThreadTracer.h>
+#include <Kernel/TimerQueue.h>
 #include <LibC/limits.h>
 
 namespace Kernel {
@@ -105,7 +107,7 @@ void Process::kill_threads_except_self()
     });
 
     u32 dropped_lock_count = 0;
-    if (big_lock().force_unlock_if_locked(dropped_lock_count) != LockMode::Unlocked)
+    if (big_lock().force_unlock_exclusive_if_locked(dropped_lock_count) != LockMode::Unlocked)
         dbgln("Process {} big lock had {} locks", *this, dropped_lock_count);
 }
 
@@ -139,17 +141,21 @@ ErrorOr<NonnullRefPtr<Process>> Process::try_create_user_process(RefPtr<Thread>&
     auto name = TRY(KString::try_create(parts.last()));
     auto process = TRY(Process::try_create(first_thread, move(name), uid, gid, ProcessID(0), false, VirtualFileSystem::the().root_custody(), nullptr, tty));
 
-    TRY(process->m_fds.try_resize(Process::OpenFileDescriptions::max_open()));
+    TRY(process->m_fds.with_exclusive([&](auto& fds) -> ErrorOr<void> {
+        TRY(fds.try_resize(Process::OpenFileDescriptions::max_open()));
 
-    auto& device_to_use_as_tty = tty ? (CharacterDevice&)*tty : DeviceManagement::the().null_device();
-    auto description = TRY(device_to_use_as_tty.open(O_RDWR));
-    auto setup_description = [&process, &description](int fd) {
-        process->m_fds.m_fds_metadatas[fd].allocate();
-        process->m_fds[fd].set(*description);
-    };
-    setup_description(0);
-    setup_description(1);
-    setup_description(2);
+        auto& device_to_use_as_tty = tty ? (CharacterDevice&)*tty : DeviceManagement::the().null_device();
+        auto description = TRY(device_to_use_as_tty.open(O_RDWR));
+        auto setup_description = [&](int fd) {
+            fds.m_fds_metadatas[fd].allocate();
+            fds[fd].set(*description);
+        };
+        setup_description(0);
+        setup_description(1);
+        setup_description(2);
+
+        return {};
+    }));
 
     Thread* new_main_thread = nullptr;
     u32 prev_flags = 0;
@@ -163,6 +169,11 @@ ErrorOr<NonnullRefPtr<Process>> Process::try_create_user_process(RefPtr<Thread>&
 
     // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
     process->ref();
+
+    {
+        SpinlockLocker lock(g_scheduler_lock);
+        new_main_thread->set_state(Thread::State::Runnable);
+    }
 
     return process;
 }
@@ -382,7 +393,6 @@ RefPtr<Process> Process::from_pid(ProcessID pid)
 
 const Process::OpenFileDescriptionAndFlags* Process::OpenFileDescriptions::get_if_valid(size_t i) const
 {
-    SpinlockLocker lock(m_fds_lock);
     if (m_fds_metadatas.size() <= i)
         return nullptr;
 
@@ -393,7 +403,6 @@ const Process::OpenFileDescriptionAndFlags* Process::OpenFileDescriptions::get_i
 }
 Process::OpenFileDescriptionAndFlags* Process::OpenFileDescriptions::get_if_valid(size_t i)
 {
-    SpinlockLocker lock(m_fds_lock);
     if (m_fds_metadatas.size() <= i)
         return nullptr;
 
@@ -405,20 +414,18 @@ Process::OpenFileDescriptionAndFlags* Process::OpenFileDescriptions::get_if_vali
 
 const Process::OpenFileDescriptionAndFlags& Process::OpenFileDescriptions::at(size_t i) const
 {
-    SpinlockLocker lock(m_fds_lock);
     VERIFY(m_fds_metadatas[i].is_allocated());
     return m_fds_metadatas[i];
 }
+
 Process::OpenFileDescriptionAndFlags& Process::OpenFileDescriptions::at(size_t i)
 {
-    SpinlockLocker lock(m_fds_lock);
     VERIFY(m_fds_metadatas[i].is_allocated());
     return m_fds_metadatas[i];
 }
 
 ErrorOr<NonnullRefPtr<OpenFileDescription>> Process::OpenFileDescriptions::open_file_description(int fd) const
 {
-    SpinlockLocker lock(m_fds_lock);
     if (fd < 0)
         return EBADF;
     if (static_cast<size_t>(fd) >= m_fds_metadatas.size())
@@ -431,7 +438,6 @@ ErrorOr<NonnullRefPtr<OpenFileDescription>> Process::OpenFileDescriptions::open_
 
 void Process::OpenFileDescriptions::enumerate(Function<void(const OpenFileDescriptionAndFlags&)> callback) const
 {
-    SpinlockLocker lock(m_fds_lock);
     for (auto const& file_description_metadata : m_fds_metadatas) {
         callback(file_description_metadata);
     }
@@ -439,7 +445,6 @@ void Process::OpenFileDescriptions::enumerate(Function<void(const OpenFileDescri
 
 void Process::OpenFileDescriptions::change_each(Function<void(OpenFileDescriptionAndFlags&)> callback)
 {
-    SpinlockLocker lock(m_fds_lock);
     for (auto& file_description_metadata : m_fds_metadatas) {
         callback(file_description_metadata);
     }
@@ -457,7 +462,6 @@ size_t Process::OpenFileDescriptions::open_count() const
 
 ErrorOr<Process::ScopedDescriptionAllocation> Process::OpenFileDescriptions::allocate(int first_candidate_fd)
 {
-    SpinlockLocker lock(m_fds_lock);
     for (size_t i = first_candidate_fd; i < max_open(); ++i) {
         if (!m_fds_metadatas[i].is_allocated()) {
             m_fds_metadatas[i].allocate();
@@ -587,7 +591,7 @@ void Process::finalize()
 
     if (m_alarm_timer)
         TimerQueue::the().cancel_timer(m_alarm_timer.release_nonnull());
-    m_fds.clear();
+    m_fds.with_exclusive([](auto& fds) { fds.clear(); });
     m_tty = nullptr;
     m_executable = nullptr;
     m_cwd = nullptr;
@@ -659,7 +663,9 @@ void Process::die()
 
     VERIFY(m_threads_for_coredump.is_empty());
     for_each_thread([&](auto& thread) {
-        m_threads_for_coredump.append(thread);
+        auto result = m_threads_for_coredump.try_append(thread);
+        if (result.is_error())
+            dbgln("Failed to add thread {} to coredump due to OOM", thread.tid());
     });
 
     all_instances().with([&](const auto& list) {

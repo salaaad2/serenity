@@ -61,7 +61,7 @@ void InProcessWebView::set_preferred_color_scheme(CSS::PreferredColorScheme colo
 void InProcessWebView::page_did_layout()
 {
     VERIFY(layout_root());
-    set_content_size(layout_root()->size().to_type<int>());
+    set_content_size(layout_root()->content_size().to_type<int>());
 }
 
 void InProcessWebView::page_did_change_title(const String& title)
@@ -177,13 +177,13 @@ void InProcessWebView::layout_and_sync_size()
     bool had_horizontal_scrollbar = horizontal_scrollbar().is_visible();
 
     page().top_level_browsing_context().set_size(available_size());
-    set_content_size(layout_root()->size().to_type<int>());
+    set_content_size(layout_root()->content_size().to_type<int>());
 
     // NOTE: If layout caused us to gain or lose scrollbars, we have to lay out again
     //       since the scrollbars now take up some of the available space.
     if (had_vertical_scrollbar != vertical_scrollbar().is_visible() || had_horizontal_scrollbar != horizontal_scrollbar().is_visible()) {
         page().top_level_browsing_context().set_size(available_size());
-        set_content_size(layout_root()->size().to_type<int>());
+        set_content_size(layout_root()->content_size().to_type<int>());
     }
 
     page().top_level_browsing_context().set_viewport_scroll_offset({ horizontal_scrollbar().value(), vertical_scrollbar().value() });
@@ -237,7 +237,7 @@ void InProcessWebView::mouseup_event(GUI::MouseEvent& event)
 
 void InProcessWebView::mousewheel_event(GUI::MouseEvent& event)
 {
-    page().handle_mousewheel(to_content_position(event.position()), event.button(), event.modifiers(), event.wheel_delta());
+    page().handle_mousewheel(to_content_position(event.position()), event.button(), event.modifiers(), event.wheel_delta_x(), event.wheel_delta_y());
     GUI::AbstractScrollableWidget::mousewheel_event(event);
 }
 

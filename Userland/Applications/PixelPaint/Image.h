@@ -14,7 +14,6 @@
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <AK/Result.h>
-#include <AK/Vector.h>
 #include <LibCore/File.h>
 #include <LibGUI/Command.h>
 #include <LibGUI/Forward.h>
@@ -70,8 +69,8 @@ public:
 
     void serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const;
     ErrorOr<void> write_to_file(String const& file_path) const;
-    ErrorOr<void> export_bmp_to_fd_and_close(int fd, bool preserve_alpha_channel);
-    ErrorOr<void> export_png_to_fd_and_close(int fd, bool preserve_alpha_channel);
+    ErrorOr<void> export_bmp_to_file(Core::File&, bool preserve_alpha_channel);
+    ErrorOr<void> export_png_to_file(Core::File&, bool preserve_alpha_channel);
 
     void move_layer_to_front(Layer&);
     void move_layer_to_back(Layer&);

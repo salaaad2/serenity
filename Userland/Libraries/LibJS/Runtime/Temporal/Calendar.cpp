@@ -70,9 +70,7 @@ ThrowCompletionOr<Calendar*> get_builtin_calendar(GlobalObject& global_object, S
         return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidCalendarIdentifier, identifier);
 
     // 2. Return ? Construct(%Temporal.Calendar%, « id »).
-    MarkedValueList arguments(vm.heap());
-    arguments.append(js_string(vm, identifier));
-    return static_cast<Calendar*>(TRY(construct(global_object, *global_object.temporal_calendar_constructor(), move(arguments))));
+    return static_cast<Calendar*>(TRY(construct(global_object, *global_object.temporal_calendar_constructor(), js_string(vm, identifier))));
 }
 
 // 12.1.4 GetISO8601Calendar ( ), https://tc39.es/proposal-temporal/#sec-temporal-getiso8601calendar
@@ -99,7 +97,7 @@ ThrowCompletionOr<Vector<String>> calendar_fields(GlobalObject& global_object, O
     // 3. If fields is not undefined, then
     if (fields) {
         // a. Set fieldsArray to ? Call(fields, calendar, « fieldsArray »).
-        fields_array = TRY(vm.call(*fields, &calendar, fields_array));
+        fields_array = TRY(call(global_object, *fields, &calendar, fields_array));
     }
 
     // 4. Return ? IterableToListOfType(fieldsArray, « String »).
@@ -451,11 +449,11 @@ ThrowCompletionOr<Object*> get_temporal_calendar_with_iso_default(GlobalObject& 
     if (is<ZonedDateTime>(item))
         return &static_cast<ZonedDateTime&>(item).calendar();
 
-    // 2. Let calendar be ? Get(item, "calendar").
-    auto calendar = TRY(item.get(vm.names.calendar));
+    // 2. Let calendarLike be ? Get(item, "calendar").
+    auto calendar_like = TRY(item.get(vm.names.calendar));
 
-    // 3. Return ? ToTemporalCalendarWithISODefault(calendar).
-    return to_temporal_calendar_with_iso_default(global_object, calendar);
+    // 3. Return ? ToTemporalCalendarWithISODefault(calendarLike).
+    return to_temporal_calendar_with_iso_default(global_object, calendar_like);
 }
 
 // 12.1.24 DateFromFields ( calendar, fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-datefromfields

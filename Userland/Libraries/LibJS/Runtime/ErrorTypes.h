@@ -29,6 +29,7 @@
     M(DescWriteNonWritable, "Cannot write to non-writable property '{}'")                                                               \
     M(DetachedArrayBuffer, "ArrayBuffer is detached")                                                                                   \
     M(DivisionByZero, "Division by zero")                                                                                               \
+    M(DynamicImportNotAllowed, "Dynamic Imports are not allowed")                                                                       \
     M(FinalizationRegistrySameTargetAndValue, "Target and held value must not be the same")                                             \
     M(GetCapabilitiesExecutorCalledMultipleTimes, "GetCapabilitiesExecutor was called multiple times")                                  \
     M(GlobalEnvironmentAlreadyHasBinding, "Global environment already has binding '{}'")                                                \
@@ -36,10 +37,13 @@
     M(InOperatorWithObject, "'in' operator must be used on an object")                                                                  \
     M(InstanceOfOperatorBadPrototype, "'prototype' property of {} is not an object")                                                    \
     M(IntlInvalidDateTimeFormatOption, "Option {} cannot be set when also providing {}")                                                \
+    M(IntlInvalidKey, "{} is not a valid key")                                                                                          \
     M(IntlInvalidLanguageTag, "{} is not a structurally valid language tag")                                                            \
     M(IntlInvalidTime, "Time value must be between -8.64E15 and 8.64E15")                                                               \
+    M(IntlInvalidUnit, "Unit {} is not a valid time unit")                                                                              \
     M(IntlStartTimeAfterEndTime, "Start time {} is after end time {}")                                                                  \
     M(IntlMinimumExceedsMaximum, "Minimum value {} is larger than maximum value {}")                                                    \
+    M(IntlNumberIsNaNOrInfinity, "Number must not be NaN or Infinity")                                                                  \
     M(IntlNumberIsNaNOrOutOfRange, "Value {} is NaN or is not between {} and {}")                                                       \
     M(IntlOptionUndefined, "Option {} must be defined when option {} is {}")                                                            \
     M(InvalidAssignToConst, "Invalid assignment to const variable")                                                                     \
@@ -50,6 +54,7 @@
     M(InvalidIndex, "Index must be a positive integer")                                                                                 \
     M(InvalidLeftHandAssignment, "Invalid left-hand side in assignment")                                                                \
     M(InvalidLength, "Invalid {} length")                                                                                               \
+    M(InvalidOrAmbiguousExportEntry, "Invalid or ambiguous export entry '{}'")                                                          \
     M(InvalidPrecision, "Precision must be an integer no less than 1, and no greater than 100")                                         \
     M(InvalidTimeValue, "Invalid time value")                                                                                           \
     M(InvalidRadix, "Radix must be an integer no less than 2, and no greater than 36")                                                  \
@@ -65,6 +70,9 @@
     M(JsonCircular, "Cannot stringify circular object")                                                                                 \
     M(JsonMalformed, "Malformed JSON string")                                                                                           \
     M(MissingRequiredProperty, "Required property {} is missing or undefined")                                                          \
+    M(ModuleNoEnvironment, "Cannot find module environment for imported binding")                                                       \
+    M(ModuleNotFound, "Cannot find/open module: '{}'")                                                                                  \
+    M(ModuleNotFoundNoReferencingScript, "Cannot resolve module {} without any active script or module")                                \
     M(NegativeExponent, "Exponent must be positive")                                                                                    \
     M(NonExtensibleDefine, "Cannot define property {} on non-extensible object")                                                        \
     M(NotAConstructor, "{} is not a constructor")                                                                                       \
@@ -224,6 +232,7 @@
     M(TemporalInvalidDurationString, "Invalid duration string '{}'")                                                                    \
     M(TemporalInvalidDurationStringFractionNotLast, "Invalid duration string '{}': fractional {} must not be proceeded by {}")          \
     M(TemporalInvalidEpochNanoseconds, "Invalid epoch nanoseconds value, must be in range -86400 * 10^17 to 86400 * 10^17")             \
+    M(TemporalInvalidExtendedYearNegativeZero, "Invalid extended year, must not be negative zero")                                      \
     M(TemporalInvalidInstantString, "Invalid instant string '{}'")                                                                      \
     M(TemporalInvalidISODate, "Invalid ISO date")                                                                                       \
     M(TemporalInvalidMonthCode, "Invalid month code")                                                                                   \
@@ -272,6 +281,7 @@
     M(UnknownIdentifier, "'{}' is not defined")                                                                                         \
     M(UnsupportedDeleteSuperProperty, "Can't delete a property on 'super'")                                                             \
     M(WrappedFunctionCallThrowCompletion, "Call of wrapped target function did not complete normally")                                  \
+    M(WrappedFunctionCopyNameAndLengthThrowCompletion, "Trying to copy target name and length did not complete normally")               \
     M(URIMalformed, "URI malformed") /* LibWeb bindings */                                                                              \
     M(NotAByteString, "Argument to {}() must be a byte string")                                                                         \
     M(BadArgCountOne, "{}() needs one argument")                                                                                        \

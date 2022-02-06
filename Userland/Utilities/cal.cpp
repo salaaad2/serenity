@@ -6,6 +6,7 @@
 
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
+#include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
 #include <string.h>
@@ -89,6 +90,10 @@ static void clean_buffers()
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
+    TRY(Core::System::pledge("stdio rpath"));
+    TRY(Core::System::unveil("/etc/timezone", "r"));
+    TRY(Core::System::unveil(nullptr, nullptr));
+
     int day = 0;
     int month = 0;
     int year = 0;

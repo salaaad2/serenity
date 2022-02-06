@@ -8,7 +8,6 @@
 
 #include <AK/Badge.h>
 #include <Kernel/Devices/CharacterDevice.h>
-#include <Kernel/Locking/Mutex.h>
 
 namespace Kernel {
 
@@ -26,8 +25,8 @@ public:
     virtual ErrorOr<NonnullRefPtr<OpenFileDescription>> open(int options) override;
     virtual ErrorOr<size_t> read(OpenFileDescription&, u64, UserOrKernelBuffer&, size_t) override { return 0; }
     virtual ErrorOr<size_t> write(OpenFileDescription&, u64, const UserOrKernelBuffer&, size_t) override { return 0; }
-    virtual bool can_read(const OpenFileDescription&, size_t) const override { return true; }
-    virtual bool can_write(const OpenFileDescription&, size_t) const override { return true; }
+    virtual bool can_read(const OpenFileDescription&, u64) const override { return true; }
+    virtual bool can_write(const OpenFileDescription&, u64) const override { return true; }
 
     void notify_master_destroyed(Badge<MasterPTY>, unsigned index);
 
@@ -36,7 +35,7 @@ private:
     virtual StringView class_name() const override { return "PTYMultiplexer"sv; }
 
     static constexpr size_t max_pty_pairs = 64;
-    MutexProtected<Vector<unsigned, max_pty_pairs>> m_freelist;
+    SpinlockProtected<Vector<unsigned, max_pty_pairs>> m_freelist;
 };
 
 }

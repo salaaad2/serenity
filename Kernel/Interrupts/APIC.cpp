@@ -20,6 +20,7 @@
 #include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/TypedMapping.h>
 #include <Kernel/Panic.h>
+#include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Thread.h>
 #include <Kernel/Time/APICTimer.h>
@@ -366,7 +367,7 @@ UNMAP_AFTER_INIT void APIC::setup_ap_boot_environment()
     // Allocate Processor structures for all APs and store the pointer to the data
     m_ap_processor_info.resize(aps_to_enable);
     for (size_t i = 0; i < aps_to_enable; i++)
-        m_ap_processor_info[i] = make<Processor>();
+        m_ap_processor_info[i] = adopt_nonnull_own_or_enomem(new (nothrow) Processor()).release_value_but_fixme_should_propagate_errors();
     auto* ap_processor_info_array = &ap_stack_array[aps_to_enable];
     for (size_t i = 0; i < aps_to_enable; i++) {
         ap_processor_info_array[i] = FlatPtr(m_ap_processor_info[i].ptr());

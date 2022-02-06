@@ -15,7 +15,6 @@
 #include <LibGUI/FocusSource.h>
 #include <LibGUI/Forward.h>
 #include <LibGUI/WindowType.h>
-#include <LibGfx/Color.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Rect.h>
 #include <LibGfx/StandardCursor.h>
@@ -75,9 +74,6 @@ public:
 
     String title() const;
     void set_title(String);
-
-    Color background_color() const { return m_background_color; }
-    void set_background_color(Color color) { m_background_color = color; }
 
     enum class CloseRequestDecision {
         StayOpen,
@@ -151,6 +147,10 @@ public:
         return *widget;
     }
 
+    Widget* default_return_key_widget() { return m_default_return_key_widget; }
+    Widget const* default_return_key_widget() const { return m_default_return_key_widget; }
+    void set_default_return_key_widget(Widget*);
+
     Widget* focused_widget() { return m_focused_widget; }
     const Widget* focused_widget() const { return m_focused_widget; }
     void set_focused_widget(Widget*, FocusSource = FocusSource::Programmatic);
@@ -215,6 +215,9 @@ public:
 
     void flush_pending_paints_immediately();
 
+    Menubar& menubar() { return *m_menubar; }
+    Menubar const& menubar() const { return *m_menubar; }
+
 protected:
     Window(Core::Object* parent = nullptr);
     virtual void wm_event(WMEvent&);
@@ -265,6 +268,7 @@ private:
     float m_opacity_when_windowless { 1.0f };
     float m_alpha_hit_threshold { 0.0f };
     RefPtr<Widget> m_main_widget;
+    WeakPtr<Widget> m_default_return_key_widget;
     WeakPtr<Widget> m_focused_widget;
     WeakPtr<Widget> m_automatic_cursor_tracking_widget;
     WeakPtr<Widget> m_hovered_widget;
@@ -275,7 +279,6 @@ private:
     Vector<Gfx::IntRect, 32> m_pending_paint_event_rects;
     Gfx::IntSize m_size_increment;
     Gfx::IntSize m_base_size;
-    Color m_background_color { Color::WarmGray };
     WindowType m_window_type { WindowType::Normal };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_cursor { Gfx::StandardCursor::None };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_effective_cursor { Gfx::StandardCursor::None };

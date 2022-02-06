@@ -115,13 +115,6 @@ InitialContainingBlock& Node::root()
     return *document().layout_node();
 }
 
-void Node::split_into_lines(InlineFormattingContext& context, LayoutMode layout_mode)
-{
-    for_each_child([&](auto& child) {
-        child.split_into_lines(context, layout_mode);
-    });
-}
-
 void Node::set_needs_display()
 {
     if (auto* block = containing_block()) {
@@ -411,6 +404,10 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
     if (text_decoration_line.has_value())
         computed_values.set_text_decoration_line(text_decoration_line.value());
 
+    auto text_decoration_style = specified_style.text_decoration_style();
+    if (text_decoration_style.has_value())
+        computed_values.set_text_decoration_style(text_decoration_style.value());
+
     auto text_transform = specified_style.text_transform();
     if (text_transform.has_value())
         computed_values.set_text_transform(text_transform.value());
@@ -494,13 +491,13 @@ void Node::handle_mousemove(Badge<EventHandler>, const Gfx::IntPoint&, unsigned,
 {
 }
 
-bool Node::handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned, int wheel_delta)
+bool Node::handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned, int wheel_delta_x, int wheel_delta_y)
 {
     if (auto* containing_block = this->containing_block()) {
         if (!containing_block->is_scrollable())
             return false;
         auto new_offset = containing_block->scroll_offset();
-        new_offset.translate_by(0, wheel_delta);
+        new_offset.translate_by(wheel_delta_x, wheel_delta_y);
         containing_block->set_scroll_offset(new_offset);
         return true;
     }

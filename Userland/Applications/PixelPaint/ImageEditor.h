@@ -114,6 +114,8 @@ public:
     bool show_active_layer_boundary() const { return m_show_active_layer_boundary; }
     void set_show_active_layer_boundary(bool);
 
+    void set_loaded_from_image(bool);
+
 private:
     explicit ImageEditor(NonnullRefPtr<Image>);
 
@@ -135,7 +137,7 @@ private:
     GUI::MouseEvent event_adjusted_for_layer(GUI::MouseEvent const&, Layer const&) const;
     GUI::MouseEvent event_with_pan_and_scale_applied(GUI::MouseEvent const&) const;
 
-    Result<void, String> save_project_to_fd_and_close(int fd) const;
+    Result<void, String> save_project_to_file(Core::File&) const;
 
     int calculate_ruler_step_size() const;
     Gfx::IntRect mouse_indicator_rect_x() const;
@@ -170,6 +172,8 @@ private:
     Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_active_cursor { Gfx::StandardCursor::None };
 
     Selection m_selection;
+
+    bool m_loaded_from_image { true };
 };
 
 }

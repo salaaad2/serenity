@@ -281,7 +281,7 @@ JS_DEFINE_NATIVE_FUNCTION(NumberPrototype::to_fixed)
     return js_string(vm, String::formatted("{:0.{1}}", number, static_cast<size_t>(fraction_digits)));
 }
 
-// 18.2.1 Number.prototype.toLocaleString ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sup-number.prototype.tolocalestring
+// 19.2.1 Number.prototype.toLocaleString ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sup-number.prototype.tolocalestring
 JS_DEFINE_NATIVE_FUNCTION(NumberPrototype::to_locale_string)
 {
     auto locales = vm.argument(0);
@@ -290,17 +290,12 @@ JS_DEFINE_NATIVE_FUNCTION(NumberPrototype::to_locale_string)
     // 1. Let x be ? thisNumberValue(this value).
     auto number_value = TRY(this_number_value(global_object, vm.this_value(global_object)));
 
-    MarkedValueList arguments { vm.heap() };
-    arguments.append(locales);
-    arguments.append(options);
-
     // 2. Let numberFormat be ? Construct(%NumberFormat%, « locales, options »).
-    auto* number_format = static_cast<Intl::NumberFormat*>(TRY(construct(global_object, *global_object.intl_number_format_constructor(), move(arguments))));
+    auto* number_format = static_cast<Intl::NumberFormat*>(TRY(construct(global_object, *global_object.intl_number_format_constructor(), locales, options)));
 
     // 3. Return ? FormatNumeric(numberFormat, x).
     // Note: Our implementation of FormatNumeric does not throw.
-    auto formatted = Intl::format_numeric(*number_format, number_value.as_double());
-
+    auto formatted = Intl::format_numeric(global_object, *number_format, number_value);
     return js_string(vm, move(formatted));
 }
 

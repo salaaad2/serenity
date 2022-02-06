@@ -43,15 +43,17 @@ static constexpr size_t TEXTURE_MATRIX_STACK_LIMIT = 8;
             return;                                                  \
     }
 
-#define RETURN_WITH_ERROR_IF(condition, error) \
-    if (condition) {                           \
-        if (m_error == GL_NO_ERROR)            \
-            m_error = error;                   \
-        return;                                \
+#define RETURN_WITH_ERROR_IF(condition, error)                    \
+    if (condition) {                                              \
+        dbgln_if(GL_DEBUG, "{}(): error {:#x}", __func__, error); \
+        if (m_error == GL_NO_ERROR)                               \
+            m_error = error;                                      \
+        return;                                                   \
     }
 
 #define RETURN_VALUE_WITH_ERROR_IF(condition, error, return_value) \
     if (condition) {                                               \
+        dbgln_if(GL_DEBUG, "{}(): error {:#x}", __func__, error);  \
         if (m_error == GL_NO_ERROR)                                \
             m_error = error;                                       \
         return return_value;                                       \
@@ -168,6 +170,8 @@ Optional<ContextParameter> SoftwareGLContext::get_context_parameter(GLenum name)
         return ContextParameter { .type = GL_INT, .value = { .integer_value = 0 } };
     case GL_PACK_SWAP_BYTES:
         return ContextParameter { .type = GL_BOOL, .value = { .boolean_value = false } };
+    case GL_POLYGON_OFFSET_FILL:
+        return ContextParameter { .type = GL_BOOL, .is_capability = true, .value = { .boolean_value = m_depth_offset_enabled } };
     case GL_RED_BITS:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = sizeof(float) * 8 } };
     case GL_SCISSOR_BOX: {
@@ -723,6 +727,11 @@ void SoftwareGLContext::gl_enable(GLenum capability)
         rasterizer_options.normalization_enabled = true;
         update_rasterizer_options = true;
         break;
+    case GL_POLYGON_OFFSET_FILL:
+        m_depth_offset_enabled = true;
+        rasterizer_options.depth_offset_enabled = true;
+        update_rasterizer_options = true;
+        break;
     case GL_SCISSOR_TEST:
         rasterizer_options.scissor_enabled = true;
         update_rasterizer_options = true;
@@ -834,6 +843,11 @@ void SoftwareGLContext::gl_disable(GLenum capability)
     case GL_NORMALIZE:
         m_normalize = false;
         rasterizer_options.normalization_enabled = false;
+        update_rasterizer_options = true;
+        break;
+    case GL_POLYGON_OFFSET_FILL:
+        m_depth_offset_enabled = false;
+        rasterizer_options.depth_offset_enabled = false;
         update_rasterizer_options = true;
         break;
     case GL_SCISSOR_TEST:
@@ -1927,12 +1941,15 @@ void SoftwareGLContext::get_floating_point(GLenum pname, T* params)
 {
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    // Handle special matrix cases first
-    auto flatten_and_assign_matrix = [&params](const FloatMatrix4x4& matrix) {
+    // Handle matrix retrieval first
+    auto flatten_and_assign_matrix = [&params](FloatMatrix4x4 const& matrix) {
         auto elements = matrix.elements();
-        for (size_t i = 0; i < 4; ++i)
-            for (size_t j = 0; j < 4; ++j)
-                params[i * 4 + j] = static_cast<T>(elements[i][j]);
+        for (size_t i = 0; i < 4; ++i) {
+            for (size_t j = 0; j < 4; ++j) {
+                // Return transposed matrix since OpenGL defines them as column-major
+                params[i * 4 + j] = static_cast<T>(elements[j][i]);
+            }
+        }
     };
     switch (pname) {
     case GL_MODELVIEW_MATRIX:
@@ -1963,14 +1980,12 @@ void SoftwareGLContext::get_floating_point(GLenum pname, T* params)
         *params = parameter.value.boolean_value ? GL_TRUE : GL_FALSE;
         break;
     case GL_DOUBLE:
-        for (size_t i = 0; i < parameter.count; ++i) {
+        for (size_t i = 0; i < parameter.count; ++i)
             params[i] = parameter.value.double_list[i];
-        }
         break;
     case GL_INT:
-        for (size_t i = 0; i < parameter.count; ++i) {
+        for (size_t i = 0; i < parameter.count; ++i)
             params[i] = parameter.value.integer_list[i];
-        }
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -1998,9 +2013,8 @@ void SoftwareGLContext::gl_get_integerv(GLenum pname, GLint* data)
         break;
     }
     case GL_INT:
-        for (size_t i = 0; i < parameter.count; ++i) {
+        for (size_t i = 0; i < parameter.count; ++i)
             data[i] = parameter.value.integer_list[i];
-        }
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -2536,18 +2550,25 @@ void SoftwareGLContext::gl_polygon_mode(GLenum face, GLenum mode)
     auto options = m_rasterizer.options();
 
     // FIXME: This must support different polygon modes for front- and backside
-    switch (mode) {
-    case GL_POINT:
-        options.polygon_mode = SoftGPU::PolygonMode::Point;
-        break;
-    case GL_LINE:
-        options.polygon_mode = SoftGPU::PolygonMode::Line;
-        break;
-    case GL_FILL:
-        options.polygon_mode = SoftGPU::PolygonMode::Fill;
-        break;
+    if (face == GL_BACK) {
+        dbgln_if(GL_DEBUG, "gl_polygon_mode(GL_BACK, {:#x}): unimplemented", mode);
+        return;
     }
 
+    auto map_mode = [](GLenum mode) -> SoftGPU::PolygonMode {
+        switch (mode) {
+        case GL_FILL:
+            return SoftGPU::PolygonMode::Fill;
+        case GL_LINE:
+            return SoftGPU::PolygonMode::Line;
+        case GL_POINT:
+            return SoftGPU::PolygonMode::Point;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    };
+
+    options.polygon_mode = map_mode(mode);
     m_rasterizer.set_options(options);
 }
 
@@ -3133,40 +3154,12 @@ void SoftwareGLContext::sync_light_state()
     m_rasterizer.set_options(options);
 
     for (auto light_id = 0u; light_id < SoftGPU::NUM_LIGHTS; light_id++) {
-        SoftGPU::Light light;
         auto const& current_light_state = m_light_states.at(light_id);
-
-        light.is_enabled = current_light_state.is_enabled;
-        light.ambient_intensity = current_light_state.ambient_intensity;
-        light.diffuse_intensity = current_light_state.diffuse_intensity;
-        light.specular_intensity = current_light_state.specular_intensity;
-        light.position = current_light_state.position;
-        light.spotlight_direction = current_light_state.spotlight_direction;
-        light.spotlight_exponent = current_light_state.spotlight_exponent;
-        light.spotlight_cutoff_angle = current_light_state.spotlight_cutoff_angle;
-        light.constant_attenuation = current_light_state.constant_attenuation;
-        light.linear_attenuation = current_light_state.linear_attenuation;
-        light.quadratic_attenuation = current_light_state.quadratic_attenuation;
-
-        m_rasterizer.set_light_state(light_id, light);
+        m_rasterizer.set_light_state(light_id, current_light_state);
     }
 
-    auto update_material_state = [&](SoftGPU::Face face, SoftGPU::Material const& current_material_state) {
-        SoftGPU::Material material;
-
-        material.ambient = current_material_state.ambient;
-        material.diffuse = current_material_state.diffuse;
-        material.specular = current_material_state.specular;
-        material.emissive = current_material_state.emissive;
-        material.shininess = current_material_state.shininess;
-        material.ambient_color_index = current_material_state.ambient_color_index;
-        material.diffuse_color_index = current_material_state.diffuse_color_index;
-        material.specular_color_index = current_material_state.specular_color_index;
-
-        m_rasterizer.set_material_state(face, material);
-    };
-    update_material_state(SoftGPU::Face::Front, m_material_states[Face::Front]);
-    update_material_state(SoftGPU::Face::Back, m_material_states[Face::Back]);
+    m_rasterizer.set_material_state(SoftGPU::Face::Front, m_material_states[Face::Front]);
+    m_rasterizer.set_material_state(SoftGPU::Face::Back, m_material_states[Face::Back]);
 }
 
 void SoftwareGLContext::sync_device_texcoord_config()
@@ -3401,6 +3394,61 @@ void SoftwareGLContext::gl_lightfv(GLenum light, GLenum pname, GLfloat const* pa
     m_light_state_is_dirty = true;
 }
 
+void SoftwareGLContext::gl_lightiv(GLenum light, GLenum pname, GLint const* params)
+{
+    APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_lightiv, light, pname, params);
+    RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
+    RETURN_WITH_ERROR_IF(light < GL_LIGHT0 || light >= (GL_LIGHT0 + m_device_info.num_lights), GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(!(pname == GL_AMBIENT || pname == GL_DIFFUSE || pname == GL_SPECULAR || pname == GL_POSITION || pname == GL_CONSTANT_ATTENUATION || pname == GL_LINEAR_ATTENUATION || pname == GL_QUADRATIC_ATTENUATION || pname == GL_SPOT_CUTOFF || pname == GL_SPOT_EXPONENT || pname == GL_SPOT_DIRECTION), GL_INVALID_ENUM);
+
+    auto& light_state = m_light_states[light - GL_LIGHT0];
+
+    auto const to_float_vector = [](GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
+        return FloatVector4(x, y, z, w);
+    };
+
+    switch (pname) {
+    case GL_AMBIENT:
+        light_state.ambient_intensity = to_float_vector(params[0], params[1], params[2], params[3]);
+        break;
+    case GL_DIFFUSE:
+        light_state.diffuse_intensity = to_float_vector(params[0], params[1], params[2], params[3]);
+        break;
+    case GL_SPECULAR:
+        light_state.specular_intensity = to_float_vector(params[0], params[1], params[2], params[3]);
+        break;
+    case GL_POSITION:
+        light_state.position = to_float_vector(params[0], params[1], params[2], params[3]);
+        light_state.position = m_model_view_matrix * light_state.position;
+        break;
+    case GL_CONSTANT_ATTENUATION:
+        light_state.constant_attenuation = static_cast<float>(params[0]);
+        break;
+    case GL_LINEAR_ATTENUATION:
+        light_state.linear_attenuation = static_cast<float>(params[0]);
+        break;
+    case GL_QUADRATIC_ATTENUATION:
+        light_state.quadratic_attenuation = static_cast<float>(params[0]);
+        break;
+    case GL_SPOT_EXPONENT:
+        light_state.spotlight_exponent = static_cast<float>(params[0]);
+        break;
+    case GL_SPOT_CUTOFF:
+        light_state.spotlight_cutoff_angle = static_cast<float>(params[0]);
+        break;
+    case GL_SPOT_DIRECTION: {
+        FloatVector4 direction_vector = to_float_vector(params[0], params[1], params[2], 0.0f);
+        direction_vector = m_model_view_matrix * direction_vector;
+        light_state.spotlight_direction = direction_vector.xyz();
+        break;
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+
+    m_light_state_is_dirty = true;
+}
+
 void SoftwareGLContext::gl_materialf(GLenum face, GLenum pname, GLfloat param)
 {
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_materialf, face, pname, param);
@@ -3473,6 +3521,53 @@ void SoftwareGLContext::gl_materialfv(GLenum face, GLenum pname, GLfloat const* 
     m_light_state_is_dirty = true;
 }
 
+void SoftwareGLContext::gl_materialiv(GLenum face, GLenum pname, GLint const* params)
+{
+    APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_materialiv, face, pname, params);
+    RETURN_WITH_ERROR_IF(!(face == GL_FRONT || face == GL_BACK || face == GL_FRONT_AND_BACK), GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(!(pname == GL_AMBIENT || pname == GL_DIFFUSE || pname == GL_SPECULAR || pname == GL_EMISSION || pname == GL_SHININESS || pname == GL_AMBIENT_AND_DIFFUSE), GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF((pname == GL_SHININESS && *params > 128), GL_INVALID_VALUE);
+
+    auto update_material = [](SoftGPU::Material& material, GLenum pname, GLint const* params) {
+        switch (pname) {
+        case GL_AMBIENT:
+            material.ambient = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            break;
+        case GL_DIFFUSE:
+            material.diffuse = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            break;
+        case GL_SPECULAR:
+            material.specular = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            break;
+        case GL_EMISSION:
+            material.emissive = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            break;
+        case GL_SHININESS:
+            material.shininess = static_cast<float>(params[0]);
+            break;
+        case GL_AMBIENT_AND_DIFFUSE:
+            material.ambient = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            material.diffuse = { static_cast<float>(params[0]), static_cast<float>(params[1]), static_cast<float>(params[2]), static_cast<float>(params[3]) };
+            break;
+        }
+    };
+
+    switch (face) {
+    case GL_FRONT:
+        update_material(m_material_states[Face::Front], pname, params);
+        break;
+    case GL_BACK:
+        update_material(m_material_states[Face::Back], pname, params);
+        break;
+    case GL_FRONT_AND_BACK:
+        update_material(m_material_states[Face::Front], pname, params);
+        update_material(m_material_states[Face::Back], pname, params);
+        break;
+    }
+
+    m_light_state_is_dirty = true;
+}
+
 void SoftwareGLContext::gl_color_material(GLenum face, GLenum mode)
 {
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_color_material, face, mode);
@@ -3493,6 +3588,127 @@ void SoftwareGLContext::gl_color_material(GLenum face, GLenum mode)
     m_color_material_mode = mode;
 
     m_light_state_is_dirty = true;
+}
+
+void SoftwareGLContext::gl_get_light(GLenum light, GLenum pname, void* params, GLenum type)
+{
+    APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_get_light, light, pname, params, type);
+    RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
+    RETURN_WITH_ERROR_IF(light < GL_LIGHT0 || light > GL_LIGHT0 + m_device_info.num_lights, GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(!(pname == GL_AMBIENT || pname == GL_DIFFUSE || pname == GL_SPECULAR || pname == GL_SPOT_DIRECTION || pname == GL_SPOT_EXPONENT || pname == GL_SPOT_CUTOFF || pname == GL_CONSTANT_ATTENUATION || pname == GL_LINEAR_ATTENUATION || pname == GL_QUADRATIC_ATTENUATION), GL_INVALID_ENUM);
+
+    if (type == GL_FLOAT)
+        get_light_param<GLfloat>(light, pname, static_cast<GLfloat*>(params));
+    else if (type == GL_INT)
+        get_light_param<GLint>(light, pname, static_cast<GLint*>(params));
+    else
+        VERIFY_NOT_REACHED();
+}
+
+template<typename T>
+void SoftwareGLContext::get_light_param(GLenum light, GLenum pname, T* params)
+{
+    auto const& light_state = m_light_states[light - GL_LIGHT0];
+    switch (pname) {
+    case GL_AMBIENT:
+        params[0] = light_state.ambient_intensity.x();
+        params[1] = light_state.ambient_intensity.y();
+        params[2] = light_state.ambient_intensity.z();
+        params[3] = light_state.ambient_intensity.w();
+        break;
+    case GL_DIFFUSE:
+        params[0] = light_state.diffuse_intensity.x();
+        params[1] = light_state.diffuse_intensity.y();
+        params[2] = light_state.diffuse_intensity.z();
+        params[3] = light_state.diffuse_intensity.w();
+        break;
+    case GL_SPECULAR:
+        params[0] = light_state.specular_intensity.x();
+        params[1] = light_state.specular_intensity.y();
+        params[2] = light_state.specular_intensity.z();
+        params[3] = light_state.specular_intensity.w();
+        break;
+    case GL_SPOT_DIRECTION:
+        params[0] = light_state.spotlight_direction.x();
+        params[1] = light_state.spotlight_direction.y();
+        params[2] = light_state.spotlight_direction.z();
+        break;
+    case GL_SPOT_EXPONENT:
+        *params = light_state.spotlight_exponent;
+        break;
+    case GL_SPOT_CUTOFF:
+        *params = light_state.spotlight_cutoff_angle;
+        break;
+    case GL_CONSTANT_ATTENUATION:
+        *params = light_state.constant_attenuation;
+        break;
+    case GL_LINEAR_ATTENUATION:
+        *params = light_state.linear_attenuation;
+        break;
+    case GL_QUADRATIC_ATTENUATION:
+        *params = light_state.quadratic_attenuation;
+        break;
+    }
+}
+
+void SoftwareGLContext::gl_get_material(GLenum face, GLenum pname, void* params, GLenum type)
+{
+    APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_get_material, face, pname, params, type);
+    RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
+    RETURN_WITH_ERROR_IF(!(pname == GL_AMBIENT || pname == GL_DIFFUSE || pname == GL_SPECULAR || pname == GL_EMISSION), GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(!(face == GL_FRONT || face == GL_BACK), GL_INVALID_ENUM);
+
+    Face material_face = Front;
+    switch (face) {
+    case GL_FRONT:
+        material_face = Front;
+        break;
+    case GL_BACK:
+        material_face = Back;
+        break;
+    }
+
+    if (type == GL_FLOAT)
+        get_material_param<GLfloat>(material_face, pname, static_cast<GLfloat*>(params));
+    else if (type == GL_INT)
+        get_material_param<GLint>(material_face, pname, static_cast<GLint*>(params));
+    else
+        VERIFY_NOT_REACHED();
+}
+
+template<typename T>
+void SoftwareGLContext::get_material_param(Face face, GLenum pname, T* params)
+{
+    auto const& material = m_material_states[face];
+    switch (pname) {
+    case GL_AMBIENT:
+        params[0] = static_cast<T>(material.ambient.x());
+        params[1] = static_cast<T>(material.ambient.y());
+        params[2] = static_cast<T>(material.ambient.z());
+        params[3] = static_cast<T>(material.ambient.w());
+        break;
+    case GL_DIFFUSE:
+        params[0] = static_cast<T>(material.diffuse.x());
+        params[1] = static_cast<T>(material.diffuse.y());
+        params[2] = static_cast<T>(material.diffuse.z());
+        params[3] = static_cast<T>(material.diffuse.w());
+        break;
+    case GL_SPECULAR:
+        params[0] = static_cast<T>(material.specular.x());
+        params[1] = static_cast<T>(material.specular.y());
+        params[2] = static_cast<T>(material.specular.z());
+        params[3] = static_cast<T>(material.specular.w());
+        break;
+    case GL_EMISSION:
+        params[0] = static_cast<T>(material.emissive.x());
+        params[1] = static_cast<T>(material.emissive.y());
+        params[2] = static_cast<T>(material.emissive.z());
+        params[3] = static_cast<T>(material.emissive.w());
+        break;
+    case GL_SHININESS:
+        *params = material.shininess;
+        break;
+    }
 }
 
 }

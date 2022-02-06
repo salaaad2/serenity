@@ -51,9 +51,10 @@ public:
     static constexpr FlatPtr block_mask = ~(block_size - 1);
 
     KmallocSlabBlock(size_t slab_size)
+        : m_slab_size(slab_size)
+        , m_slab_count((block_size - sizeof(KmallocSlabBlock)) / slab_size)
     {
-        size_t slab_count = (block_size - sizeof(KmallocSlabBlock)) / slab_size;
-        for (size_t i = 0; i < slab_count; ++i) {
+        for (size_t i = 0; i < m_slab_count; ++i) {
             auto* freelist_entry = (FreelistEntry*)(void*)(&m_data[i * slab_size]);
             freelist_entry->next = m_freelist;
             m_freelist = freelist_entry;
@@ -63,12 +64,14 @@ public:
     void* allocate()
     {
         VERIFY(m_freelist);
+        ++m_allocated_slabs;
         return exchange(m_freelist, m_freelist->next);
     }
 
     void deallocate(void* ptr)
     {
         VERIFY(ptr >= &m_data && ptr < ((u8*)this + block_size));
+        --m_allocated_slabs;
         auto* freelist_entry = (FreelistEntry*)ptr;
         freelist_entry->next = m_freelist;
         m_freelist = freelist_entry;
@@ -77,6 +80,16 @@ public:
     bool is_full() const
     {
         return m_freelist == nullptr;
+    }
+
+    size_t allocated_bytes() const
+    {
+        return m_allocated_slabs * m_slab_size;
+    }
+
+    size_t free_bytes() const
+    {
+        return (m_slab_count - m_allocated_slabs) * m_slab_size;
     }
 
     IntrusiveListNode<KmallocSlabBlock> list_node;
@@ -88,6 +101,10 @@ private:
     };
 
     FreelistEntry* m_freelist { nullptr };
+
+    size_t m_slab_size { 0 };
+    size_t m_slab_count { 0 };
+    size_t m_allocated_slabs { 0 };
 
     [[gnu::aligned(16)]] u8 m_data[];
 };
@@ -134,6 +151,22 @@ public:
             m_usable_blocks.append(*block);
     }
 
+    size_t allocated_bytes() const
+    {
+        size_t total = m_full_blocks.size_slow() * KmallocSlabBlock::block_size;
+        for (auto const& slab_block : m_usable_blocks)
+            total += slab_block.allocated_bytes();
+        return total;
+    }
+
+    size_t free_bytes() const
+    {
+        size_t total = 0;
+        for (auto const& slab_block : m_usable_blocks)
+            total += slab_block.free_bytes();
+        return total;
+    }
+
 private:
     size_t m_slab_size { 0 };
 
@@ -151,7 +184,7 @@ struct KmallocGlobalData {
 
     void add_subheap(u8* storage, size_t storage_size)
     {
-        dbgln("Adding kmalloc subheap @ {} with size {}", storage, storage_size);
+        dbgln_if(KMALLOC_DEBUG, "Adding kmalloc subheap @ {} with size {}", storage, storage_size);
         static_assert(sizeof(KmallocSubheap) <= PAGE_SIZE);
         auto* subheap = new (storage) KmallocSubheap(storage + PAGE_SIZE, storage_size - PAGE_SIZE);
         subheaps.append(*subheap);
@@ -203,6 +236,8 @@ struct KmallocGlobalData {
         size_t total = 0;
         for (auto const& subheap : subheaps)
             total += subheap.allocator.allocated_bytes();
+        for (auto const& slabheap : slabheaps)
+            total += slabheap.allocated_bytes();
         return total;
     }
 
@@ -211,6 +246,8 @@ struct KmallocGlobalData {
         size_t total = 0;
         for (auto const& subheap : subheaps)
             total += subheap.allocator.free_bytes();
+        for (auto const& slabheap : slabheaps)
+            total += slabheap.free_bytes();
         return total;
     }
 
@@ -232,7 +269,7 @@ struct KmallocGlobalData {
         }
         size_t new_subheap_size = max(minimum_subheap_size, rounded_allocation_request.value());
 
-        dbgln("Unable to allocate {}, expanding kmalloc heap", allocation_request);
+        dbgln_if(KMALLOC_DEBUG, "Unable to allocate {}, expanding kmalloc heap", allocation_request);
 
         if (!expansion_data->virtual_range.contains(new_subheap_base, new_subheap_size)) {
             // FIXME: Dare to return false and allow kmalloc() to fail!

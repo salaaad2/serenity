@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Jan de Visser <jan@de-visser.net>
+ * Copyright (c) 2021, Mahmoud Mandour <ma.mandourr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -449,6 +450,68 @@ TEST_CASE(select_with_order)
     EXPECT_EQ(rows[4].row[0].to_string(), "Test_5");
 }
 
+TEST_CASE(select_with_regexp)
+{
+    ScopeGuard guard([]() { unlink(db_name); });
+    auto database = SQL::Database::construct(db_name);
+    EXPECT(!database->open().is_error());
+    create_table(database);
+    auto result = execute(database,
+        "INSERT INTO TestSchema.TestTable ( TextColumn, IntColumn ) VALUES "
+        "( 'Test+1', 42 ), "
+        "( 'Pröv+2', 43 ), "
+        "( 'Test(3)', 44 ), "
+        "( 'Test[4]', 45 ), "
+        "( 'Test+5', 46 ), "
+        "( 'Another-Test_6', 47 );");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->inserted() == 6);
+
+    // Simple match
+    result = execute(database, "SELECT TextColumn FROM TestSchema.TestTable WHERE TextColumn REGEXP 'Test\\+1';");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->has_results());
+    EXPECT_EQ(result->results().size(), 1u);
+
+    // Match all
+    result = execute(database, "SELECT TextColumn FROM TestSchema.TestTable WHERE TextColumn REGEXP '.*';");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->has_results());
+    EXPECT_EQ(result->results().size(), 6u);
+
+    // Match with wildcards
+    result = execute(database, "SELECT TextColumn FROM TestSchema.TestTable WHERE TextColumn REGEXP '^Test.+';");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->has_results());
+    EXPECT_EQ(result->results().size(), 4u);
+
+    // Match with case insensitive basic Latin and case sensitive Swedish ö
+    // FIXME: If LibRegex is changed to support case insensitive matches of Unicode characters
+    //        This test should be updated and changed to match 'PRÖV'.
+    result = execute(database, "SELECT TextColumn FROM TestSchema.TestTable WHERE TextColumn REGEXP 'PRöV.*';");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->has_results());
+    EXPECT_EQ(result->results().size(), 1u);
+}
+
+TEST_CASE(handle_regexp_errors)
+{
+    ScopeGuard guard([]() { unlink(db_name); });
+    auto database = SQL::Database::construct(db_name);
+    EXPECT(!database->open().is_error());
+    create_table(database);
+    auto result = execute(database,
+        "INSERT INTO TestSchema.TestTable ( TextColumn, IntColumn ) VALUES "
+        "( 'Test', 0 );");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->inserted() == 1);
+
+    // Malformed regex, unmatched square bracket
+    result = execute(database, "SELECT TextColumn FROM TestSchema.TestTable WHERE TextColumn REGEXP 'Test\\+[0-9.*';");
+    EXPECT(result->error().code != SQL::SQLErrorCode::NoError);
+    EXPECT(!result->has_results());
+}
+
 TEST_CASE(select_with_order_two_columns)
 {
     ScopeGuard guard([]() { unlink(db_name); });
@@ -613,6 +676,27 @@ TEST_CASE(select_with_offset_out_of_bounds)
     EXPECT(result->has_results());
     auto rows = result->results();
     EXPECT_EQ(rows.size(), 0u);
+}
+
+TEST_CASE(describe_table)
+{
+    ScopeGuard guard([]() { unlink(db_name); });
+    auto database = SQL::Database::construct(db_name);
+    EXPECT(!database->open().is_error());
+    create_table(database);
+    auto result = execute(database, "DESCRIBE TABLE TestSchema.TestTable;");
+    EXPECT(result->error().code == SQL::SQLErrorCode::NoError);
+    EXPECT(result->has_results());
+    EXPECT_EQ(result->results().size(), 2u);
+
+    auto rows = result->results();
+    auto& row1 = rows[0];
+    EXPECT_EQ(row1.row[0].to_string(), "TEXTCOLUMN");
+    EXPECT_EQ(row1.row[1].to_string(), "text");
+
+    auto& row2 = rows[1];
+    EXPECT_EQ(row2.row[0].to_string(), "INTCOLUMN");
+    EXPECT_EQ(row2.row[1].to_string(), "int");
 }
 
 }

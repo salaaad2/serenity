@@ -45,6 +45,7 @@ class CommandLine {
 public:
     static void early_initialize(const char* cmd_line);
     static void initialize();
+    static bool was_initialized();
 
     enum class Validate {
         Yes,
@@ -70,6 +71,7 @@ public:
     [[nodiscard]] bool is_vmmouse_enabled() const;
     [[nodiscard]] PCIAccessLevel pci_access_level() const;
     [[nodiscard]] bool is_legacy_time_enabled() const;
+    [[nodiscard]] bool is_pc_speaker_enabled() const;
     [[nodiscard]] FrameBufferDevices are_framebuffer_devices_enabled() const;
     [[nodiscard]] bool is_force_pio() const;
     [[nodiscard]] AcpiFeatureLevel acpi_feature_level() const;
@@ -85,6 +87,7 @@ public:
     [[nodiscard]] StringView userspace_init() const;
     [[nodiscard]] NonnullOwnPtrVector<KString> userspace_init_args() const;
     [[nodiscard]] StringView root_device() const;
+    [[nodiscard]] bool is_nvme_polling_enabled() const;
     [[nodiscard]] size_t switch_to_tty() const;
 
 private:

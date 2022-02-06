@@ -32,11 +32,16 @@
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/GlobalObject.h>
+#include <LibJS/Runtime/Intl/Collator.h>
 #include <LibJS/Runtime/Intl/DateTimeFormat.h>
 #include <LibJS/Runtime/Intl/DisplayNames.h>
 #include <LibJS/Runtime/Intl/ListFormat.h>
 #include <LibJS/Runtime/Intl/Locale.h>
 #include <LibJS/Runtime/Intl/NumberFormat.h>
+#include <LibJS/Runtime/Intl/PluralRules.h>
+#include <LibJS/Runtime/Intl/RelativeTimeFormat.h>
+#include <LibJS/Runtime/Intl/Segmenter.h>
+#include <LibJS/Runtime/Intl/Segments.h>
 #include <LibJS/Runtime/JSONObject.h>
 #include <LibJS/Runtime/Map.h>
 #include <LibJS/Runtime/NativeFunction.h>
@@ -62,6 +67,7 @@
 #include <LibJS/Runtime/Temporal/ZonedDateTime.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibJS/Runtime/Value.h>
+#include <LibJS/SourceTextModule.h>
 #include <LibLine/Editor.h>
 #include <LibMain/Main.h>
 #include <fcntl.h>
@@ -762,6 +768,90 @@ static void print_intl_date_time_format(JS::Object& object, HashTable<JS::Object
     });
 }
 
+static void print_intl_relative_time_format(JS::Object& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& date_time_format = static_cast<JS::Intl::RelativeTimeFormat&>(object);
+    print_type("Intl.RelativeTimeFormat");
+    js_out("\n  locale: ");
+    print_value(js_string(object.vm(), date_time_format.locale()), seen_objects);
+    js_out("\n  numberingSystem: ");
+    print_value(js_string(object.vm(), date_time_format.numbering_system()), seen_objects);
+    js_out("\n  style: ");
+    print_value(js_string(object.vm(), date_time_format.style_string()), seen_objects);
+    js_out("\n  numeric: ");
+    print_value(js_string(object.vm(), date_time_format.numeric_string()), seen_objects);
+}
+
+static void print_intl_plural_rules(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& plural_rules = static_cast<JS::Intl::PluralRules const&>(object);
+    print_type("Intl.PluralRules");
+    js_out("\n  locale: ");
+    print_value(js_string(object.vm(), plural_rules.locale()), seen_objects);
+    js_out("\n  type: ");
+    print_value(js_string(object.vm(), plural_rules.type_string()), seen_objects);
+    js_out("\n  minimumIntegerDigits: ");
+    print_value(JS::Value(plural_rules.min_integer_digits()), seen_objects);
+    if (plural_rules.has_min_fraction_digits()) {
+        js_out("\n  minimumFractionDigits: ");
+        print_value(JS::Value(plural_rules.min_fraction_digits()), seen_objects);
+    }
+    if (plural_rules.has_max_fraction_digits()) {
+        js_out("\n  maximumFractionDigits: ");
+        print_value(JS::Value(plural_rules.max_fraction_digits()), seen_objects);
+    }
+    if (plural_rules.has_min_significant_digits()) {
+        js_out("\n  minimumSignificantDigits: ");
+        print_value(JS::Value(plural_rules.min_significant_digits()), seen_objects);
+    }
+    if (plural_rules.has_max_significant_digits()) {
+        js_out("\n  maximumSignificantDigits: ");
+        print_value(JS::Value(plural_rules.max_significant_digits()), seen_objects);
+    }
+    js_out("\n  roundingType: ");
+    print_value(js_string(object.vm(), plural_rules.rounding_type_string()), seen_objects);
+}
+
+static void print_intl_collator(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& collator = static_cast<JS::Intl::Collator const&>(object);
+    print_type("Intl.Collator");
+    out("\n  locale: ");
+    print_value(js_string(object.vm(), collator.locale()), seen_objects);
+    out("\n  usage: ");
+    print_value(js_string(object.vm(), collator.usage_string()), seen_objects);
+    out("\n  sensitivity: ");
+    print_value(js_string(object.vm(), collator.sensitivity_string()), seen_objects);
+    out("\n  caseFirst: ");
+    print_value(js_string(object.vm(), collator.case_first_string()), seen_objects);
+    out("\n  collation: ");
+    print_value(js_string(object.vm(), collator.collation()), seen_objects);
+    out("\n  ignorePunctuation: ");
+    print_value(JS::Value(collator.ignore_punctuation()), seen_objects);
+    out("\n  numeric: ");
+    print_value(JS::Value(collator.numeric()), seen_objects);
+}
+
+static void print_intl_segmenter(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& segmenter = static_cast<JS::Intl::Segmenter const&>(object);
+    print_type("Intl.Segmenter");
+    out("\n  locale: ");
+    print_value(js_string(object.vm(), segmenter.locale()), seen_objects);
+    out("\n  granularity: ");
+    print_value(js_string(object.vm(), segmenter.segmenter_granularity_string()), seen_objects);
+}
+
+static void print_intl_segments(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& segments = static_cast<JS::Intl::Segments const&>(object);
+    print_type("Segments");
+    out("\n  string: ");
+    print_value(js_string(object.vm(), segments.segments_string()), seen_objects);
+    out("\n  segmenter: ");
+    print_value(&segments.segments_segmenter(), seen_objects);
+}
+
 static void print_primitive_wrapper_object(FlyString const& name, JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
     // BooleanObject, NumberObject, StringObject
@@ -857,6 +947,16 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
             return print_intl_number_format(object, seen_objects);
         if (is<JS::Intl::DateTimeFormat>(object))
             return print_intl_date_time_format(object, seen_objects);
+        if (is<JS::Intl::RelativeTimeFormat>(object))
+            return print_intl_relative_time_format(object, seen_objects);
+        if (is<JS::Intl::PluralRules>(object))
+            return print_intl_plural_rules(object, seen_objects);
+        if (is<JS::Intl::Collator>(object))
+            return print_intl_collator(object, seen_objects);
+        if (is<JS::Intl::Segmenter>(object))
+            return print_intl_segmenter(object, seen_objects);
+        if (is<JS::Intl::Segments>(object))
+            return print_intl_segments(object, seen_objects);
         return print_object(object, seen_objects);
     }
 
@@ -915,44 +1015,69 @@ static bool write_to_file(String const& path)
 
 static bool parse_and_run(JS::Interpreter& interpreter, StringView source, StringView source_name)
 {
-    auto program_type = s_as_module ? JS::Program::Type::Module : JS::Program::Type::Script;
-    auto parser = JS::Parser(JS::Lexer(source), program_type);
-    auto program = parser.parse_program();
+    enum class ReturnEarly {
+        No,
+        Yes,
+    };
 
-    if (s_dump_ast)
-        program->dump(0);
+    JS::ThrowCompletionOr<JS::Value> result { JS::js_undefined() };
 
-    auto result = JS::ThrowCompletionOr<JS::Value> { JS::js_undefined() };
+    auto run_script_or_module = [&](auto& script_or_module) {
+        if (s_dump_ast)
+            script_or_module->parse_node().dump(0);
 
-    if (parser.has_errors()) {
-        auto error = parser.errors()[0];
-        if (!s_disable_source_location_hints) {
-            auto hint = error.source_location_hint(source);
-            if (!hint.is_empty())
-                js_outln("{}", hint);
-        }
-        result = vm->throw_completion<JS::SyntaxError>(interpreter.global_object(), error.to_string());
-    } else {
         if (JS::Bytecode::g_dump_bytecode || s_run_bytecode) {
-            auto executable = JS::Bytecode::Generator::generate(*program);
-            executable.name = source_name;
+            auto executable = JS::Bytecode::Generator::generate(script_or_module->parse_node());
+            executable->name = source_name;
             if (s_opt_bytecode) {
                 auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
-                passes.perform(executable);
+                passes.perform(*executable);
                 dbgln("Optimisation passes took {}us", passes.elapsed());
             }
 
             if (JS::Bytecode::g_dump_bytecode)
-                executable.dump();
+                executable->dump();
 
             if (s_run_bytecode) {
                 JS::Bytecode::Interpreter bytecode_interpreter(interpreter.global_object(), interpreter.realm());
-                result = bytecode_interpreter.run(executable);
+                result = bytecode_interpreter.run(*executable);
             } else {
-                return true;
+                return ReturnEarly::Yes;
             }
         } else {
-            result = interpreter.run(interpreter.global_object(), *program);
+            result = interpreter.run(*script_or_module);
+        }
+
+        return ReturnEarly::No;
+    };
+
+    if (!s_as_module) {
+        auto script_or_error = JS::Script::parse(source, interpreter.realm(), source_name);
+        if (script_or_error.is_error()) {
+            auto error = script_or_error.error()[0];
+            auto hint = error.source_location_hint(source);
+            if (!hint.is_empty())
+                outln("{}", hint);
+            outln(error.to_string());
+            vm->throw_exception<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+        } else {
+            auto return_early = run_script_or_module(script_or_error.value());
+            if (return_early == ReturnEarly::Yes)
+                return true;
+        }
+    } else {
+        auto module_or_error = JS::SourceTextModule::parse(source, interpreter.realm(), source_name);
+        if (module_or_error.is_error()) {
+            auto error = module_or_error.error()[0];
+            auto hint = error.source_location_hint(source);
+            if (!hint.is_empty())
+                outln("{}", hint);
+            outln(error.to_string());
+            vm->throw_exception<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+        } else {
+            auto return_early = run_script_or_module(module_or_error.value());
+            if (return_early == ReturnEarly::Yes)
+                return true;
         }
     }
 
@@ -992,6 +1117,13 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
         last_value = JS::make_handle(result.value());
 
     if (result.is_error()) {
+        if (!vm->exception()) {
+            // Until js no longer relies on vm->exception() we have to set it in case the exception was cleared
+            VERIFY(result.throw_completion().value().has_value());
+            auto throw_value = result.release_error().release_value().release_value();
+            auto* exception = interpreter.heap().allocate<JS::Exception>(interpreter.global_object(), throw_value);
+            vm->set_exception(*exception);
+        }
         handle_exception();
         return false;
     } else if (s_print_last_result) {
@@ -1012,14 +1144,13 @@ static JS::ThrowCompletionOr<JS::Value> load_file_impl(JS::VM& vm, JS::GlobalObj
         return vm.throw_completion<JS::Error>(global_object, String::formatted("Failed to open '{}': {}", filename, file->error_string()));
     auto file_contents = file->read_all();
     auto source = StringView { file_contents };
-    auto parser = JS::Parser(JS::Lexer(source));
-    auto program = parser.parse_program();
-    if (parser.has_errors()) {
-        auto& error = parser.errors()[0];
+    auto script_or_error = JS::Script::parse(source, vm.interpreter().realm(), filename);
+    if (script_or_error.is_error()) {
+        auto& error = script_or_error.error()[0];
         return vm.throw_completion<JS::SyntaxError>(global_object, error.to_string());
     }
     // FIXME: Use eval()-like semantics and execute in current scope?
-    TRY(vm.interpreter().run(global_object, *program));
+    TRY(vm.interpreter().run(script_or_error.value()));
     return JS::js_undefined();
 }
 
@@ -1239,10 +1370,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'c');
     args_parser.add_option(s_disable_source_location_hints, "Disable source location hints", "disable-source-location-hints", 'h');
     args_parser.add_option(gc_on_every_allocation, "GC on every allocation", "gc-on-every-allocation", 'g');
-#ifdef JS_TRACK_ZOMBIE_CELLS
-    bool zombify_dead_cells = false;
-    args_parser.add_option(zombify_dead_cells, "Zombify dead cells (to catch missing GC marks)", "zombify-dead-cells", 'z');
-#endif
     args_parser.add_option(disable_syntax_highlight, "Disable live syntax highlighting", "no-syntax-highlight", 's');
     args_parser.add_positional_argument(script_paths, "Path to script files", "scripts", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
@@ -1250,6 +1377,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool syntax_highlight = !disable_syntax_highlight;
 
     vm = JS::VM::create();
+    vm->enable_default_host_import_module_dynamically_hook();
+
     // NOTE: These will print out both warnings when using something like Promise.reject().catch(...) -
     // which is, as far as I can tell, correct - a promise is created, rejected without handler, and a
     // handler then attached to it. The Node.js REPL doesn't warn in this case, so it's something we
@@ -1283,9 +1412,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         ReplConsoleClient console_client(interpreter->global_object().console());
         interpreter->global_object().console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
-#ifdef JS_TRACK_ZOMBIE_CELLS
-        interpreter->heap().set_zombify_dead_cells(zombify_dead_cells);
-#endif
 
         auto& global_environment = interpreter->realm().global_environment();
 
@@ -1497,13 +1623,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         ReplConsoleClient console_client(interpreter->global_object().console());
         interpreter->global_object().console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
-#ifdef JS_TRACK_ZOMBIE_CELLS
-        interpreter->heap().set_zombify_dead_cells(zombify_dead_cells);
-#endif
 
         signal(SIGINT, [](int) {
             sigint_handler();
         });
+
+        if (script_paths.size() > 1)
+            warnln("Warning: Multiple files supplied, this will concatenate the sources and resolve modules as if it was the first file");
 
         StringBuilder builder;
         for (auto& path : script_paths) {
@@ -1513,10 +1639,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             builder.append(source);
         }
 
-        StringBuilder source_name_builder;
-        source_name_builder.join(", ", script_paths);
+        // We resolve modules as if it is the first file
 
-        if (!parse_and_run(*interpreter, builder.string_view(), source_name_builder.string_view()))
+        if (!parse_and_run(*interpreter, builder.string_view(), script_paths[0]))
             return 1;
     }
 
