@@ -9,7 +9,7 @@
 #include <AK/FlyString.h>
 #include <AK/WeakPtr.h>
 #include <LibWeb/DOM/Node.h>
-#include <LibWeb/QualifiedName.h>
+#include <LibWeb/DOM/QualifiedName.h>
 
 namespace Web::DOM {
 
@@ -45,5 +45,8 @@ private:
     String m_value;
     WeakPtr<Element> m_owner_element;
 };
+
+template<>
+inline bool Node::fast_is<Attribute>() const { return is_attribute(); }
 
 }

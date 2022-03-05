@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Sahan Fernando <sahan.h.fernando@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -83,8 +84,6 @@ ErrorOr<void> FramebufferDevice::set_head_resolution(size_t head, size_t width, 
 
     auto& info = display_info();
 
-    SpinlockLocker locker(adapter()->operation_lock());
-
     info.rect = {
         .x = 0,
         .y = 0,
@@ -166,6 +165,7 @@ FramebufferDevice::~FramebufferDevice()
 
 ErrorOr<void> FramebufferDevice::create_framebuffer()
 {
+    SpinlockLocker locker(adapter()->operation_lock());
     // First delete any existing framebuffers to free the memory first
     m_framebuffer = nullptr;
     m_framebuffer_sink_vmobject = nullptr;
@@ -184,7 +184,6 @@ ErrorOr<void> FramebufferDevice::create_framebuffer()
     }
     m_framebuffer_sink_vmobject = TRY(Memory::AnonymousVMObject::try_create_with_physical_pages(pages.span()));
 
-    SpinlockLocker locker(adapter()->operation_lock());
     m_current_buffer = &buffer_from_index(m_last_set_buffer_index.load());
     create_buffer(m_main_buffer, 0, m_buffer_size);
     create_buffer(m_back_buffer, m_buffer_size, m_buffer_size);
@@ -342,7 +341,7 @@ void FramebufferDevice::clear_to_black(Buffer& buffer)
 
 void FramebufferDevice::draw_ntsc_test_pattern(Buffer& buffer)
 {
-    static constexpr u8 colors[12][4] = {
+    constexpr u8 colors[12][4] = {
         { 0xff, 0xff, 0xff, 0xff }, // White
         { 0x00, 0xff, 0xff, 0xff }, // Primary + Composite colors
         { 0xff, 0xff, 0x00, 0xff },

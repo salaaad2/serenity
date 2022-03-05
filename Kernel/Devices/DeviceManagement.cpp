@@ -22,11 +22,6 @@ UNMAP_AFTER_INIT void DeviceManagement::initialize()
     s_the.ensure_instance();
 }
 
-UNMAP_AFTER_INIT void DeviceManagement::attach_audio_device(CharacterDevice const& device)
-{
-    m_audio_devices.append(device);
-}
-
 UNMAP_AFTER_INIT void DeviceManagement::attach_console_device(ConsoleDevice const& device)
 {
     m_console_device = device;
@@ -111,6 +106,15 @@ void DeviceManagement::for_each(Function<void(Device&)> callback)
     m_devices.with([&](auto& map) -> void {
         for (auto& entry : map)
             callback(*entry.value);
+    });
+}
+
+ErrorOr<void> DeviceManagement::try_for_each(Function<ErrorOr<void>(Device&)> callback)
+{
+    return m_devices.with([&](auto& map) -> ErrorOr<void> {
+        for (auto& entry : map)
+            TRY(callback(*entry.value));
+        return {};
     });
 }
 

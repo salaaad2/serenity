@@ -32,7 +32,9 @@ pre {
     white-space: pre;
 }
 
-code {
+code,
+kbd,
+samp {
     font-family: monospace;
 }
 
@@ -41,9 +43,23 @@ ins {
     text-decoration: underline;
 }
 
+s,
+del {
+    text-decoration: line-through;
+}
+
 strong,
 b {
     font-weight: bold;
+}
+
+i,
+em,
+address,
+cite,
+dfn,
+var {
+    font-style: italic;
 }
 
 html,
@@ -211,10 +227,31 @@ ol ol ul {
 }
 
 /* FIXME: This is a temporary hack until we can render a native-looking frame for these. */
-input[type=text] {
+input {
     border: 1px solid black;
     min-width: 80px;
     min-height: 16px;
+    width: 120px;
+    cursor: text;
+    overflow: hidden;
+}
+
+input[type=submit], input[type=button], input[type=reset], input[type=checkbox], input[type=radio] {
+    border: none;
+    min-width: unset;
+    min-height: unset;
+    width: unset;
+    cursor: unset;
+}
+
+button, input[type=submit], input[type=button], input[type=reset] {
+    padding: 4px 8px;
+    background-color: -libweb-palette-button;
+    border: 1px solid -libweb-palette-threed-shadow1;
+}
+
+button:hover, input[type=submit]:hover, input[type=button]:hover, input[type=reset]:hover {
+    background-color: -libweb-palette-hover-highlight;
 }
 
 option {

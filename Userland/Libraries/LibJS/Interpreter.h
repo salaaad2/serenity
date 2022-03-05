@@ -15,13 +15,12 @@
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/DeferGC.h>
 #include <LibJS/Heap/Heap.h>
+#include <LibJS/Heap/MarkedVector.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/ErrorTypes.h>
-#include <LibJS/Runtime/Exception.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
-#include <LibJS/Runtime/MarkedValueList.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/Value.h>
@@ -116,7 +115,6 @@ public:
     ALWAYS_INLINE VM& vm() { return *m_vm; }
     ALWAYS_INLINE const VM& vm() const { return *m_vm; }
     ALWAYS_INLINE Heap& heap() { return vm().heap(); }
-    ALWAYS_INLINE Exception* exception() { return vm().exception(); }
 
     Environment* lexical_environment() { return vm().lexical_environment(); }
 

@@ -1,9 +1,9 @@
 @GUI::Widget {
-    layout: @GUI::VerticalBoxLayout
+    layout: @GUI::VerticalBoxLayout {}
     fill_with_background_color: true
 
     @GUI::Frame {
-        layout: @GUI::HorizontalBoxLayout
+        layout: @GUI::HorizontalBoxLayout {}
         name: "preview_frame"
     }
 
@@ -56,8 +56,7 @@
             fixed_width: 230
         }
 
-        @GUI::Widget {
-        }
+        @GUI::Widget {}
 
         @GUI::CheckBox {
             name: "flag_input"

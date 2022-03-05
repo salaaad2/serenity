@@ -24,7 +24,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio thread recvfd sendfd rpath unix wpath cpath"));
 
     auto app = GUI::Application::construct(arguments);
-    Config::pledge_domains("PixelPaint");
+    Config::pledge_domain("PixelPaint");
 
     const char* image_file = nullptr;
     Core::ArgsParser args_parser;
@@ -39,6 +39,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil(nullptr, nullptr));
 
     auto app_icon = GUI::Icon::default_icon("app-pixel-paint");
+
+    PixelPaint::g_icon_bag = TRY(PixelPaint::IconBag::try_create());
 
     auto window = GUI::Window::construct();
     window->set_title("Pixel Paint");

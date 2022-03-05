@@ -8,8 +8,10 @@
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/Window.h>
 #include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/BrowsingContextContainer.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/Layout/BreakNode.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -40,6 +42,12 @@ BrowsingContext::~BrowsingContext()
 void BrowsingContext::did_edit(Badge<EditEventHandler>)
 {
     reset_cursor_blink_cycle();
+
+    if (m_cursor_position.node() && is<DOM::Text>(*m_cursor_position.node())) {
+        auto& text_node = static_cast<DOM::Text&>(*m_cursor_position.node());
+        if (auto* input_element = text_node.owner_input_element())
+            input_element->did_edit_text_node({});
+    }
 }
 
 void BrowsingContext::reset_cursor_blink_cycle()
@@ -47,6 +55,13 @@ void BrowsingContext::reset_cursor_blink_cycle()
     m_cursor_blink_state = true;
     m_cursor_blink_timer->restart();
     m_cursor_position.node()->layout_node()->set_needs_display();
+}
+
+// https://html.spec.whatwg.org/multipage/browsers.html#top-level-browsing-context
+bool BrowsingContext::is_top_level() const
+{
+    // A browsing context that has no parent browsing context is the top-level browsing context for itself and all of the browsing contexts for which it is an ancestor browsing context.
+    return !parent();
 }
 
 bool BrowsingContext::is_focused_context() const
@@ -127,6 +142,11 @@ void BrowsingContext::set_viewport_scroll_offset(Gfx::IntPoint const& offset)
         client->browsing_context_did_set_viewport_rect(viewport_rect());
 }
 
+void BrowsingContext::set_needs_display()
+{
+    set_needs_display(viewport_rect());
+}
+
 void BrowsingContext::set_needs_display(Gfx::IntRect const& rect)
 {
     if (!viewport_rect().intersects(rect))
@@ -158,7 +178,7 @@ void BrowsingContext::scroll_to_anchor(String const& fragment)
         }
     }
 
-    active_document()->update_layout();
+    active_document()->force_layout();
 
     if (!element || !element->layout_node())
         return;
@@ -360,6 +380,35 @@ bool BrowsingContext::has_a_rendering_opportunity() const
 
     // FIXME: We should at the very least say `false` here if we're an inactive browser tab.
     return true;
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#currently-focused-area-of-a-top-level-browsing-context
+RefPtr<DOM::Node> BrowsingContext::currently_focused_area()
+{
+    // 1. If topLevelBC does not have system focus, then return null.
+    if (!is_focused_context())
+        return nullptr;
+
+    // 2. Let candidate be topLevelBC's active document.
+    auto* candidate = active_document();
+
+    // 3. While candidate's focused area is a browsing context container with a non-null nested browsing context:
+    //    set candidate to the active document of that browsing context container's nested browsing context.
+    while (candidate->focused_element()
+        && is<HTML::BrowsingContextContainer>(candidate->focused_element())
+        && static_cast<HTML::BrowsingContextContainer&>(*candidate->focused_element()).nested_browsing_context()) {
+        candidate = static_cast<HTML::BrowsingContextContainer&>(*candidate->focused_element()).nested_browsing_context()->active_document();
+    }
+
+    // 4. If candidate's focused area is non-null, set candidate to candidate's focused area.
+    if (candidate->focused_element()) {
+        // NOTE: We return right away here instead of assigning to candidate,
+        //       since that would require compromising type safety.
+        return candidate->focused_element();
+    }
+
+    // 5. Return candidate.
+    return candidate;
 }
 
 }

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Undefine <cqundefine@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -61,7 +62,7 @@ static RefPtr<GUI::Statusbar> statusbar;
 class UnavailableProcessWidget final : public GUI::Frame {
     C_OBJECT(UnavailableProcessWidget)
 public:
-    virtual ~UnavailableProcessWidget() override { }
+    virtual ~UnavailableProcessWidget() override = default;
 
     const String& text() const { return m_text; }
     void set_text(String text) { m_text = move(text); }
@@ -107,7 +108,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
-    Config::pledge_domains("SystemMonitor");
+    Config::pledge_domain("SystemMonitor");
 
     TRY(Core::System::unveil("/etc/passwd", "r"));
     TRY(Core::System::unveil("/res", "r"));
@@ -121,6 +122,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return result.release_error();
 
     if (auto result = Core::System::unveil("/usr/local/lib", "r"); result.is_error() && result.error().code() != ENOENT)
+        return result.release_error();
+
+    // This file is only accesible when running as root
+    if (auto result = Core::System::unveil("/boot/Kernel.debug", "r"); result.is_error() && result.error().code() != EACCES)
         return result.release_error();
 
     TRY(Core::System::unveil("/bin/Profiler", "rx"));
@@ -383,7 +388,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
 class ProgressbarPaintingDelegate final : public GUI::TableCellPaintingDelegate {
 public:
-    virtual ~ProgressbarPaintingDelegate() override { }
+    virtual ~ProgressbarPaintingDelegate() override = default;
 
     virtual void paint(GUI::Painter& painter, const Gfx::IntRect& a_rect, const Palette& palette, const GUI::ModelIndex& index) override
     {
@@ -404,6 +409,9 @@ ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t pid)
     auto window = GUI::Window::construct();
     window->resize(480, 360);
     window->set_title(String::formatted("PID {} - System Monitor", pid));
+
+    auto app_icon = GUI::Icon::default_icon("app-system-monitor");
+    window->set_icon(app_icon.bitmap_for_size(16));
 
     auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
     main_widget->set_fill_with_background_color(true);

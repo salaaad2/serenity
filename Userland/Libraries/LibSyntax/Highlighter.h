@@ -40,6 +40,7 @@ public:
     virtual ~Highlighter();
 
     virtual Language language() const = 0;
+    StringView language_string(Language) const;
     virtual void rehighlight(const Palette&) = 0;
     virtual void highlight_matching_token_pair();
 
@@ -55,6 +56,12 @@ public:
         u64 close;
     };
     Vector<MatchingTokenPair> matching_token_pairs() const;
+
+    template<typename T>
+    bool fast_is() const = delete;
+
+    // FIXME: When other syntax highlighters start using a language server, we should add a common base class here.
+    virtual bool is_cpp_semantic_highlighter() const { return false; }
 
 protected:
     Highlighter() { }

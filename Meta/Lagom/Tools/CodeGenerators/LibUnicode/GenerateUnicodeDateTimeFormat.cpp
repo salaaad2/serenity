@@ -22,7 +22,7 @@
 #include <AK/Utf8View.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibTimeZone/TimeZone.h>
 #include <LibUnicode/DateTimeFormat.h>
 
@@ -569,10 +569,6 @@ struct UnicodeLocaleData {
     Vector<String> time_zones { "UTC"sv };
 
     Vector<String> calendars;
-    Vector<Alias> calendar_aliases {
-        // FIXME: Aliases should come from BCP47. See: https://unicode-org.atlassian.net/browse/CLDR-15158
-        { "gregorian"sv, "gregory"sv },
-    };
 };
 
 static Optional<Unicode::DayPeriod> day_period_from_string(StringView day_period)
@@ -607,8 +603,7 @@ static ErrorOr<void> parse_hour_cycles(String core_path, UnicodeLocaleData& loca
     time_data_path = time_data_path.append("supplemental"sv);
     time_data_path = time_data_path.append("timeData.json"sv);
 
-    auto time_data_file = TRY(Core::File::open(time_data_path.string(), Core::OpenMode::ReadOnly));
-    auto time_data = TRY(JsonValue::from_string(time_data_file->read_all()));
+    auto time_data = TRY(read_json_file(time_data_path.string()));
     auto const& supplemental_object = time_data.as_object().get("supplemental"sv);
     auto const& time_data_object = supplemental_object.as_object().get("timeData"sv);
 
@@ -652,9 +647,7 @@ static ErrorOr<void> parse_meta_zones(String core_path, UnicodeLocaleData& local
     meta_zone_path = meta_zone_path.append("supplemental"sv);
     meta_zone_path = meta_zone_path.append("metaZones.json"sv);
 
-    auto meta_zone_file = TRY(Core::File::open(meta_zone_path.string(), Core::OpenMode::ReadOnly));
-    auto meta_zone = TRY(JsonValue::from_string(meta_zone_file->read_all()));
-
+    auto meta_zone = TRY(read_json_file(meta_zone_path.string()));
     auto const& supplemental_object = meta_zone.as_object().get("supplemental"sv);
     auto const& meta_zone_object = supplemental_object.as_object().get("metaZones"sv);
     auto const& meta_zone_array = meta_zone_object.as_object().get("metazones"sv);
@@ -1327,9 +1320,7 @@ static ErrorOr<void> parse_calendars(String locale_calendars_path, UnicodeLocale
     if (!calendars_path.basename().starts_with("ca-"sv))
         return {};
 
-    auto calendars_file = TRY(Core::File::open(calendars_path.string(), Core::OpenMode::ReadOnly));
-    auto calendars = TRY(JsonValue::from_string(calendars_file->read_all()));
-
+    auto calendars = TRY(read_json_file(calendars_path.string()));
     auto const& main_object = calendars.as_object().get("main"sv);
     auto const& locale_object = main_object.as_object().get(calendars_path.parent().basename());
     auto const& dates_object = locale_object.as_object().get("dates"sv);
@@ -1417,9 +1408,7 @@ static ErrorOr<void> parse_time_zone_names(String locale_time_zone_names_path, U
     LexicalPath time_zone_names_path(move(locale_time_zone_names_path));
     time_zone_names_path = time_zone_names_path.append("timeZoneNames.json"sv);
 
-    auto time_zone_names_file = TRY(Core::File::open(time_zone_names_path.string(), Core::OpenMode::ReadOnly));
-    auto time_zone_names = TRY(JsonValue::from_string(time_zone_names_file->read_all()));
-
+    auto time_zone_names = TRY(read_json_file(time_zone_names_path.string()));
     auto const& main_object = time_zone_names.as_object().get("main"sv);
     auto const& locale_object = main_object.as_object().get(time_zone_names_path.parent().basename());
     auto const& dates_object = locale_object.as_object().get("dates"sv);
@@ -1530,9 +1519,7 @@ static ErrorOr<void> parse_day_periods(String core_path, UnicodeLocaleData& loca
     day_periods_path = day_periods_path.append("supplemental"sv);
     day_periods_path = day_periods_path.append("dayPeriods.json"sv);
 
-    auto day_periods_file = TRY(Core::File::open(day_periods_path.string(), Core::OpenMode::ReadOnly));
-    auto locale_day_periods = TRY(JsonValue::from_string(day_periods_file->read_all()));
-
+    auto locale_day_periods = TRY(read_json_file(day_periods_path.string()));
     auto const& supplemental_object = locale_day_periods.as_object().get("supplemental"sv);
     auto const& day_periods_object = supplemental_object.as_object().get("dayPeriodRuleSet"sv);
 
@@ -1629,7 +1616,7 @@ static String format_identifier(StringView owner, String identifier)
     return identifier;
 }
 
-static void generate_unicode_locale_header(Core::File& file, UnicodeLocaleData& locale_data)
+static ErrorOr<void> generate_unicode_locale_header(Core::Stream::BufferedFile& file, UnicodeLocaleData& locale_data)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -1642,17 +1629,18 @@ static void generate_unicode_locale_header(Core::File& file, UnicodeLocaleData& 
 namespace Unicode {
 )~~~");
 
-    generate_enum(generator, format_identifier, "Calendar"sv, {}, locale_data.calendars, locale_data.calendar_aliases);
+    generate_enum(generator, format_identifier, "Calendar"sv, {}, locale_data.calendars);
     generate_enum(generator, format_identifier, "HourCycleRegion"sv, {}, locale_data.hour_cycle_regions);
 
     generator.append(R"~~~(
 }
 )~~~");
 
-    VERIFY(file.write(generator.as_string_view()));
+    TRY(file.write(generator.as_string_view().bytes()));
+    return {};
 }
 
-static void generate_unicode_locale_implementation(Core::File& file, UnicodeLocaleData& locale_data)
+static ErrorOr<void> generate_unicode_locale_implementation(Core::Stream::BufferedFile& file, UnicodeLocaleData& locale_data)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -1680,6 +1668,7 @@ static void generate_unicode_locale_implementation(Core::File& file, UnicodeLoca
 #include <LibUnicode/DateTimeFormat.h>
 #include <LibUnicode/Locale.h>
 #include <LibUnicode/UnicodeDateTimeFormat.h>
+#include <LibUnicode/UnicodeLocale.h>
 
 namespace Unicode {
 )~~~");
@@ -1863,8 +1852,6 @@ struct DayPeriodData {
 };
 )~~~");
 
-    generate_available_values(generator, "get_available_calendars"sv, locale_data.calendars, locale_data.calendar_aliases);
-
     locale_data.unique_formats.generate(generator, "CalendarFormatImpl"sv, "s_calendar_formats"sv, 10);
     locale_data.unique_symbol_lists.generate(generator, s_string_index_type, "s_symbol_lists"sv);
     locale_data.unique_calendar_symbols.generate(generator, "CalendarSymbols"sv, "s_calendar_symbols"sv, 10);
@@ -1939,10 +1926,26 @@ static constexpr Array<@type@, @size@> @name@ { {)~~~");
         generate_value_from_string(generator, "{}_from_string"sv, enum_title, enum_snake, move(hashes));
     };
 
-    append_from_string("Calendar"sv, "calendar"sv, locale_data.calendars, locale_data.calendar_aliases);
     append_from_string("HourCycleRegion"sv, "hour_cycle_region"sv, locale_data.hour_cycle_regions);
 
     generator.append(R"~~~(
+static Optional<Calendar> keyword_to_calendar(KeywordCalendar keyword)
+{
+    switch (keyword) {)~~~");
+
+    for (auto const& calendar : locale_data.calendars) {
+        generator.set("name"sv, format_identifier({}, calendar));
+        generator.append(R"~~~(
+    case KeywordCalendar::@name@:
+        return Calendar::@name@;)~~~");
+    }
+
+    generator.append(R"~~~(
+    default:
+        return {};
+    }
+}
+
 Vector<HourCycle> get_regional_hour_cycles(StringView region)
 {
     auto region_value = hour_cycle_region_from_string(region);
@@ -1969,9 +1972,13 @@ static CalendarData const* find_calendar_data(StringView locale, StringView cale
     if (!locale_value.has_value())
         return nullptr;
 
-    auto calendar_value = calendar_from_string(calendar);
+    auto calendar_keyword = keyword_ca_from_string(calendar);
+    if (!calendar_keyword.has_value())
+        return {};
+
+    auto calendar_value = keyword_to_calendar(*calendar_keyword);
     if (!calendar_value.has_value())
-        return nullptr;
+        return {};
 
     auto locale_index = to_underlying(*locale_value) - 1; // Subtract 1 because 0 == Locale::None.
     size_t calendar_index = to_underlying(*calendar_value);
@@ -2241,7 +2248,8 @@ Optional<StringView> get_time_zone_name(StringView locale, StringView time_zone,
 }
 )~~~");
 
-    VERIFY(file.write(generator.as_string_view()));
+    TRY(file.write(generator.as_string_view().bytes()));
+    return {};
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -2258,23 +2266,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(dates_path, "Path to cldr-dates directory", "dates-path", 'd', "dates-path");
     args_parser.parse(arguments);
 
-    auto open_file = [&](StringView path) -> ErrorOr<NonnullRefPtr<Core::File>> {
-        if (path.is_empty()) {
-            args_parser.print_usage(stderr, arguments.argv[0]);
-            return Error::from_string_literal("Must provide all command line options"sv);
-        }
-
-        return Core::File::open(path, Core::OpenMode::ReadWrite);
-    };
-
-    auto generated_header_file = TRY(open_file(generated_header_path));
-    auto generated_implementation_file = TRY(open_file(generated_implementation_path));
+    auto generated_header_file = TRY(open_file(generated_header_path, Core::Stream::OpenMode::Write));
+    auto generated_implementation_file = TRY(open_file(generated_implementation_path, Core::Stream::OpenMode::Write));
 
     UnicodeLocaleData locale_data;
     TRY(parse_all_locales(core_path, dates_path, locale_data));
 
-    generate_unicode_locale_header(generated_header_file, locale_data);
-    generate_unicode_locale_implementation(generated_implementation_file, locale_data);
+    TRY(generate_unicode_locale_header(*generated_header_file, locale_data));
+    TRY(generate_unicode_locale_implementation(*generated_implementation_file, locale_data));
 
     return 0;
 }

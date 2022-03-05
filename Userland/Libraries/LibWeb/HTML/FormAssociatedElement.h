@@ -8,24 +8,52 @@
 
 #include <AK/WeakPtr.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/HTML/HTMLElement.h>
 
 namespace Web::HTML {
 
-class FormAssociatedElement {
+class FormAssociatedElement : public HTMLElement {
 public:
     HTMLFormElement* form() { return m_form; }
     HTMLFormElement const* form() const { return m_form; }
 
     void set_form(HTMLFormElement*);
 
-protected:
-    FormAssociatedElement() = default;
-    virtual ~FormAssociatedElement() = default;
+    bool enabled() const;
 
-    virtual HTMLElement& form_associated_element_to_html_element() = 0;
+    void set_parser_inserted(Badge<HTMLParser>) { m_parser_inserted = true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const { return false; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-submit
+    virtual bool is_submittable() const { return false; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-reset
+    virtual bool is_resettable() const { return false; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_auto_capitalize_inheriting() const { return false; }
+
+protected:
+    FormAssociatedElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+        : HTMLElement(document, move(qualified_name))
+    {
+    }
+
+    virtual ~FormAssociatedElement() = default;
 
 private:
     WeakPtr<HTMLFormElement> m_form;
+
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#parser-inserted-flag
+    bool m_parser_inserted { false };
+
+    void reset_form_owner();
+
+    // ^DOM::Node
+    virtual void inserted() override;
+    virtual void removed_from(DOM::Node*) override;
 };
 
 }

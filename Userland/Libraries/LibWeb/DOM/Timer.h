@@ -7,38 +7,25 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <AK/Function.h>
 #include <LibCore/Forward.h>
-#include <LibJS/Heap/Handle.h>
-#include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::DOM {
 
 class Timer final : public RefCounted<Timer> {
 public:
-    enum class Type {
-        Interval,
-        Timeout,
-    };
-
-    static NonnullRefPtr<Timer> create_interval(Window&, int milliseconds, JS::FunctionObject&);
-    static NonnullRefPtr<Timer> create_timeout(Window&, int milliseconds, JS::FunctionObject&);
-
+    static NonnullRefPtr<Timer> create(Window& window, i32 milliseconds, Function<void()> callback, i32 id);
     ~Timer();
 
-    i32 id() const { return m_id; }
-    Type type() const { return m_type; }
-
-    JS::FunctionObject& callback() { return *m_callback.cell(); }
+    void start();
 
 private:
-    Timer(Window&, Type, int ms, JS::FunctionObject&);
+    Timer(Window& window, i32 milliseconds, Function<void()> callback, i32 id);
 
-    Window& m_window;
     RefPtr<Core::Timer> m_timer;
-    Type m_type;
-    int m_id { 0 };
-    JS::Handle<JS::FunctionObject> m_callback;
+    Window& m_window;
+    i32 m_id { 0 };
 };
 
 }

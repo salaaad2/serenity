@@ -28,8 +28,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Desktop::Launcher::add_allowed_handler_with_only_specific_urls("/bin/Help", { URL::create_with_file_protocol("/usr/share/man/man1/FontEditor.md") }));
     TRY(Desktop::Launcher::seal_allowlist());
 
-    Config::pledge_domains("FontEditor");
-    Config::monitor_domain("FontEditor");
+    Config::pledge_domain("FontEditor");
     TRY(Core::System::pledge("stdio recvfd sendfd thread rpath cpath wpath"));
 
     char const* path = nullptr;
@@ -41,7 +40,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto window = TRY(GUI::Window::try_create());
     window->set_icon(app_icon.bitmap_for_size(16));
-    window->resize(440, 470);
+    window->resize(640, 470);
 
     auto font_editor = TRY(window->try_set_main_widget<FontEditorWidget>());
     font_editor->initialize_menubar(*window);

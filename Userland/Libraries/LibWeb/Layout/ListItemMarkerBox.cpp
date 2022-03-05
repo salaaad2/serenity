@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -48,22 +48,6 @@ ListItemMarkerBox::ListItemMarkerBox(DOM::Document& document, CSS::ListStyleType
     default:
         VERIFY_NOT_REACHED();
     }
-
-    int image_width = 0;
-    int image_height = 0;
-    if (auto const* list_style_image = list_style_image_bitmap()) {
-        image_width = list_style_image->rect().width();
-        image_height = list_style_image->rect().height();
-    }
-
-    if (m_text.is_null()) {
-        set_content_width(image_width + 4);
-    } else {
-        auto text_width = font().width(m_text);
-        set_content_width(image_width + text_width);
-    }
-
-    set_content_height(max(image_height, line_height()));
 }
 
 ListItemMarkerBox::~ListItemMarkerBox()
@@ -82,8 +66,7 @@ void ListItemMarkerBox::paint(PaintContext& context, PaintPhase phase)
         return;
     }
 
-    // FIXME: It would be nicer to not have to go via the parent here to get our inherited style.
-    auto color = parent()->computed_values().color();
+    auto color = computed_values().color();
 
     int marker_width = (int)enclosing.height() / 2;
     Gfx::IntRect marker_rect { 0, 0, marker_width, marker_width };

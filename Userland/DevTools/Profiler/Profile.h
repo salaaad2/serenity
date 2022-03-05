@@ -47,7 +47,7 @@ public:
     void will_track_seen_events(size_t profile_event_count)
     {
         if (m_seen_events.size() != profile_event_count)
-            m_seen_events = Bitmap { profile_event_count, false };
+            m_seen_events = Bitmap::must_create(profile_event_count, false);
     }
     bool has_seen_event(size_t event_index) const { return m_seen_events.get(event_index); }
     void did_see_event(size_t event_index) { m_seen_events.set(event_index, true); }
@@ -221,7 +221,15 @@ public:
             pid_t parent_tid {};
         };
 
-        Variant<std::nullptr_t, SampleData, MallocData, FreeData, SignpostData, MmapData, MunmapData, ProcessCreateData, ProcessExecData, ThreadCreateData> data { nullptr };
+        struct ReadData {
+            int fd;
+            size_t size;
+            String path;
+            size_t start_timestamp;
+            bool success;
+        };
+
+        Variant<std::nullptr_t, SampleData, MallocData, FreeData, SignpostData, MmapData, MunmapData, ProcessCreateData, ProcessExecData, ThreadCreateData, ReadData> data { nullptr };
     };
 
     Vector<Event> const& events() const { return m_events; }

@@ -71,8 +71,13 @@ public:
 
     void open_coredump(String const& coredump_path);
     void for_each_open_file(Function<void(ProjectFile const&)>);
+    bool semantic_syntax_highlighting_is_enabled() const;
+
+    static Vector<String> read_recent_projects();
 
 private:
+    static constexpr size_t recent_projects_history_size = 15;
+
     static String get_full_path_of_serenity_source(const String& file);
     String get_absolute_path(String const&) const;
     Vector<String> selected_file_paths() const;
@@ -107,6 +112,7 @@ private:
     NonnullRefPtr<GUI::Action> create_build_action();
     NonnullRefPtr<GUI::Action> create_run_action();
     NonnullRefPtr<GUI::Action> create_stop_action();
+    NonnullRefPtr<GUI::Action> create_toggle_syntax_highlighting_mode_action();
     void create_location_history_actions();
 
     void add_new_editor(GUI::Widget& parent);
@@ -126,6 +132,7 @@ private:
     void create_toolbar(GUI::Widget& parent);
     void create_action_tab(GUI::Widget& parent);
     void create_file_menu(GUI::Window&);
+    void update_recent_projects_submenu();
     void create_project_menu(GUI::Window&);
     void create_edit_menu(GUI::Window&);
     void create_build_menu(GUI::Window&);
@@ -191,6 +198,7 @@ private:
     RefPtr<DisassemblyWidget> m_disassembly_widget;
     RefPtr<Threading::Thread> m_debugger_thread;
     RefPtr<EditorWrapper> m_current_editor_in_execution;
+    RefPtr<GUI::Menu> m_recent_projects_submenu { nullptr };
 
     NonnullRefPtrVector<GUI::Action> m_new_file_actions;
     RefPtr<GUI::Action> m_new_plain_file_action;
@@ -216,6 +224,7 @@ private:
     RefPtr<GUI::Action> m_run_action;
     RefPtr<GUI::Action> m_locations_history_back_action;
     RefPtr<GUI::Action> m_locations_history_forward_action;
+    RefPtr<GUI::Action> m_toggle_semantic_highlighting_action;
 
     RefPtr<Gfx::Font> read_editor_font_from_config();
     void change_editor_font(RefPtr<Gfx::Font>);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,6 +12,9 @@
 #include <LibWeb/Bindings/AbortControllerPrototype.h>
 #include <LibWeb/Bindings/AbortSignalConstructor.h>
 #include <LibWeb/Bindings/AbortSignalPrototype.h>
+#include <LibWeb/Bindings/AbstractRangeConstructor.h>
+#include <LibWeb/Bindings/AbstractRangePrototype.h>
+#include <LibWeb/Bindings/AudioConstructor.h>
 #include <LibWeb/Bindings/CSSRuleConstructor.h>
 #include <LibWeb/Bindings/CSSRuleListConstructor.h>
 #include <LibWeb/Bindings/CSSRuleListPrototype.h>
@@ -43,6 +46,8 @@
 #include <LibWeb/Bindings/DOMParserConstructor.h>
 #include <LibWeb/Bindings/DOMParserPrototype.h>
 #include <LibWeb/Bindings/DOMRectConstructor.h>
+#include <LibWeb/Bindings/DOMRectListConstructor.h>
+#include <LibWeb/Bindings/DOMRectListPrototype.h>
 #include <LibWeb/Bindings/DOMRectPrototype.h>
 #include <LibWeb/Bindings/DOMRectReadOnlyConstructor.h>
 #include <LibWeb/Bindings/DOMRectReadOnlyPrototype.h>
@@ -56,10 +61,14 @@
 #include <LibWeb/Bindings/DocumentTypePrototype.h>
 #include <LibWeb/Bindings/ElementConstructor.h>
 #include <LibWeb/Bindings/ElementPrototype.h>
+#include <LibWeb/Bindings/ErrorEventConstructor.h>
+#include <LibWeb/Bindings/ErrorEventPrototype.h>
 #include <LibWeb/Bindings/EventConstructor.h>
 #include <LibWeb/Bindings/EventPrototype.h>
 #include <LibWeb/Bindings/EventTargetConstructor.h>
 #include <LibWeb/Bindings/EventTargetPrototype.h>
+#include <LibWeb/Bindings/FocusEventConstructor.h>
+#include <LibWeb/Bindings/FocusEventPrototype.h>
 #include <LibWeb/Bindings/HTMLAnchorElementConstructor.h>
 #include <LibWeb/Bindings/HTMLAnchorElementPrototype.h>
 #include <LibWeb/Bindings/HTMLAreaElementConstructor.h>
@@ -243,14 +252,26 @@
 #include <LibWeb/Bindings/RangePrototype.h>
 #include <LibWeb/Bindings/ResizeObserverConstructor.h>
 #include <LibWeb/Bindings/ResizeObserverPrototype.h>
+#include <LibWeb/Bindings/SVGCircleElementConstructor.h>
+#include <LibWeb/Bindings/SVGCircleElementPrototype.h>
 #include <LibWeb/Bindings/SVGElementConstructor.h>
 #include <LibWeb/Bindings/SVGElementPrototype.h>
+#include <LibWeb/Bindings/SVGEllipseElementConstructor.h>
+#include <LibWeb/Bindings/SVGEllipseElementPrototype.h>
 #include <LibWeb/Bindings/SVGGeometryElementConstructor.h>
 #include <LibWeb/Bindings/SVGGeometryElementPrototype.h>
 #include <LibWeb/Bindings/SVGGraphicsElementConstructor.h>
 #include <LibWeb/Bindings/SVGGraphicsElementPrototype.h>
+#include <LibWeb/Bindings/SVGLineElementConstructor.h>
+#include <LibWeb/Bindings/SVGLineElementPrototype.h>
 #include <LibWeb/Bindings/SVGPathElementConstructor.h>
 #include <LibWeb/Bindings/SVGPathElementPrototype.h>
+#include <LibWeb/Bindings/SVGPolygonElementConstructor.h>
+#include <LibWeb/Bindings/SVGPolygonElementPrototype.h>
+#include <LibWeb/Bindings/SVGPolylineElementConstructor.h>
+#include <LibWeb/Bindings/SVGPolylineElementPrototype.h>
+#include <LibWeb/Bindings/SVGRectElementConstructor.h>
+#include <LibWeb/Bindings/SVGRectElementPrototype.h>
 #include <LibWeb/Bindings/SVGSVGElementConstructor.h>
 #include <LibWeb/Bindings/SVGSVGElementPrototype.h>
 #include <LibWeb/Bindings/ScreenConstructor.h>
@@ -259,6 +280,10 @@
 #include <LibWeb/Bindings/SelectionPrototype.h>
 #include <LibWeb/Bindings/ShadowRootConstructor.h>
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
+#include <LibWeb/Bindings/StaticRangeConstructor.h>
+#include <LibWeb/Bindings/StaticRangePrototype.h>
+#include <LibWeb/Bindings/StorageConstructor.h>
+#include <LibWeb/Bindings/StoragePrototype.h>
 #include <LibWeb/Bindings/StyleSheetConstructor.h>
 #include <LibWeb/Bindings/StyleSheetListConstructor.h>
 #include <LibWeb/Bindings/StyleSheetListPrototype.h>
@@ -268,6 +293,8 @@
 #include <LibWeb/Bindings/SubtleCryptoConstructor.h>
 #include <LibWeb/Bindings/SubtleCryptoPrototype.h>
 #include <LibWeb/Bindings/TextConstructor.h>
+#include <LibWeb/Bindings/TextDecoderConstructor.h>
+#include <LibWeb/Bindings/TextDecoderPrototype.h>
 #include <LibWeb/Bindings/TextEncoderConstructor.h>
 #include <LibWeb/Bindings/TextEncoderPrototype.h>
 #include <LibWeb/Bindings/TextMetricsConstructor.h>
@@ -281,6 +308,8 @@
 #include <LibWeb/Bindings/URLSearchParamsPrototype.h>
 #include <LibWeb/Bindings/WebSocketConstructor.h>
 #include <LibWeb/Bindings/WebSocketPrototype.h>
+#include <LibWeb/Bindings/WorkerConstructor.h>
+#include <LibWeb/Bindings/WorkerPrototype.h>
 #include <LibWeb/Bindings/XMLHttpRequestConstructor.h>
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetConstructor.h>
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetPrototype.h>
@@ -297,144 +326,158 @@
 #define ADD_WINDOW_OBJECT_INTERFACE(interface_name) \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, interface_name##Constructor, interface_name##Prototype)
 
-#define ADD_WINDOW_OBJECT_INTERFACES                       \
-    auto& vm = this->vm();                                 \
-    ADD_WINDOW_OBJECT_INTERFACE(AbortController)           \
-    ADD_WINDOW_OBJECT_INTERFACE(AbortSignal)               \
-    ADD_WINDOW_OBJECT_INTERFACE(Crypto)                    \
-    ADD_WINDOW_OBJECT_INTERFACE(CSSRule)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(CSSRuleList)               \
-    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleDeclaration)       \
-    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleRule)              \
-    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleSheet)             \
-    ADD_WINDOW_OBJECT_INTERFACE(CanvasGradient)            \
-    ADD_WINDOW_OBJECT_INTERFACE(CanvasRenderingContext2D)  \
-    ADD_WINDOW_OBJECT_INTERFACE(CharacterData)             \
-    ADD_WINDOW_OBJECT_INTERFACE(CloseEvent)                \
-    ADD_WINDOW_OBJECT_INTERFACE(Comment)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(CustomEvent)               \
-    ADD_WINDOW_OBJECT_INTERFACE(DocumentFragment)          \
-    ADD_WINDOW_OBJECT_INTERFACE(Document)                  \
-    ADD_WINDOW_OBJECT_INTERFACE(DocumentType)              \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMException)              \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMImplementation)         \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMParser)                 \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMRect)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMRectReadOnly)           \
-    ADD_WINDOW_OBJECT_INTERFACE(DOMStringMap)              \
-    ADD_WINDOW_OBJECT_INTERFACE(Element)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(Event)                     \
-    ADD_WINDOW_OBJECT_INTERFACE(EventTarget)               \
-    ADD_WINDOW_OBJECT_INTERFACE(History)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLAnchorElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLAreaElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLAudioElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLBaseElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLBodyElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLBRElement)             \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLButtonElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLCanvasElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLCollection)            \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDataElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDataListElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDetailsElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDialogElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDirectoryElement)      \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDivElement)            \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLDListElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLElement)               \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLEmbedElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLFieldSetElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLFontElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLFormElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLFrameElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLFrameSetElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLHeadElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLHeadingElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLHRElement)             \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLHtmlElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLIFrameElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLImageElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLInputElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLLabelElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLLegendElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLLIElement)             \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLLinkElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMapElement)            \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMarqueeElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMediaElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMenuElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMetaElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLMeterElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLModElement)            \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLObjectElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLOListElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLOptGroupElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLOptionElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLOutputElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLParagraphElement)      \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLParamElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLPictureElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLPreElement)            \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLProgressElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLQuoteElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLScriptElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLSelectElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLSlotElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLSourceElement)         \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLSpanElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLStyleElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableCaptionElement)   \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableCellElement)      \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableColElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableRowElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableSectionElement)   \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTemplateElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTextAreaElement)       \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTimeElement)           \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTitleElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLTrackElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLUListElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLUnknownElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(HTMLVideoElement)          \
-    ADD_WINDOW_OBJECT_INTERFACE(ImageData)                 \
-    ADD_WINDOW_OBJECT_INTERFACE(IntersectionObserver)      \
-    ADD_WINDOW_OBJECT_INTERFACE(KeyboardEvent)             \
-    ADD_WINDOW_OBJECT_INTERFACE(MediaQueryList)            \
-    ADD_WINDOW_OBJECT_INTERFACE(MediaQueryListEvent)       \
-    ADD_WINDOW_OBJECT_INTERFACE(MessageChannel)            \
-    ADD_WINDOW_OBJECT_INTERFACE(MessageEvent)              \
-    ADD_WINDOW_OBJECT_INTERFACE(MouseEvent)                \
-    ADD_WINDOW_OBJECT_INTERFACE(Node)                      \
-    ADD_WINDOW_OBJECT_INTERFACE(NodeList)                  \
-    ADD_WINDOW_OBJECT_INTERFACE(PageTransitionEvent)       \
-    ADD_WINDOW_OBJECT_INTERFACE(Performance)               \
-    ADD_WINDOW_OBJECT_INTERFACE(PerformanceTiming)         \
-    ADD_WINDOW_OBJECT_INTERFACE(ProcessingInstruction)     \
-    ADD_WINDOW_OBJECT_INTERFACE(ProgressEvent)             \
-    ADD_WINDOW_OBJECT_INTERFACE(PromiseRejectionEvent)     \
-    ADD_WINDOW_OBJECT_INTERFACE(Range)                     \
-    ADD_WINDOW_OBJECT_INTERFACE(ResizeObserver)            \
-    ADD_WINDOW_OBJECT_INTERFACE(Screen)                    \
-    ADD_WINDOW_OBJECT_INTERFACE(Selection)                 \
-    ADD_WINDOW_OBJECT_INTERFACE(ShadowRoot)                \
-    ADD_WINDOW_OBJECT_INTERFACE(StyleSheet)                \
-    ADD_WINDOW_OBJECT_INTERFACE(StyleSheetList)            \
-    ADD_WINDOW_OBJECT_INTERFACE(SubmitEvent)               \
-    ADD_WINDOW_OBJECT_INTERFACE(SubtleCrypto)              \
-    ADD_WINDOW_OBJECT_INTERFACE(SVGElement)                \
-    ADD_WINDOW_OBJECT_INTERFACE(SVGGeometryElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(SVGGraphicsElement)        \
-    ADD_WINDOW_OBJECT_INTERFACE(SVGPathElement)            \
-    ADD_WINDOW_OBJECT_INTERFACE(SVGSVGElement)             \
-    ADD_WINDOW_OBJECT_INTERFACE(Text)                      \
-    ADD_WINDOW_OBJECT_INTERFACE(TextEncoder)               \
-    ADD_WINDOW_OBJECT_INTERFACE(TextMetrics)               \
-    ADD_WINDOW_OBJECT_INTERFACE(UIEvent)                   \
-    ADD_WINDOW_OBJECT_INTERFACE(URLSearchParams)           \
-    ADD_WINDOW_OBJECT_INTERFACE(URL)                       \
-    ADD_WINDOW_OBJECT_INTERFACE(WebSocket)                 \
-    ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequest)            \
-    ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequestEventTarget) \
+#define ADD_WINDOW_OBJECT_INTERFACES                                                                \
+    auto& vm = this->vm();                                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(AbortController)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(AbortSignal)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(AbstractRange)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(Crypto)                                                             \
+    ADD_WINDOW_OBJECT_INTERFACE(CSSRule)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(CSSRuleList)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleDeclaration)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleRule)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(CSSStyleSheet)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(CanvasGradient)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(CanvasRenderingContext2D)                                           \
+    ADD_WINDOW_OBJECT_INTERFACE(CharacterData)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(CloseEvent)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(Comment)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(CustomEvent)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(DocumentFragment)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(Document)                                                           \
+    ADD_WINDOW_OBJECT_INTERFACE(DocumentType)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMException)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMImplementation)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMParser)                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMRect)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMRectList)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMRectReadOnly)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMStringMap)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(Element)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(ErrorEvent)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(Event)                                                              \
+    ADD_WINDOW_OBJECT_INTERFACE(EventTarget)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(History)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLAnchorElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLAreaElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLAudioElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLBaseElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLBodyElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLBRElement)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLButtonElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLCanvasElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLCollection)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDataElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDataListElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDetailsElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDialogElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDirectoryElement)                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDivElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLDListElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLElement)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLEmbedElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLFieldSetElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLFontElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLFormElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLFrameElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLFrameSetElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLHeadElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLHeadingElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLHRElement)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLHtmlElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLIFrameElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLImageElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLInputElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLLabelElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLLegendElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLLIElement)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLLinkElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMapElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMarqueeElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMediaElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMenuElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMetaElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLMeterElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLModElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLObjectElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLOListElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLOptGroupElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLOptionElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLOutputElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLParagraphElement)                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLParamElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLPictureElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLPreElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLProgressElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLQuoteElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLScriptElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLSelectElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLSlotElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLSourceElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLSpanElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLStyleElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableCaptionElement)                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableCellElement)                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableColElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableRowElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTableSectionElement)                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTemplateElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTextAreaElement)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTimeElement)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTitleElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLTrackElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLUListElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLUnknownElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(HTMLVideoElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(ImageData)                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(IntersectionObserver)                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(KeyboardEvent)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(MediaQueryList)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(MediaQueryListEvent)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(MessageChannel)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(MessageEvent)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(MouseEvent)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(Node)                                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(NodeList)                                                           \
+    ADD_WINDOW_OBJECT_INTERFACE(PageTransitionEvent)                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(Performance)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(PerformanceTiming)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(ProcessingInstruction)                                              \
+    ADD_WINDOW_OBJECT_INTERFACE(ProgressEvent)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(PromiseRejectionEvent)                                              \
+    ADD_WINDOW_OBJECT_INTERFACE(Range)                                                              \
+    ADD_WINDOW_OBJECT_INTERFACE(ResizeObserver)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(Screen)                                                             \
+    ADD_WINDOW_OBJECT_INTERFACE(Selection)                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(ShadowRoot)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(StaticRange)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(Storage)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(StyleSheet)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(StyleSheetList)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(SubmitEvent)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(SubtleCrypto)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGElement)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGCircleElement)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGEllipseElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGGeometryElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGGraphicsElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGLineElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGPathElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGPolygonElement)                                                  \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGPolylineElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGRectElement)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGSVGElement)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(Text)                                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(TextDecoder)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(TextEncoder)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(TextMetrics)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(UIEvent)                                                            \
+    ADD_WINDOW_OBJECT_INTERFACE(URLSearchParams)                                                    \
+    ADD_WINDOW_OBJECT_INTERFACE(URL)                                                                \
+    ADD_WINDOW_OBJECT_INTERFACE(WebSocket)                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(Worker)                                                             \
+    ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequest)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequestEventTarget)                                          \
+    ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Audio, AudioConstructor, HTMLAudioElementPrototype) \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Image, ImageConstructor, HTMLImageElementPrototype)

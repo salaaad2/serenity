@@ -127,7 +127,10 @@ void ECMAScriptFunctionObject::initialize(GlobalObject& global_object)
             // FIXME: Add the AsyncGeneratorObject and set it as prototype.
             break;
         }
-        define_direct_property(vm.names.prototype, prototype, Attribute::Writable);
+        // 27.7.4 AsyncFunction Instances, https://tc39.es/ecma262/#sec-async-function-instances
+        // AsyncFunction instances do not have a prototype property as they are not constructible.
+        if (m_kind != FunctionKind::Async)
+            define_direct_property(vm.names.prototype, prototype, Attribute::Writable);
     }
 }
 
@@ -136,7 +139,7 @@ ECMAScriptFunctionObject::~ECMAScriptFunctionObject()
 }
 
 // 10.2.1 [[Call]] ( thisArgument, argumentsList ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-call-thisargument-argumentslist
-ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argument, MarkedValueList arguments_list)
+ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argument, MarkedVector<Value> arguments_list)
 {
     auto& vm = this->vm();
 
@@ -194,7 +197,7 @@ ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argu
 }
 
 // 10.2.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-construct-argumentslist-newtarget
-ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedValueList arguments_list, FunctionObject& new_target)
+ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
     auto& vm = this->vm();
     auto& global_object = this->global_object();
@@ -297,8 +300,8 @@ void ECMAScriptFunctionObject::visit_edges(Visitor& visitor)
     visitor.visit(m_home_object);
 
     for (auto& field : m_fields) {
-        if (auto* property_name_ptr = field.name.get_pointer<PropertyKey>(); property_name_ptr && property_name_ptr->is_symbol())
-            visitor.visit(property_name_ptr->as_symbol());
+        if (auto* property_key_ptr = field.name.get_pointer<PropertyKey>(); property_key_ptr && property_key_ptr->is_symbol())
+            visitor.visit(property_key_ptr->as_symbol());
 
         visitor.visit(field.initializer);
     }
@@ -375,11 +378,8 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
 
         if (!has_parameter_expressions && arguments_object_needed) {
             scope_body->for_each_lexically_declared_name([&](auto const& name) {
-                if (name == arguments_name) {
+                if (name == arguments_name)
                     arguments_object_needed = false;
-                    return IterationDecision::Break;
-                }
-                return IterationDecision::Continue;
             });
         }
     } else {
@@ -485,7 +485,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
         if (scope_body) {
             scope_body->for_each_var_declared_name([&](auto const& name) {
                 if (instantiated_var_names.set(name) != AK::HashSetResult::InsertedNewEntry)
-                    return IterationDecision::Continue;
+                    return;
                 MUST(var_environment->create_mutable_binding(global_object(), name, false));
 
                 Value initial_value;
@@ -495,8 +495,6 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
                     initial_value = MUST(environment->get_binding_value(global_object(), name, false));
 
                 MUST(var_environment->initialize_binding(global_object(), name, initial_value));
-
-                return IterationDecision::Continue;
             });
         }
     }
@@ -506,7 +504,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
         scope_body->for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) {
             auto& function_name = function_declaration.name();
             if (parameter_names.contains(function_name))
-                return IterationDecision::Continue;
+                return;
             // The spec says 'initializedBindings' here but that does not exist and it then adds it to 'instantiatedVarNames' so it probably means 'instantiatedVarNames'.
             if (!instantiated_var_names.contains(function_name) && function_name != vm.names.arguments.as_string()) {
                 MUST(var_environment->create_mutable_binding(global_object(), function_name, false));
@@ -515,7 +513,6 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
             }
 
             function_declaration.set_should_do_additional_annexB_steps();
-            return IterationDecision::Continue;
         });
     }
 
@@ -548,17 +545,17 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
     if (!scope_body)
         return {};
 
-    scope_body->for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
-        declaration.for_each_bound_name([&](auto const& name) {
-            if (declaration.is_constant_declaration())
-                MUST(lex_environment->create_immutable_binding(global_object(), name, true));
-            else
-                MUST(lex_environment->create_mutable_binding(global_object(), name, false));
-            return IterationDecision::Continue;
+    if (!Bytecode::Interpreter::current()) {
+        scope_body->for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
+            declaration.for_each_bound_name([&](auto const& name) {
+                if (declaration.is_constant_declaration())
+                    MUST(lex_environment->create_immutable_binding(global_object(), name, true));
+                else
+                    MUST(lex_environment->create_mutable_binding(global_object(), name, false));
+            });
         });
-    });
+    }
 
-    VERIFY(!vm.exception());
     auto* private_environment = callee_context.private_environment;
     for (auto& declaration : functions_to_initialize) {
         auto* function = ECMAScriptFunctionObject::create(global_object(), declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lex_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
@@ -738,7 +735,6 @@ void async_block_start(VM& vm, NonnullRefPtr<Statement> const& async_body, Promi
             VERIFY(result.type() == Completion::Type::Throw);
 
             // ii. Perform ! Call(promiseCapability.[[Reject]], undefined, « result.[[Value]] »).
-            vm.clear_exception();
             MUST(call(global_object, promise_capability.reject, js_undefined(), *result.value()));
         }
         // g. Return.
@@ -776,7 +772,11 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
         // FIXME: pass something to evaluate default arguments with
         TRY(function_declaration_instantiation(nullptr));
         if (!m_bytecode_executable) {
-            m_bytecode_executable = Bytecode::Generator::generate(m_ecmascript_code, m_kind);
+            auto executable_result = JS::Bytecode::Generator::generate(m_ecmascript_code, m_kind);
+            if (executable_result.is_error())
+                return vm.throw_completion<InternalError>(bytecode_interpreter->global_object(), ErrorType::NotImplemented, executable_result.error().to_string());
+
+            m_bytecode_executable = executable_result.release_value();
             m_bytecode_executable->name = m_name;
             auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
             passes.perform(*m_bytecode_executable);
@@ -788,14 +788,11 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
                 m_bytecode_executable->dump();
         }
         auto result_and_frame = bytecode_interpreter->run_and_return_frame(*m_bytecode_executable, nullptr);
-        if (auto* exception = vm.exception())
-            return throw_completion(exception->value());
 
         VERIFY(result_and_frame.frame != nullptr);
-        if (result_and_frame.value.is_error()) {
-            vm.throw_exception(bytecode_interpreter->global_object(), *result_and_frame.value.release_error().value());
-            return throw_completion(vm.exception()->value());
-        }
+        if (result_and_frame.value.is_error())
+            return result_and_frame.value.release_error();
+
         auto result = result_and_frame.value.release_value();
 
         // NOTE: Running the bytecode should eventually return a completion.

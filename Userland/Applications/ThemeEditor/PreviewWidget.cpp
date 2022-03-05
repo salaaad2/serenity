@@ -2,6 +2,7 @@
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2021, Antonio Di Stefano <tonio9681@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -100,10 +101,6 @@ PreviewWidget::PreviewWidget(const Gfx::Palette& preview_palette)
     set_greedy_for_hits(true);
 }
 
-PreviewWidget::~PreviewWidget()
-{
-}
-
 void PreviewWidget::load_theme_bitmaps()
 {
     auto load_bitmap = [](String const& path, String& last_path, RefPtr<Gfx::Bitmap>& bitmap) {
@@ -144,7 +141,7 @@ void PreviewWidget::set_preview_palette(const Gfx::Palette& palette)
 
 void PreviewWidget::set_theme_from_file(Core::File& file)
 {
-    auto config_file = Core::ConfigFile::open(file.filename(), file.leak_fd());
+    auto config_file = Core::ConfigFile::open(file.filename(), file.leak_fd()).release_value_but_fixme_should_propagate_errors();
     auto theme = Gfx::load_system_theme(config_file);
     VERIFY(theme.is_valid());
 

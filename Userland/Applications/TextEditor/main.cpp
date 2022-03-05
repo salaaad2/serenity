@@ -22,7 +22,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
-    Config::pledge_domains("TextEditor");
+    Config::pledge_domain("TextEditor");
 
     char const* preview_mode = "auto";
     char const* file_to_edit = nullptr;
@@ -88,6 +88,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
     text_widget->update_title();
+    text_widget->update_statusbar();
 
     return app->exec();
 }

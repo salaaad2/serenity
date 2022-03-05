@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,8 +8,8 @@
 #pragma once
 
 #include "UndoGlyph.h"
-#include <LibConfig/Listener.h>
 #include <LibGUI/ActionGroup.h>
+#include <LibGUI/FilteringProxyModel.h>
 #include <LibGUI/GlyphMapWidget.h>
 #include <LibGUI/UndoStack.h>
 #include <LibGUI/Widget.h>
@@ -17,11 +18,10 @@
 class GlyphEditorWidget;
 
 class FontEditorWidget final
-    : public GUI::Widget
-    , public Config::Listener {
+    : public GUI::Widget {
     C_OBJECT(FontEditorWidget)
 public:
-    virtual ~FontEditorWidget() override;
+    virtual ~FontEditorWidget() override = default;
 
     bool open_file(String const&);
     bool save_file(String const&);
@@ -34,7 +34,10 @@ public:
     void initialize_menubar(GUI::Window&);
 
     bool is_showing_font_metadata() { return m_font_metadata; }
-    void set_show_font_metadata(bool b);
+    void set_show_font_metadata(bool);
+
+    bool is_showing_unicode_blocks() { return m_unicode_blocks; }
+    void set_show_unicode_blocks(bool);
 
     Function<void()> on_initialize;
 
@@ -42,9 +45,6 @@ private:
     FontEditorWidget();
 
     virtual void drop_event(GUI::DropEvent&) override;
-
-    virtual void config_i32_did_change(String const& domain, String const& group, String const& key, i32 value) override;
-    virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override;
 
     void undo();
     void redo();
@@ -86,6 +86,7 @@ private:
 
     RefPtr<GUI::Action> m_open_preview_action;
     RefPtr<GUI::Action> m_show_metadata_action;
+    RefPtr<GUI::Action> m_show_unicode_blocks_action;
 
     GUI::ActionGroup m_glyph_editor_scale_actions;
     RefPtr<GUI::Action> m_scale_five_action;
@@ -106,6 +107,7 @@ private:
     RefPtr<GUI::Window> m_font_preview_window;
     RefPtr<GUI::Widget> m_left_column_container;
     RefPtr<GUI::Widget> m_glyph_editor_container;
+    RefPtr<GUI::Widget> m_unicode_block_container;
     RefPtr<GUI::ComboBox> m_weight_combobox;
     RefPtr<GUI::ComboBox> m_slope_combobox;
     RefPtr<GUI::SpinBox> m_spacing_spinbox;
@@ -116,11 +118,18 @@ private:
     RefPtr<GUI::CheckBox> m_glyph_editor_present_checkbox;
     RefPtr<GUI::TextBox> m_name_textbox;
     RefPtr<GUI::TextBox> m_family_textbox;
+    RefPtr<GUI::TextBox> m_search_textbox;
     RefPtr<GUI::CheckBox> m_fixed_width_checkbox;
     RefPtr<GUI::GroupBox> m_font_metadata_groupbox;
+    RefPtr<GUI::ListView> m_unicode_block_listview;
+    RefPtr<GUI::Model> m_unicode_block_model;
+    RefPtr<GUI::FilteringProxyModel> m_filter_model;
 
     String m_path;
     Vector<String> m_font_weight_list;
     Vector<String> m_font_slope_list;
+    Vector<String> m_unicode_block_list;
     bool m_font_metadata { true };
+    bool m_unicode_blocks { true };
+    Unicode::CodePointRange m_range { 0x0000, 0x10FFFF };
 };

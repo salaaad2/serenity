@@ -71,6 +71,7 @@ public:
     bool is_document_fragment() const { return type() == NodeType::DOCUMENT_FRAGMENT_NODE; }
     bool is_parent_node() const { return is_element() || is_document() || is_document_fragment(); }
     bool is_slottable() const { return is_element() || is_text(); }
+    bool is_attribute() const { return type() == NodeType::ATTRIBUTE_NODE; }
 
     virtual bool requires_svg_container() const { return false; }
     virtual bool is_svg_container() const { return false; }
@@ -83,6 +84,7 @@ public:
     virtual bool is_editable() const;
 
     virtual bool is_html_html_element() const { return false; }
+    virtual bool is_html_anchor_element() const { return false; }
     virtual bool is_html_template_element() const { return false; }
     virtual bool is_browsing_context_container() const { return false; }
 
@@ -90,6 +92,8 @@ public:
     ExceptionOr<NonnullRefPtr<Node>> pre_remove(NonnullRefPtr<Node>);
 
     ExceptionOr<NonnullRefPtr<Node>> append_child(NonnullRefPtr<Node>);
+    ExceptionOr<NonnullRefPtr<Node>> remove_child(NonnullRefPtr<Node>);
+
     void insert_before(NonnullRefPtr<Node> node, RefPtr<Node> child, bool suppress_observers = false);
     void remove(bool suppress_observers = false);
     void remove_all_children(bool suppress_observers = false);
@@ -110,6 +114,9 @@ public:
     String descendant_text_content() const;
     String text_content() const;
     void set_text_content(String const&);
+
+    String node_value() const;
+    void set_node_value(String const&);
 
     Document& document() { return *m_document; }
     const Document& document() const { return *m_document; }
@@ -202,6 +209,10 @@ public:
     NonnullRefPtr<Node> get_root_node(GetRootNodeOptions const& options = {});
 
     bool is_uninteresting_whitespace_node() const;
+
+    String debug_description() const;
+
+    size_t length() const;
 
 protected:
     Node(Document&, NodeType);

@@ -9,7 +9,6 @@
 #include <LibCompress/Gzip.h>
 #include <LibCompress/Zlib.h>
 #include <LibCore/Event.h>
-#include <LibCore/TCPSocket.h>
 #include <LibHTTP/HttpResponse.h>
 #include <LibHTTP/Job.h>
 #include <stdio.h>
@@ -111,7 +110,7 @@ void Job::flush_received_buffers()
         return;
     dbgln_if(JOB_DEBUG, "Job: Flushing received buffers: have {} bytes in {} buffers for {}", m_buffered_size, m_received_buffers.size(), m_request.url());
     for (size_t i = 0; i < m_received_buffers.size(); ++i) {
-        auto& payload = m_received_buffers[i];
+        auto& payload = m_received_buffers[i].pending_flush;
         auto result = do_write(payload);
         if (result.is_error()) {
             if (!result.error().is_errno()) {
@@ -128,7 +127,7 @@ void Job::flush_received_buffers()
         m_buffered_size -= written;
         if (written == payload.size()) {
             // FIXME: Make this a take-first-friendly object?
-            m_received_buffers.take_first();
+            (void)m_received_buffers.take_first();
             --i;
             continue;
         }
@@ -244,8 +243,8 @@ void Job::on_socket_connected()
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
             }
             auto parts = line.split_view(' ');
-            if (parts.size() < 3) {
-                dbgln("Job: Expected 3-part HTTP status, got '{}'", line);
+            if (parts.size() < 2) {
+                dbgln("Job: Expected 2-part or 3-part HTTP status line, got '{}'", line);
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
             }
             auto code = parts[1].to_uint();
@@ -311,13 +310,12 @@ void Job::on_socket_connected()
                     if (result.value() == 0 && !m_headers.get("Transfer-Encoding"sv).value_or(""sv).view().trim_whitespace().equals_ignoring_case("chunked"sv))
                         return finish_up();
                 }
+                // There's also the possibility that the server responds with 204 (No Content),
+                // and manages to set a Content-Length anyway, in such cases ignore Content-Length and quit early;
+                // As the HTTP spec explicitly prohibits presence of Content-Length when the response code is 204.
+                if (m_code == 204)
+                    return finish_up();
 
-                can_read_line = m_socket->can_read_line();
-                if (can_read_line.is_error())
-                    return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
-
-                if (!can_read_line.value())
-                    return;
                 break;
             }
             auto parts = line.split_view(':');
@@ -381,12 +379,6 @@ void Job::on_socket_connected()
             }
         }
         VERIFY(m_state == State::InBody);
-
-        auto can_read_without_blocking = m_socket->can_read_without_blocking();
-        if (can_read_without_blocking.is_error())
-            return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
-        if (!can_read_without_blocking.value())
-            return;
 
         while (true) {
             auto can_read_without_blocking = m_socket->can_read_without_blocking();
@@ -502,7 +494,7 @@ void Job::on_socket_connected()
                 }
             }
 
-            m_received_buffers.append(payload);
+            m_received_buffers.append(make<ReceivedBuffer>(payload));
             m_buffered_size += payload.size();
             m_received_size += payload.size();
             flush_received_buffers();
@@ -575,8 +567,8 @@ void Job::finish_up()
 
         u8* flat_ptr = flattened_buffer.data();
         for (auto& received_buffer : m_received_buffers) {
-            memcpy(flat_ptr, received_buffer.data(), received_buffer.size());
-            flat_ptr += received_buffer.size();
+            memcpy(flat_ptr, received_buffer.pending_flush.data(), received_buffer.pending_flush.size());
+            flat_ptr += received_buffer.pending_flush.size();
         }
         m_received_buffers.clear();
 
@@ -591,7 +583,7 @@ void Job::finish_up()
         }
 
         m_buffered_size = flattened_buffer.size();
-        m_received_buffers.append(move(flattened_buffer));
+        m_received_buffers.append(make<ReceivedBuffer>(move(flattened_buffer)));
         m_can_stream_response = true;
     }
 

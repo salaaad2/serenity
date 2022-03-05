@@ -1,23 +1,20 @@
 /*
  * Copyright (c) 2021, Valtteri Koskivuori <vkoskiv@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "MagnifierWidget.h"
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/DisplayLink.h>
 #include <LibGUI/Painter.h>
 #include <LibGUI/Window.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/Rect.h>
 
 MagnifierWidget::MagnifierWidget()
 {
     GUI::DisplayLink::register_callback([this](auto) { sync(); });
-}
-
-MagnifierWidget::~MagnifierWidget()
-{
 }
 
 void MagnifierWidget::set_scale_factor(int scale_factor)
@@ -56,7 +53,7 @@ void MagnifierWidget::sync()
 
     auto size = frame_inner_rect().size();
     Gfx::IntSize grab_size { size.width() / m_scale_factor, size.height() / m_scale_factor };
-    m_grabbed_bitmap = GUI::WindowServerConnection::the().get_screen_bitmap_around_cursor(grab_size).bitmap();
+    m_grabbed_bitmap = GUI::ConnectionToWindowServer::the().get_screen_bitmap_around_cursor(grab_size).bitmap();
     m_grabbed_bitmaps.enqueue(m_grabbed_bitmap);
     update();
 }

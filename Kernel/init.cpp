@@ -13,8 +13,7 @@
 #include <Kernel/Bus/VirtIO/Device.h>
 #include <Kernel/CMOS.h>
 #include <Kernel/CommandLine.h>
-#include <Kernel/Devices/Audio/AC97.h>
-#include <Kernel/Devices/Audio/SB16.h>
+#include <Kernel/Devices/Audio/Management.h>
 #include <Kernel/Devices/DeviceControlDevice.h>
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Devices/FullDevice.h>
@@ -34,6 +33,7 @@
 #include <Kernel/Firmware/ACPI/Parser.h>
 #include <Kernel/Firmware/SysFSFirmware.h>
 #include <Kernel/Graphics/Console/BootFramebufferConsole.h>
+#include <Kernel/Graphics/Console/TextModeConsole.h>
 #include <Kernel/Graphics/GraphicsManagement.h>
 #include <Kernel/Heap/kmalloc.h>
 #include <Kernel/Interrupts/APIC.h>
@@ -136,7 +136,7 @@ READONLY_AFTER_INIT u8 multiboot_framebuffer_bpp;
 READONLY_AFTER_INIT u8 multiboot_framebuffer_type;
 }
 
-Atomic<Graphics::BootFramebufferConsole*> boot_framebuffer_console;
+Atomic<Graphics::Console*> g_boot_console;
 
 extern "C" [[noreturn]] UNMAP_AFTER_INIT void init(BootInfo const& boot_info)
 {
@@ -190,9 +190,13 @@ extern "C" [[noreturn]] UNMAP_AFTER_INIT void init(BootInfo const& boot_info)
     CommandLine::initialize();
     Memory::MemoryManager::initialize(0);
 
+    // NOTE: If the bootloader provided a framebuffer, then set up an initial console.
+    // If the bootloader didn't provide a framebuffer, then set up an initial text console.
+    // We do so we can see the output on the screen as soon as possible.
     if (!multiboot_framebuffer_addr.is_null()) {
-        // NOTE: If the bootloader provided a framebuffer, then set up an initial console so we can see the output on the screen as soon as possible!
-        boot_framebuffer_console = &try_make_ref_counted<Graphics::BootFramebufferConsole>(multiboot_framebuffer_addr, multiboot_framebuffer_width, multiboot_framebuffer_height, multiboot_framebuffer_pitch).value().leak_ref();
+        g_boot_console = &try_make_ref_counted<Graphics::BootFramebufferConsole>(multiboot_framebuffer_addr, multiboot_framebuffer_width, multiboot_framebuffer_height, multiboot_framebuffer_pitch).value().leak_ref();
+    } else {
+        g_boot_console = &Graphics::TextModeConsole::initialize().leak_ref();
     }
     dmesgln("Starting SerenityOS...");
 
@@ -296,7 +300,9 @@ void init_stage2(void*)
 
     // Initialize the PCI Bus as early as possible, for early boot (PCI based) serial logging
     PCI::initialize();
-    PCISerialDevice::detect();
+    if (!PCI::Access::is_disabled()) {
+        PCISerialDevice::detect();
+    }
 
     VirtualFileSystem::initialize();
 
@@ -317,10 +323,14 @@ void init_stage2(void*)
 
     auto boot_profiling = kernel_command_line().is_boot_profiling_enabled();
 
-    USB::USBManagement::initialize();
+    if (!PCI::Access::is_disabled()) {
+        USB::USBManagement::initialize();
+    }
     FirmwareSysFSDirectory::initialize();
 
-    VirtIO::detect();
+    if (!PCI::Access::is_disabled()) {
+        VirtIO::detect();
+    }
 
     NetworkingManagement::the().initialize();
     Syscall::initialize();
@@ -334,8 +344,7 @@ void init_stage2(void*)
     (void)RandomDevice::must_create().leak_ref();
     PTYMultiplexer::initialize();
 
-    (void)SB16::try_detect_and_create();
-    AC97::detect();
+    AudioManagement::the().initialize();
 
     StorageManagement::the().initialize(kernel_command_line().root_device(), kernel_command_line().is_force_pio(), kernel_command_line().is_nvme_polling_enabled());
     if (VirtualFileSystem::the().mount_root(StorageManagement::the().root_filesystem()).is_error()) {
@@ -370,7 +379,8 @@ void init_stage2(void*)
     if (boot_profiling) {
         dbgln("Starting full system boot profiling");
         MutexLocker mutex_locker(Process::current().big_lock());
-        auto result = Process::current().sys$profiling_enable(-1, ~0ull);
+        const auto enable_all = ~(u64)0;
+        auto result = Process::current().sys$profiling_enable(-1, reinterpret_cast<FlatPtr>(&enable_all));
         VERIFY(!result.is_error());
     }
 

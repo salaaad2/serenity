@@ -53,6 +53,9 @@ class ExpectationError extends Error {
 
     const valueToString = value => {
         try {
+            if (value === 0 && 1 / value < 0) {
+                return "-0";
+            }
             return String(value);
         } catch {
             // e.g for objects without a prototype, the above throws.
@@ -277,7 +280,13 @@ class ExpectationError extends Error {
 
         toEqual(value) {
             this.__doMatcher(() => {
-                this.__expect(deepEquals(this.target, value));
+                this.__expect(
+                    deepEquals(this.target, value),
+                    () =>
+                        `Expected _${valueToString(value)}_, but got _${valueToString(
+                            this.target
+                        )}_`
+                );
             });
         }
 
@@ -443,6 +452,46 @@ class ExpectationError extends Error {
 
             this.__doMatcher(() => {
                 this.__expect(d.set !== undefined);
+            });
+        }
+
+        toBeIteratorResultWithValue(value) {
+            this.__expect(this.target !== undefined && this.target !== null);
+            this.__doMatcher(() => {
+                this.__expect(
+                    this.target.done === false,
+                    () =>
+                        `toGiveIteratorResultWithValue: expected 'done' to be _false_ got ${valueToString(
+                            this.target.done
+                        )}`
+                );
+                this.__expect(
+                    deepEquals(value, this.target.value),
+                    () =>
+                        `toGiveIteratorResultWithValue: expected 'value' to be _${valueToString(
+                            value
+                        )}_ got ${valueToString(this.target.value)}`
+                );
+            });
+        }
+
+        toBeIteratorResultDone() {
+            this.__expect(this.target !== undefined && this.target !== null);
+            this.__doMatcher(() => {
+                this.__expect(
+                    this.target.done === true,
+                    () =>
+                        `toGiveIteratorResultDone: expected 'done' to be _true_ got ${valueToString(
+                            this.target.done
+                        )}`
+                );
+                this.__expect(
+                    this.target.value === undefined,
+                    () =>
+                        `toGiveIteratorResultDone: expected 'value' to be _undefined_ got ${valueToString(
+                            this.target.value
+                        )}`
+                );
             });
         }
 

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2020, Jesse Buhagiar <jooster669@gmail.com>
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,13 +16,13 @@
 #include <LibGUI/Button.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGUI/ComboBox.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/Desktop.h>
 #include <LibGUI/FilePicker.h>
 #include <LibGUI/FileSystemModel.h>
 #include <LibGUI/IconView.h>
 #include <LibGUI/ItemListModel.h>
 #include <LibGUI/MessageBox.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/Palette.h>
 #include <LibGfx/SystemTheme.h>
 
@@ -38,10 +39,6 @@ BackgroundSettingsWidget::BackgroundSettingsWidget()
 
     create_frame();
     load_current_settings();
-}
-
-BackgroundSettingsWidget::~BackgroundSettingsWidget()
-{
 }
 
 void BackgroundSettingsWidget::create_frame()
@@ -108,7 +105,7 @@ void BackgroundSettingsWidget::create_frame()
 
 void BackgroundSettingsWidget::load_current_settings()
 {
-    auto ws_config = Core::ConfigFile::open("/etc/WindowServer.ini");
+    auto ws_config = Core::ConfigFile::open("/etc/WindowServer.ini").release_value_but_fixme_should_propagate_errors();
 
     auto selected_wallpaper = Config::read_string("WindowManager", "Background", "Wallpaper", "");
     if (!selected_wallpaper.is_empty()) {
@@ -140,9 +137,7 @@ void BackgroundSettingsWidget::load_current_settings()
 
 void BackgroundSettingsWidget::apply_settings()
 {
-    if (GUI::Desktop::the().set_wallpaper(m_monitor_widget->wallpaper()))
-        Config::write_string("WindowManager", "Background", "Wallpaper", m_monitor_widget->wallpaper());
-    else
+    if (!GUI::Desktop::the().set_wallpaper(m_monitor_widget->wallpaper_bitmap(), m_monitor_widget->wallpaper()))
         GUI::MessageBox::show_error(window(), String::formatted("Unable to load file {} as wallpaper", m_monitor_widget->wallpaper()));
 
     GUI::Desktop::the().set_background_color(m_color_input->text());

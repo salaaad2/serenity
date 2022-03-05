@@ -9,16 +9,16 @@
 #include <AK/ByteBuffer.h>
 #include <AK/OwnPtr.h>
 #include <LibGfx/Forward.h>
-#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/Loader/ImageLoader.h>
 
 namespace Web::HTML {
 
-class HTMLImageElement final : public HTMLElement {
+class HTMLImageElement final : public FormAssociatedElement {
 public:
     using WrapperType = Bindings::HTMLImageElementWrapper;
 
-    HTMLImageElement(DOM::Document&, QualifiedName);
+    HTMLImageElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLImageElement() override;
 
     virtual void parse_attribute(const FlyString& name, const String& value) override;
@@ -27,6 +27,12 @@ public:
     String src() const { return attribute(HTML::AttributeNames::src); }
 
     const Gfx::Bitmap* bitmap() const;
+
+    unsigned width() const;
+    void set_width(unsigned);
+
+    unsigned height() const;
+    void set_height(unsigned);
 
 private:
     virtual void apply_presentational_hints(CSS::StyleProperties&) const override;

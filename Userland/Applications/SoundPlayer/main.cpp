@@ -5,12 +5,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "AlbumCoverVisualizationWidget.h"
 #include "BarsVisualizationWidget.h"
-#include "NoVisualizationWidget.h"
 #include "Player.h"
 #include "SampleWidget.h"
 #include "SoundPlayerWidgetAdvancedView.h"
-#include <LibAudio/ClientConnection.h>
+#include <LibAudio/ConnectionFromClient.h>
 #include <LibCore/System.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/ActionGroup.h>
@@ -28,7 +28,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio recvfd sendfd rpath thread unix"));
 
     auto app = TRY(GUI::Application::try_create(arguments));
-    auto audio_client = TRY(Audio::ClientConnection::try_create());
+    auto audio_client = TRY(Audio::ConnectionFromClient::try_create());
 
     TRY(Core::System::pledge("stdio recvfd sendfd rpath thread"));
 
@@ -124,11 +124,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(visualization_menu->try_add_action(samples));
     visualization_actions.add_action(samples);
 
-    auto none = GUI::Action::create_checkable("&None", [&](auto&) {
-        static_cast<SoundPlayerWidgetAdvancedView*>(player)->set_visualization<NoVisualizationWidget>();
+    auto album_cover_visualization = GUI::Action::create_checkable("&Album Cover", [&](auto&) {
+        static_cast<SoundPlayerWidgetAdvancedView*>(player)->set_visualization<AlbumCoverVisualizationWidget>();
     });
-    TRY(visualization_menu->try_add_action(none));
-    visualization_actions.add_action(none);
+    TRY(visualization_menu->try_add_action(album_cover_visualization));
+    visualization_actions.add_action(album_cover_visualization);
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Sound Player", app_icon, window)));

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2020-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -18,7 +18,7 @@ class ChessWidget final : public GUI::Frame {
     C_OBJECT(ChessWidget);
 
 public:
-    virtual ~ChessWidget() override;
+    virtual ~ChessWidget() override = default;
 
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void mousedown_event(GUI::MouseEvent&) override;
@@ -114,10 +114,10 @@ private:
     BoardMarking m_current_marking;
     Vector<BoardMarking> m_board_markings;
     BoardTheme m_board_theme { "Beige", Color::from_rgb(0xb58863), Color::from_rgb(0xf0d9b5) };
-    Color m_move_highlight_color { Color::from_rgba(0x66ccee00) };
-    Color m_marking_primary_color { Color::from_rgba(0x66ff0000) };
-    Color m_marking_alternate_color { Color::from_rgba(0x66ffaa00) };
-    Color m_marking_secondary_color { Color::from_rgba(0x6655dd55) };
+    Color m_move_highlight_color { Color::from_argb(0x66ccee00) };
+    Color m_marking_primary_color { Color::from_argb(0x66ff0000) };
+    Color m_marking_alternate_color { Color::from_argb(0x66ffaa00) };
+    Color m_marking_secondary_color { Color::from_argb(0x6655dd55) };
     Chess::Color m_side { Chess::Color::White };
     HashMap<Chess::Piece, RefPtr<Gfx::Bitmap>> m_pieces;
     String m_piece_set;

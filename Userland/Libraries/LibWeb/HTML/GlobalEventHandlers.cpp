@@ -7,7 +7,7 @@
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/DOM/EventListener.h>
+#include <LibWeb/DOM/IDLEventListener.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
@@ -17,11 +17,11 @@ namespace Web::HTML {
 
 #undef __ENUMERATE
 #define __ENUMERATE(attribute_name, event_name)                                                       \
-    void GlobalEventHandlers::set_##attribute_name(HTML::EventHandler value)                          \
+    void GlobalEventHandlers::set_##attribute_name(Optional<Bindings::CallbackType> value)            \
     {                                                                                                 \
         global_event_handlers_to_event_target().set_event_handler_attribute(event_name, move(value)); \
     }                                                                                                 \
-    HTML::EventHandler GlobalEventHandlers::attribute_name()                                          \
+    Bindings::CallbackType* GlobalEventHandlers::attribute_name()                                     \
     {                                                                                                 \
         return global_event_handlers_to_event_target().event_handler_attribute(event_name);           \
     }

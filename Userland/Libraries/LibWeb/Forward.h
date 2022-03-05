@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -19,6 +19,9 @@ class SubtleCrypto;
 }
 
 namespace Web::CSS {
+class Angle;
+class AnglePercentage;
+class AngleStyleValue;
 class BackgroundRepeatStyleValue;
 class BackgroundSizeStyleValue;
 class BackgroundStyleValue;
@@ -27,6 +30,7 @@ class BorderStyleValue;
 class BoxShadowStyleValue;
 class CalculatedStyleValue;
 class ColorStyleValue;
+class ContentStyleValue;
 class CSSImportRule;
 class CSSMediaRule;
 class CSSRule;
@@ -40,6 +44,9 @@ class ElementInlineCSSStyleDeclaration;
 class FlexFlowStyleValue;
 class FlexStyleValue;
 class FontStyleValue;
+class Frequency;
+class FrequencyPercentage;
+class FrequencyStyleValue;
 class IdentifierStyleValue;
 class ImageStyleValue;
 class InheritStyleValue;
@@ -58,6 +65,8 @@ class Percentage;
 class PercentageStyleValue;
 class PositionStyleValue;
 class PropertyOwningCSSStyleDeclaration;
+class Resolution;
+class ResolutionStyleValue;
 class Screen;
 class Selector;
 class StringStyleValue;
@@ -68,12 +77,16 @@ class StyleValue;
 class StyleValueList;
 class Supports;
 class TextDecorationStyleValue;
+class Time;
+class TimePercentage;
+class TimeStyleValue;
 class TransformationStyleValue;
 class UnresolvedStyleValue;
 class UnsetStyleValue;
 }
 
 namespace Web::DOM {
+class AbstractRange;
 class AbortController;
 class AbortSignal;
 class Attribute;
@@ -84,15 +97,16 @@ class Document;
 class DocumentFragment;
 class DocumentLoadEventDelayer;
 class DocumentType;
+class DOMEventListener;
 class DOMException;
 class DOMImplementation;
 class DOMTokenList;
 class Element;
 class Event;
 class EventHandler;
-class EventListener;
 class EventTarget;
 class HTMLCollection;
+class IDLEventListener;
 class LiveNodeList;
 class NamedNodeMap;
 class Node;
@@ -103,10 +117,13 @@ class ProcessingInstruction;
 class Range;
 class ShadowRoot;
 class StaticNodeList;
+class StaticRange;
 class Text;
 class Timer;
 class Window;
 enum class QuirksMode;
+struct EventListenerOptions;
+struct AddEventListenerOptions;
 
 template<typename ValueType>
 class ExceptionOr;
@@ -118,6 +135,7 @@ class TextEncoder;
 
 namespace Web::Geometry {
 class DOMRect;
+class DOMRectList;
 class DOMRectReadOnly;
 }
 
@@ -125,9 +143,13 @@ namespace Web::HTML {
 class BrowsingContext;
 class BrowsingContextContainer;
 class CanvasRenderingContext2D;
+class ClassicScript;
 class CloseEvent;
 class DOMParser;
 class DOMStringMap;
+struct Environment;
+struct EnvironmentSettingsObject;
+class ErrorEvent;
 struct EventHandler;
 class EventLoop;
 class HTMLAnchorElement;
@@ -209,9 +231,16 @@ class MessageEvent;
 class MessagePort;
 class PageTransitionEvent;
 class PromiseRejectionEvent;
+class WorkerDebugConsoleClient;
+class Storage;
 class SubmitEvent;
 class TextMetrics;
-class WebSocket;
+class WindowEnvironmentSettingsObject;
+class Worker;
+class WorkerEnvironmentSettingsObject;
+class WorkerGlobalScope;
+class WorkerLocation;
+class WorkerNavigator;
 }
 
 namespace Web::HighResolutionTime {
@@ -220,6 +249,10 @@ class Performance;
 
 namespace Web::IntersectionObserver {
 class IntersectionObserver;
+}
+
+namespace Web::MimeSniff {
+class MimeType;
 }
 
 namespace Web::NavigationTiming {
@@ -235,15 +268,25 @@ class ResizeObserver;
 }
 
 namespace Web::SVG {
+class SVGCircleElement;
 class SVGElement;
+class SVGEllipseElement;
 class SVGGeometryElement;
 class SVGGraphicsElement;
+class SVGLineElement;
 class SVGPathElement;
+class SVGPolygonElement;
+class SVGPolylineElement;
+class SVGRectElement;
 class SVGSVGElement;
 }
 
 namespace Web::Selection {
 class Selection;
+}
+
+namespace Web::WebSockets {
+class WebSocket;
 }
 
 namespace Web::Layout {
@@ -256,12 +299,15 @@ class ButtonBox;
 class CheckBox;
 class FlexFormattingContext;
 class FormattingContext;
+struct FormattingState;
 class InitialContainingBlock;
 class InlineFormattingContext;
 class Label;
 class LabelableNode;
 class LineBox;
 class LineBoxFragment;
+class ListItemBox;
+class ListItemMarkerBox;
 class Node;
 class NodeWithStyle;
 class NodeWithStyleAndBoxModelMetrics;
@@ -304,9 +350,11 @@ class URLSearchParamsIterator;
 }
 
 namespace Web::Bindings {
+class AbstractRangeWrapper;
 class AbortControllerWrapper;
 class AbortSignalWrapper;
 class AttributeWrapper;
+struct CallbackType;
 class CanvasGradientWrapper;
 class CanvasRenderingContext2DWrapper;
 class CharacterDataWrapper;
@@ -325,14 +373,17 @@ class DocumentWrapper;
 class DOMExceptionWrapper;
 class DOMImplementationWrapper;
 class DOMParserWrapper;
+class DOMRectListWrapper;
 class DOMRectReadOnlyWrapper;
 class DOMRectWrapper;
 class DOMStringMapWrapper;
 class DOMTokenListWrapper;
 class ElementWrapper;
+class ErrorEventWrapper;
 class EventListenerWrapper;
 class EventTargetWrapper;
 class EventWrapper;
+class FocusEventWrapper;
 class HistoryWrapper;
 class HTMLAnchorElementWrapper;
 class HTMLAreaElementWrapper;
@@ -431,17 +482,25 @@ class RangePrototype;
 class RangeWrapper;
 class ResizeObserverWrapper;
 class ScreenWrapper;
-class ScriptExecutionContext;
 class SelectionWrapper;
+class StaticRangeWrapper;
+class StorageWrapper;
 class StyleSheetListWrapper;
 class StyleSheetWrapper;
 class SubmitEventWrapper;
 class SubtleCryptoWrapper;
+class SVGCircleElementWrapper;
 class SVGElementWrapper;
+class SVGEllipseElementWrapper;
 class SVGGeometryElementWrapper;
 class SVGGraphicsElementWrapper;
+class SVGLineElementWrapper;
 class SVGPathElementWrapper;
+class SVGPolygonElementWrapper;
+class SVGPolylineElementWrapper;
+class SVGRectElementWrapper;
 class SVGSVGElementWrapper;
+class TextDecoderWrapper;
 class TextEncoderWrapper;
 class TextMetricsWrapper;
 class TextWrapper;
@@ -456,10 +515,17 @@ class URLSearchParamsWrapper;
 class URLWrapper;
 class WebSocketWrapper;
 class WindowObject;
+class WorkerWrapper;
+class WorkerGlobalScopeWrapper;
+class WorkerLocationWrapper;
+class WorkerNavigatorWrapper;
 class Wrappable;
 class Wrapper;
 class XMLHttpRequestConstructor;
 class XMLHttpRequestEventTargetWrapper;
 class XMLHttpRequestPrototype;
 class XMLHttpRequestWrapper;
+enum class CanPlayTypeResult;
+enum class DOMParserSupportedType;
+enum class XMLHttpRequestResponseType;
 }

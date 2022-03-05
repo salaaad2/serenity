@@ -1,13 +1,14 @@
 /*
- * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2021-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "TreeMapWidget.h"
+#include <AK/Array.h>
 #include <AK/NumberFormat.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/Painter.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/Font.h>
 #include <WindowServer/WindowManager.h>
 
@@ -15,16 +16,7 @@ REGISTER_WIDGET(SpaceAnalyzer, TreeMapWidget)
 
 namespace SpaceAnalyzer {
 
-TreeMapWidget::TreeMapWidget()
-    : m_viewpoint(0)
-{
-}
-
-TreeMapWidget::~TreeMapWidget()
-{
-}
-
-static const Color colors[] = {
+static constexpr Array colors = {
     Color(253, 231, 37),
     Color(148, 216, 64),
     Color(60, 188, 117),
@@ -318,7 +310,7 @@ void TreeMapWidget::mousewheel_event(GUI::MouseEvent& event)
 {
     int delta = event.wheel_delta_y();
     // FIXME: The wheel_delta_y is premultiplied in the window server, we actually want a raw value here.
-    int step_size = GUI::WindowServerConnection::the().get_scroll_step_size();
+    int step_size = GUI::ConnectionToWindowServer::the().get_scroll_step_size();
     if (delta > 0) {
         size_t step_back = delta / step_size;
         if (step_back > m_viewpoint)

@@ -1,7 +1,11 @@
 include(${CMAKE_CURRENT_LIST_DIR}/utils.cmake)
 
 set(UCD_VERSION 14.0.0)
-set(CLDR_VERSION 40.0.0)
+set(CLDR_VERSION 40.0.0-updated)
+
+# FIXME: When the CLDR is bumped to version 41, we can remove this. A bugfix to the CLDR was released with the same
+#        version number, so the CLDR_VERSION number above is a fake number to force a redownload.
+set(CLDR_REAL_VERSION 40.0.0)
 
 set(UCD_PATH "${CMAKE_BINARY_DIR}/UCD" CACHE PATH "Download location for UCD files")
 set(CLDR_PATH "${CMAKE_BINARY_DIR}/CLDR" CACHE PATH "Download location for CLDR files")
@@ -42,6 +46,9 @@ set(SCRIPTS_PATH "${UCD_PATH}/Scripts.txt")
 set(SCRIPT_EXTENSIONS_URL "https://www.unicode.org/Public/${UCD_VERSION}/ucd/ScriptExtensions.txt")
 set(SCRIPT_EXTENSIONS_PATH "${UCD_PATH}/ScriptExtensions.txt")
 
+set(BLOCKS_URL "https://www.unicode.org/Public/${UCD_VERSION}/ucd/Blocks.txt")
+set(BLOCKS_PATH "${UCD_PATH}/Blocks.txt")
+
 set(EMOJI_DATA_URL "https://www.unicode.org/Public/${UCD_VERSION}/ucd/emoji/emoji-data.txt")
 set(EMOJI_DATA_PATH "${UCD_PATH}/emoji-data.txt")
 
@@ -57,8 +64,11 @@ set(WORD_BREAK_PROP_PATH "${UCD_PATH}/WordBreakProperty.txt")
 set(SENTENCE_BREAK_PROP_URL "https://www.unicode.org/Public/${UCD_VERSION}/ucd/auxiliary/SentenceBreakProperty.txt")
 set(SENTENCE_BREAK_PROP_PATH "${UCD_PATH}/SentenceBreakProperty.txt")
 
-set(CLDR_ZIP_URL "https://github.com/unicode-org/cldr-json/releases/download/${CLDR_VERSION}/cldr-${CLDR_VERSION}-json-modern.zip")
+set(CLDR_ZIP_URL "https://github.com/unicode-org/cldr-json/releases/download/${CLDR_REAL_VERSION}/cldr-${CLDR_REAL_VERSION}-json-modern.zip")
 set(CLDR_ZIP_PATH "${CLDR_PATH}/cldr.zip")
+
+set(CLDR_BCP47_SOURCE cldr-bcp47)
+set(CLDR_BCP47_PATH "${CLDR_PATH}/${CLDR_BCP47_SOURCE}")
 
 set(CLDR_CORE_SOURCE cldr-core)
 set(CLDR_CORE_PATH "${CLDR_PATH}/${CLDR_CORE_SOURCE}")
@@ -103,6 +113,7 @@ if (ENABLE_UNICODE_DATABASE_DOWNLOAD)
     download_file("${NAME_ALIAS_URL}" "${NAME_ALIAS_PATH}")
     download_file("${SCRIPTS_URL}" "${SCRIPTS_PATH}")
     download_file("${SCRIPT_EXTENSIONS_URL}" "${SCRIPT_EXTENSIONS_PATH}")
+    download_file("${BLOCKS_URL}" "${BLOCKS_PATH}")
     download_file("${EMOJI_DATA_URL}" "${EMOJI_DATA_PATH}")
     download_file("${NORM_PROPS_URL}" "${NORM_PROPS_PATH}")
     download_file("${GRAPHEME_BREAK_PROP_URL}" "${GRAPHEME_BREAK_PROP_PATH}")
@@ -110,6 +121,7 @@ if (ENABLE_UNICODE_DATABASE_DOWNLOAD)
     download_file("${SENTENCE_BREAK_PROP_URL}" "${SENTENCE_BREAK_PROP_PATH}")
 
     download_file("${CLDR_ZIP_URL}" "${CLDR_ZIP_PATH}")
+    extract_cldr_file("${CLDR_BCP47_SOURCE}" "${CLDR_BCP47_PATH}")
     extract_cldr_file("${CLDR_CORE_SOURCE}" "${CLDR_CORE_PATH}")
     extract_cldr_file("${CLDR_DATES_SOURCE}" "${CLDR_DATES_PATH}")
     extract_cldr_file("${CLDR_LOCALES_SOURCE}" "${CLDR_LOCALES_PATH}")
@@ -160,7 +172,7 @@ if (ENABLE_UNICODE_DATABASE_DOWNLOAD)
         "${UNICODE_META_TARGET_PREFIX}"
         "${UNICODE_DATA_HEADER}"
         "${UNICODE_DATA_IMPLEMENTATION}"
-        arguments -u "${UNICODE_DATA_PATH}" -s "${SPECIAL_CASING_PATH}" -g "${DERIVED_GENERAL_CATEGORY_PATH}" -p "${PROP_LIST_PATH}" -d "${DERIVED_CORE_PROP_PATH}" -b "${DERIVED_BINARY_PROP_PATH}" -a "${PROP_ALIAS_PATH}" -v "${PROP_VALUE_ALIAS_PATH}" -r "${SCRIPTS_PATH}" -x "${SCRIPT_EXTENSIONS_PATH}" -e "${EMOJI_DATA_PATH}" -m "${NAME_ALIAS_PATH}" -n "${NORM_PROPS_PATH}" -f "${GRAPHEME_BREAK_PROP_PATH}" -w "${WORD_BREAK_PROP_PATH}" -i "${SENTENCE_BREAK_PROP_PATH}"
+        arguments -u "${UNICODE_DATA_PATH}" -s "${SPECIAL_CASING_PATH}" -g "${DERIVED_GENERAL_CATEGORY_PATH}" -p "${PROP_LIST_PATH}" -d "${DERIVED_CORE_PROP_PATH}" -b "${DERIVED_BINARY_PROP_PATH}" -a "${PROP_ALIAS_PATH}" -v "${PROP_VALUE_ALIAS_PATH}" -r "${SCRIPTS_PATH}" -x "${SCRIPT_EXTENSIONS_PATH}" -k "${BLOCKS_PATH}" -e "${EMOJI_DATA_PATH}" -m "${NAME_ALIAS_PATH}" -n "${NORM_PROPS_PATH}" -f "${GRAPHEME_BREAK_PROP_PATH}" -w "${WORD_BREAK_PROP_PATH}" -i "${SENTENCE_BREAK_PROP_PATH}"
     )
     invoke_generator(
         "UnicodeDateTimeFormat"
@@ -178,7 +190,7 @@ if (ENABLE_UNICODE_DATABASE_DOWNLOAD)
         "${UNICODE_META_TARGET_PREFIX}"
         "${UNICODE_LOCALE_HEADER}"
         "${UNICODE_LOCALE_IMPLEMENTATION}"
-        arguments -r "${CLDR_CORE_PATH}" -l "${CLDR_LOCALES_PATH}" -m "${CLDR_MISC_PATH}" -n "${CLDR_NUMBERS_PATH}" -d "${CLDR_DATES_PATH}"
+        arguments -b "${CLDR_BCP47_PATH}" -r "${CLDR_CORE_PATH}" -l "${CLDR_LOCALES_PATH}" -m "${CLDR_MISC_PATH}" -n "${CLDR_NUMBERS_PATH}" -d "${CLDR_DATES_PATH}"
     )
     invoke_generator(
         "UnicodeNumberFormat"

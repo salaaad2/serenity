@@ -25,6 +25,7 @@ static RefPtr<Font> s_default_font;
 static String s_default_font_query;
 static RefPtr<Font> s_fixed_width_font;
 static String s_fixed_width_font_query;
+static String s_default_fonts_lookup_path = "/res/fonts";
 
 void FontDatabase::set_default_font_query(String query)
 {
@@ -37,6 +38,18 @@ void FontDatabase::set_default_font_query(String query)
 String FontDatabase::default_font_query()
 {
     return s_default_font_query;
+}
+
+void FontDatabase::set_default_fonts_lookup_path(String path)
+{
+    if (s_default_fonts_lookup_path == path)
+        return;
+    s_default_fonts_lookup_path = move(path);
+}
+
+String FontDatabase::default_fonts_lookup_path()
+{
+    return s_default_fonts_lookup_path;
 }
 
 Font& FontDatabase::default_font()
@@ -80,7 +93,7 @@ struct FontDatabase::Private {
 FontDatabase::FontDatabase()
     : m_private(make<Private>())
 {
-    Core::DirIterator dir_iterator("/res/fonts", Core::DirIterator::SkipDots);
+    Core::DirIterator dir_iterator(s_default_fonts_lookup_path, Core::DirIterator::SkipDots);
     if (dir_iterator.has_error()) {
         warnln("DirIterator: {}", dir_iterator.error_string());
         exit(1);
@@ -151,20 +164,20 @@ RefPtr<Gfx::Font> FontDatabase::get_by_name(StringView name)
     return it->value;
 }
 
-RefPtr<Gfx::Font> FontDatabase::get(const String& family, unsigned size, unsigned weight, unsigned slope)
+RefPtr<Gfx::Font> FontDatabase::get(String const& family, unsigned size, unsigned weight, unsigned slope, Font::AllowInexactSizeMatch allow_inexact_size_match)
 {
     for (auto typeface : m_private->typefaces) {
         if (typeface->family() == family && typeface->weight() == weight && typeface->slope() == slope)
-            return typeface->get_font(size);
+            return typeface->get_font(size, allow_inexact_size_match);
     }
     return nullptr;
 }
 
-RefPtr<Gfx::Font> FontDatabase::get(const String& family, const String& variant, unsigned size)
+RefPtr<Gfx::Font> FontDatabase::get(String const& family, const String& variant, unsigned size, Font::AllowInexactSizeMatch allow_inexact_size_match)
 {
     for (auto typeface : m_private->typefaces) {
         if (typeface->family() == family && typeface->variant() == variant)
-            return typeface->get_font(size);
+            return typeface->get_font(size, allow_inexact_size_match);
     }
     return nullptr;
 }

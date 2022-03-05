@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,7 +16,8 @@
 #include <Kernel/FileSystem/Ext2FileSystem.h>
 #include <Kernel/Panic.h>
 #include <Kernel/Storage/ATA/AHCIController.h>
-#include <Kernel/Storage/ATA/IDEController.h>
+#include <Kernel/Storage/ATA/ISAIDEController.h>
+#include <Kernel/Storage/ATA/PCIIDEController.h>
 #include <Kernel/Storage/NVMe/NVMeController.h>
 #include <Kernel/Storage/Partition/EBRPartitionTable.h>
 #include <Kernel/Storage/Partition/GUIDPartitionTable.h>
@@ -44,7 +46,7 @@ bool StorageManagement::boot_argument_contains_partition_uuid()
     return m_boot_argument.starts_with(partition_uuid_prefix);
 }
 
-UNMAP_AFTER_INIT void StorageManagement::enumerate_controllers(bool force_pio, bool nvme_poll)
+UNMAP_AFTER_INIT void StorageManagement::enumerate_pci_controllers(bool force_pio, bool nvme_poll)
 {
     VERIFY(m_controllers.is_empty());
 
@@ -57,7 +59,7 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_controllers(bool force_pio, b
             }
 
             {
-                static constexpr PCI::HardwareID vmd_device = { 0x8086, 0x9a0b };
+                constexpr PCI::HardwareID vmd_device = { 0x8086, 0x9a0b };
                 if (device_identifier.hardware_id() == vmd_device) {
                     auto controller = PCI::VolumeManagementDevice::must_create(device_identifier);
                     PCI::Access::the().add_host_controller_and_enumerate_attached_devices(move(controller), [this, nvme_poll](PCI::DeviceIdentifier const& device_identifier) -> void {
@@ -76,7 +78,7 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_controllers(bool force_pio, b
 
             auto subclass_code = static_cast<SubclassID>(device_identifier.subclass_code().value());
             if (subclass_code == SubclassID::IDEController && kernel_command_line().is_ide_enabled()) {
-                m_controllers.append(IDEController::initialize(device_identifier, force_pio));
+                m_controllers.append(PCIIDEController::initialize(device_identifier, force_pio));
             }
 
             if (subclass_code == SubclassID::SATAController
@@ -93,7 +95,6 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_controllers(bool force_pio, b
             }
         });
     }
-    m_controllers.append(RamdiskController::initialize());
 }
 
 UNMAP_AFTER_INIT void StorageManagement::enumerate_storage_devices()
@@ -221,12 +222,6 @@ UNMAP_AFTER_INIT void StorageManagement::determine_boot_device_with_partition_uu
 
     auto partition_uuid = UUID(m_boot_argument.substring_view(partition_uuid_prefix.length()), UUID::Endianness::Mixed);
 
-    if (partition_uuid.to_string().length() != 36) {
-        // FIXME: It would be helpful to output the specified and detected UUIDs in this case,
-        //        but we never actually enter this path - if the length doesn't match, the UUID
-        //        constructor above crashes with a VERIFY in convert_string_view_to_uuid().
-        PANIC("StorageManagement: Specified partition UUID is not valid");
-    }
     for (auto& storage_device : m_storage_devices) {
         for (auto& partition : storage_device.partitions()) {
             if (partition.metadata().unique_guid().is_zero())
@@ -278,7 +273,16 @@ UNMAP_AFTER_INIT void StorageManagement::initialize(StringView root_device, bool
 {
     VERIFY(s_device_minor_number == 0);
     m_boot_argument = root_device;
-    enumerate_controllers(force_pio, poll);
+    if (PCI::Access::is_disabled()) {
+        // Note: If PCI is disabled, we assume that at least we have an ISA IDE controller
+        // to probe and use
+        m_controllers.append(ISAIDEController::initialize());
+    } else {
+        enumerate_pci_controllers(force_pio, poll);
+    }
+    // Note: Whether PCI bus is present on the system or not, always try to attach
+    // a given ramdisk.
+    m_controllers.append(RamdiskController::initialize());
     enumerate_storage_devices();
     enumerate_disk_partitions();
     if (!boot_argument_contains_partition_uuid()) {

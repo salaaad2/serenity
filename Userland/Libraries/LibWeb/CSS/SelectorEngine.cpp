@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -11,7 +11,8 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/AttributeNames.h>
-#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
 
 namespace Web::SelectorEngine {
 
@@ -52,6 +53,24 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
     return false;
 }
 
+static inline DOM::Element const* previous_sibling_with_same_tag_name(DOM::Element const& element)
+{
+    for (auto const* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
+        if (sibling->tag_name() == element.tag_name())
+            return sibling;
+    }
+    return nullptr;
+}
+
+static inline DOM::Element const* next_sibling_with_same_tag_name(DOM::Element const& element)
+{
+    for (auto const* sibling = element.next_element_sibling(); sibling; sibling = sibling->next_element_sibling()) {
+        if (sibling->tag_name() == element.tag_name())
+            return sibling;
+    }
+    return nullptr;
+}
+
 static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoClass const& pseudo_class, DOM::Element const& element)
 {
     switch (pseudo_class.type) {
@@ -74,22 +93,31 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         return !element.next_element_sibling();
     case CSS::Selector::SimpleSelector::PseudoClass::Type::OnlyChild:
         return !(element.previous_element_sibling() || element.next_element_sibling());
-    case CSS::Selector::SimpleSelector::PseudoClass::Type::Empty:
-        return !(element.first_child_of_type<DOM::Element>() || element.first_child_of_type<DOM::Text>());
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::Empty: {
+        if (!element.has_children())
+            return true;
+        if (element.first_child_of_type<DOM::Element>())
+            return false;
+        // NOTE: CSS Selectors level 4 changed ":empty" to also match whitespace-only text nodes.
+        //       However, none of the major browser supports this yet, so let's just hang back until they do.
+        bool has_nonempty_text_child = false;
+        element.for_each_child_of_type<DOM::Text>([&](auto const& text_child) {
+            if (!text_child.data().is_empty()) {
+                has_nonempty_text_child = true;
+                return IterationDecision::Break;
+            }
+            return IterationDecision::Continue;
+        });
+        return !has_nonempty_text_child;
+    }
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Root:
-        return is<HTML::HTMLElement>(element);
+        return is<HTML::HTMLHtmlElement>(element);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::FirstOfType:
-        for (auto* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
-            if (sibling->tag_name() == element.tag_name())
-                return false;
-        }
-        return true;
+        return !previous_sibling_with_same_tag_name(element);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::LastOfType:
-        for (auto* sibling = element.next_element_sibling(); sibling; sibling = sibling->next_element_sibling()) {
-            if (sibling->tag_name() == element.tag_name())
-                return false;
-        }
-        return true;
+        return !next_sibling_with_same_tag_name(element);
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::OnlyOfType:
+        return !previous_sibling_with_same_tag_name(element) && !next_sibling_with_same_tag_name(element);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Disabled:
         if (!element.tag_name().equals_ignoring_case(HTML::TagNames::input))
             return false;
@@ -105,9 +133,7 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Checked:
         if (!element.tag_name().equals_ignoring_case(HTML::TagNames::input))
             return false;
-        if (!element.has_attribute("checked"))
-            return false;
-        return true;
+        return static_cast<HTML::HTMLInputElement const&>(element).checked();
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Not:
         for (auto& selector : pseudo_class.not_selector) {
             if (matches(selector, element))
@@ -116,6 +142,8 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         return true;
     case CSS::Selector::SimpleSelector::PseudoClass::Type::NthChild:
     case CSS::Selector::SimpleSelector::PseudoClass::Type::NthLastChild:
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::NthOfType:
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::NthLastOfType:
         auto const step_size = pseudo_class.nth_child_pattern.step_size;
         auto const offset = pseudo_class.nth_child_pattern.offset;
         if (step_size == 0 && offset == 0)
@@ -126,21 +154,46 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
             return false;
 
         int index = 1;
-        if (pseudo_class.type == CSS::Selector::SimpleSelector::PseudoClass::Type::NthChild) {
+        switch (pseudo_class.type) {
+        case CSS::Selector::SimpleSelector::PseudoClass::Type::NthChild: {
             for (auto* child = parent->first_child_of_type<DOM::Element>(); child && child != &element; child = child->next_element_sibling())
                 ++index;
-        } else {
+            break;
+        }
+        case CSS::Selector::SimpleSelector::PseudoClass::Type::NthLastChild: {
             for (auto* child = parent->last_child_of_type<DOM::Element>(); child && child != &element; child = child->previous_element_sibling())
                 ++index;
+            break;
+        }
+        case CSS::Selector::SimpleSelector::PseudoClass::Type::NthOfType: {
+            for (auto* child = previous_sibling_with_same_tag_name(element); child; child = previous_sibling_with_same_tag_name(*child))
+                ++index;
+            break;
+        }
+        case CSS::Selector::SimpleSelector::PseudoClass::Type::NthLastOfType: {
+            for (auto* child = next_sibling_with_same_tag_name(element); child; child = next_sibling_with_same_tag_name(*child))
+                ++index;
+            break;
+        }
+        default:
+            VERIFY_NOT_REACHED();
         }
 
-        if (step_size < 0) {
-            // When "step_size" is negative, selector represents first "offset" elements in document tree.
+        // When "step_size == -1", selector represents first "offset" elements in document tree.
+        if (step_size == -1)
             return !(offset <= 0 || index > offset);
-        } else if (step_size == 1) {
-            // When "step_size == 1", selector represents last "offset" elements in document tree.
+
+        // When "step_size == 1", selector represents last "offset" elements in document tree.
+        if (step_size == 1)
             return !(offset < 0 || index < offset);
-        }
+
+        // When "step_size == 0", selector picks only the "offset" element.
+        if (step_size == 0)
+            return index == offset;
+
+        // If both are negative, nothing can match.
+        if (step_size < 0 && offset < 0)
+            return false;
 
         // Like "a % b", but handles negative integers correctly.
         auto const canonical_modulo = [](int a, int b) -> int {
@@ -151,15 +204,12 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
             return c;
         };
 
-        if (step_size == 0) {
-            // Avoid divide by zero.
-            if (index != offset) {
-                return false;
-            }
-        } else if (canonical_modulo(index - offset, step_size) != 0) {
-            return false;
-        }
-        return true;
+        // When "step_size < 0", we start at "offset" and count backwards.
+        if (step_size < 0)
+            return index <= offset && canonical_modulo(index - offset, -step_size) == 0;
+
+        // Otherwise, we start at "offset" and count forwards.
+        return index >= offset && canonical_modulo(index - offset, step_size) == 0;
     }
 
     return false;
@@ -181,8 +231,8 @@ static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::
     case CSS::Selector::SimpleSelector::Type::PseudoClass:
         return matches_pseudo_class(component.pseudo_class, element);
     case CSS::Selector::SimpleSelector::Type::PseudoElement:
-        // FIXME: Implement pseudo-elements.
-        return false;
+        // Pseudo-element matching/not-matching is handled in the top level matches().
+        return true;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -230,9 +280,13 @@ static inline bool matches(CSS::Selector const& selector, int component_list_ind
     VERIFY_NOT_REACHED();
 }
 
-bool matches(CSS::Selector const& selector, DOM::Element const& element)
+bool matches(CSS::Selector const& selector, DOM::Element const& element, Optional<CSS::Selector::PseudoElement> pseudo_element)
 {
     VERIFY(!selector.compound_selectors().is_empty());
+    if (pseudo_element.has_value() && selector.pseudo_element() != pseudo_element)
+        return false;
+    if (!pseudo_element.has_value() && selector.pseudo_element().has_value())
+        return false;
     return matches(selector, selector.compound_selectors().size() - 1, element);
 }
 

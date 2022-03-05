@@ -20,7 +20,7 @@
 #include <LibC/stdarg.h>
 
 namespace Kernel {
-extern Atomic<Graphics::BootFramebufferConsole*> boot_framebuffer_console;
+extern Atomic<Graphics::Console*> g_boot_console;
 }
 
 static bool serial_debug;
@@ -80,7 +80,7 @@ static void critical_console_out(char ch)
     // especially when we want to avoid any memory allocations...
     if (GraphicsManagement::is_initialized() && GraphicsManagement::the().console()) {
         GraphicsManagement::the().console()->write(ch, true);
-    } else if (auto* boot_console = boot_framebuffer_console.load()) {
+    } else if (auto* boot_console = g_boot_console.load()) {
         boot_console->write(ch, true);
     }
 }
@@ -99,7 +99,7 @@ static void console_out(char ch)
     }
     if (ConsoleManagement::is_initialized()) {
         ConsoleManagement::the().debug_tty()->emit_char(ch);
-    } else if (auto* boot_console = boot_framebuffer_console.load()) {
+    } else if (auto* boot_console = g_boot_console.load()) {
         boot_console->write(ch, true);
     }
 }
@@ -123,26 +123,24 @@ int sprintf(char* buffer, const char* fmt, ...)
     return ret;
 }
 
-static size_t __vsnprintf_space_remaining;
-ALWAYS_INLINE void sized_buffer_putch(char*& bufptr, char ch)
-{
-    if (__vsnprintf_space_remaining) {
-        *bufptr++ = ch;
-        --__vsnprintf_space_remaining;
-    }
-}
-
 int snprintf(char* buffer, size_t size, const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
+    size_t space_remaining = 0;
     if (size) {
-        __vsnprintf_space_remaining = size - 1;
+        space_remaining = size - 1;
     } else {
-        __vsnprintf_space_remaining = 0;
+        space_remaining = 0;
     }
+    auto sized_buffer_putch = [&](char*& bufptr, char ch) {
+        if (space_remaining) {
+            *bufptr++ = ch;
+            --space_remaining;
+        }
+    };
     int ret = printf_internal(sized_buffer_putch, buffer, fmt, ap);
-    if (__vsnprintf_space_remaining) {
+    if (space_remaining) {
         buffer[ret] = '\0';
     } else if (size > 0) {
         buffer[size - 1] = '\0';

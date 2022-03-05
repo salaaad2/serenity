@@ -13,12 +13,16 @@
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Heap/Handle.h>
-#include <LibJS/Runtime/Exception.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS::Bytecode {
 
-using RegisterWindow = Vector<Value>;
+struct RegisterWindow {
+    MarkedVector<Value> registers;
+    MarkedVector<Environment*> saved_lexical_environments;
+    MarkedVector<Environment*> saved_variable_environments;
+};
 
 class Interpreter {
 public:
@@ -35,7 +39,7 @@ public:
     ThrowCompletionOr<Value> run(Bytecode::Executable const& executable, Bytecode::BasicBlock const* entry_point = nullptr)
     {
         auto value_and_frame = run_and_return_frame(executable, entry_point);
-        return value_and_frame.value;
+        return move(value_and_frame.value);
     }
 
     struct ValueAndFrame {
@@ -47,6 +51,9 @@ public:
     ALWAYS_INLINE Value& accumulator() { return reg(Register::accumulator()); }
     Value& reg(Register const& r) { return registers()[r.index()]; }
     [[nodiscard]] RegisterWindow snapshot_frame() const { return m_register_windows.last(); }
+
+    auto& saved_lexical_environment_stack() { return m_register_windows.last().saved_lexical_environments; }
+    auto& saved_variable_environment_stack() { return m_register_windows.last().saved_variable_environments; }
 
     void enter_frame(RegisterWindow const& frame)
     {
@@ -69,7 +76,7 @@ public:
 
     void enter_unwind_context(Optional<Label> handler_target, Optional<Label> finalizer_target);
     void leave_unwind_context();
-    void continue_pending_unwind(Label const& resume_label);
+    ThrowCompletionOr<void> continue_pending_unwind(Label const& resume_label);
 
     Executable const& current_executable() { return *m_current_executable; }
 
@@ -79,8 +86,10 @@ public:
     };
     static Bytecode::PassManager& optimization_pipeline(OptimizationLevel = OptimizationLevel::Default);
 
+    VM::InterpreterExecutionScope ast_interpreter_scope();
+
 private:
-    RegisterWindow& registers() { return m_register_windows.last(); }
+    MarkedVector<Value>& registers() { return m_register_windows.last().registers; }
 
     static AK::Array<OwnPtr<PassManager>, static_cast<UnderlyingType<Interpreter::OptimizationLevel>>(Interpreter::OptimizationLevel::__Count)> s_optimization_pipelines;
 
@@ -93,7 +102,8 @@ private:
     Value m_return_value;
     Executable const* m_current_executable { nullptr };
     Vector<UnwindInfo> m_unwind_contexts;
-    Handle<Exception> m_saved_exception;
+    Handle<Value> m_saved_exception;
+    OwnPtr<JS::Interpreter> m_ast_interpreter;
 };
 
 extern bool g_dump_bytecode;

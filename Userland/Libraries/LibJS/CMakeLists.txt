@@ -72,7 +72,6 @@ set(SOURCES
     Runtime/ErrorConstructor.cpp
     Runtime/ErrorPrototype.cpp
     Runtime/ErrorTypes.cpp
-    Runtime/Exception.cpp
     Runtime/FinalizationRegistry.cpp
     Runtime/FinalizationRegistryConstructor.cpp
     Runtime/FinalizationRegistryPrototype.cpp
@@ -89,6 +88,7 @@ set(SOURCES
     Runtime/IndexedProperties.cpp
     Runtime/Intl/AbstractOperations.cpp
     Runtime/Intl/Collator.cpp
+    Runtime/Intl/CollatorCompareFunction.cpp
     Runtime/Intl/CollatorConstructor.cpp
     Runtime/Intl/CollatorPrototype.cpp
     Runtime/Intl/DateTimeFormat.cpp
@@ -130,7 +130,6 @@ set(SOURCES
     Runtime/MapIterator.cpp
     Runtime/MapIteratorPrototype.cpp
     Runtime/MapPrototype.cpp
-    Runtime/MarkedValueList.cpp
     Runtime/MathObject.cpp
     Runtime/ModuleEnvironment.cpp
     Runtime/ModuleNamespaceObject.cpp

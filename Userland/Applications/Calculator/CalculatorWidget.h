@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2020, Sergey Bugaev <bugaevc@serenityos.org>
  * Copyright (c) 2021, Glenford Williams <gw_dev@outlook.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -16,7 +17,7 @@
 class CalculatorWidget final : public GUI::Widget {
     C_OBJECT(CalculatorWidget)
 public:
-    virtual ~CalculatorWidget() override;
+    virtual ~CalculatorWidget() override = default;
     String get_entry();
     void set_entry(KeypadValue);
 
@@ -25,9 +26,12 @@ private:
     void add_operation_button(GUI::Button&, Calculator::Operation);
     void add_digit_button(GUI::Button&, int digit);
 
+    void mimic_pressed_button(RefPtr<GUI::Button>);
+    void perform_operation(Calculator::Operation operation);
     void update_display();
 
     virtual void keydown_event(GUI::KeyEvent&) override;
+    virtual void timer_event(Core::TimerEvent&) override;
 
     Calculator m_calculator;
     Keypad m_keypad;
@@ -53,4 +57,6 @@ private:
     RefPtr<GUI::Button> m_inverse_button;
     RefPtr<GUI::Button> m_percent_button;
     RefPtr<GUI::Button> m_equals_button;
+
+    RefPtr<GUI::Button> m_mimic_pressed_button {};
 };

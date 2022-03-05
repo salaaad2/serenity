@@ -111,22 +111,22 @@ ErrorOr<NonnullRefPtr<Image>> Image::try_create_from_pixel_paint_json(JsonObject
 
 void Image::serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const
 {
-    json.add("width", m_size.width());
-    json.add("height", m_size.height());
+    MUST(json.add("width", m_size.width()));
+    MUST(json.add("height", m_size.height()));
     {
-        auto json_layers = json.add_array("layers");
+        auto json_layers = MUST(json.add_array("layers"));
         for (const auto& layer : m_layers) {
             Gfx::BMPWriter bmp_dumber;
-            auto json_layer = json_layers.add_object();
-            json_layer.add("width", layer.size().width());
-            json_layer.add("height", layer.size().height());
-            json_layer.add("name", layer.name());
-            json_layer.add("locationx", layer.location().x());
-            json_layer.add("locationy", layer.location().y());
-            json_layer.add("opacity_percent", layer.opacity_percent());
-            json_layer.add("visible", layer.is_visible());
-            json_layer.add("selected", layer.is_selected());
-            json_layer.add("bitmap", encode_base64(bmp_dumber.dump(layer.bitmap())));
+            auto json_layer = MUST(json_layers.add_object());
+            MUST(json_layer.add("width", layer.size().width()));
+            MUST(json_layer.add("height", layer.size().height()));
+            MUST(json_layer.add("name", layer.name()));
+            MUST(json_layer.add("locationx", layer.location().x()));
+            MUST(json_layer.add("locationy", layer.location().y()));
+            MUST(json_layer.add("opacity_percent", layer.opacity_percent()));
+            MUST(json_layer.add("visible", layer.is_visible()));
+            MUST(json_layer.add("selected", layer.is_selected()));
+            MUST(json_layer.add("bitmap", encode_base64(bmp_dumber.dump(layer.bitmap()))));
         }
     }
 }
@@ -134,9 +134,9 @@ void Image::serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const
 ErrorOr<void> Image::write_to_file(const String& file_path) const
 {
     StringBuilder builder;
-    JsonObjectSerializer json(builder);
+    auto json = MUST(JsonObjectSerializer<>::try_create(builder));
     serialize_as_json(json);
-    json.finish();
+    MUST(json.finish());
 
     auto file = TRY(Core::File::open(file_path, (Core::OpenMode)(Core::OpenMode::WriteOnly | Core::OpenMode::Truncate)));
     if (!file->write(builder.string_view()))
@@ -367,6 +367,23 @@ void Image::merge_visible_layers()
             index++;
         }
     }
+}
+
+void Image::merge_active_layer_up(Layer& layer)
+{
+    if (m_layers.size() < 2)
+        return;
+    size_t layer_index = this->index_of(layer);
+    if ((layer_index + 1) == m_layers.size()) {
+        dbgln("Cannot merge layer up: layer is already at the top");
+        return; // FIXME: Notify user of error properly.
+    }
+
+    auto& layer_above = m_layers.at(layer_index + 1);
+    GUI::Painter painter(layer_above.bitmap());
+    painter.draw_scaled_bitmap(rect(), layer.bitmap(), layer.rect(), (float)layer.opacity_percent() / 100.0f);
+    remove_layer(layer);
+    select_layer(&layer_above);
 }
 
 void Image::merge_active_layer_down(Layer& layer)

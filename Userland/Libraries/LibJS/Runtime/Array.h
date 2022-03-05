@@ -26,13 +26,11 @@ public:
     template<typename T>
     static Array* create_from(GlobalObject& global_object, Span<T const> elements, Function<Value(T const&)> map_fn)
     {
-        auto& vm = global_object.vm();
-        auto values = MarkedValueList { global_object.heap() };
+        auto values = MarkedVector<Value> { global_object.heap() };
         values.ensure_capacity(elements.size());
-        for (auto const& element : elements) {
+        for (auto const& element : elements)
             values.append(map_fn(element));
-            VERIFY(!vm.exception());
-        }
+
         return Array::create_from(global_object, values);
     }
 
@@ -42,7 +40,7 @@ public:
     virtual ThrowCompletionOr<Optional<PropertyDescriptor>> internal_get_own_property(PropertyKey const&) const override;
     virtual ThrowCompletionOr<bool> internal_define_own_property(PropertyKey const&, PropertyDescriptor const&) override;
     virtual ThrowCompletionOr<bool> internal_delete(PropertyKey const&) override;
-    virtual ThrowCompletionOr<MarkedValueList> internal_own_property_keys() const override;
+    virtual ThrowCompletionOr<MarkedVector<Value>> internal_own_property_keys() const override;
 
     [[nodiscard]] bool length_is_writable() const { return m_length_writable; };
 

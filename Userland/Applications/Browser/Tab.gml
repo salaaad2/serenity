@@ -13,8 +13,7 @@
 
     @GUI::Widget {
         name: "webview_container"
-        layout: @GUI::VerticalBoxLayout {
-        }
+        layout: @GUI::VerticalBoxLayout {}
     }
 
     @GUI::Statusbar {

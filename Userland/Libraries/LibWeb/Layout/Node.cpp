@@ -80,15 +80,9 @@ bool Node::establishes_stacking_context() const
     return computed_values().opacity() < 1.0f;
 }
 
-HitTestResult Node::hit_test(const Gfx::IntPoint& position, HitTestType type) const
+HitTestResult Node::hit_test(Gfx::IntPoint const&, HitTestType) const
 {
-    HitTestResult result;
-    for_each_child_in_paint_order([&](auto& child) {
-        auto child_result = child.hit_test(position, type);
-        if (child_result.layout_node)
-            result = child_result;
-    });
-    return result;
+    VERIFY_NOT_REACHED();
 }
 
 HTML::BrowsingContext const& Node::browsing_context() const
@@ -197,6 +191,8 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
 
     m_font = specified_style.computed_font();
     m_line_height = specified_style.line_height(*this);
+
+    computed_values.set_vertical_align(specified_style.vertical_align());
 
     {
         auto attachments = specified_style.property(CSS::PropertyID::BackgroundAttachment);
@@ -322,6 +318,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
 
     computed_values.set_box_sizing(specified_style.box_sizing());
 
+    computed_values.set_font_size(specified_style.property(CSS::PropertyID::FontSize).value()->to_length().to_px(*this));
+    computed_values.set_font_weight(specified_style.property(CSS::PropertyID::FontWeight).value()->to_integer());
+
     // FIXME: BorderXRadius properties are now BorderRadiusStyleValues, so make use of that.
     auto border_bottom_left_radius = specified_style.property(CSS::PropertyID::BorderBottomLeftRadius);
     if (border_bottom_left_radius.has_value() && border_bottom_left_radius.value()->is_border_radius())
@@ -396,6 +395,10 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
     if (cursor.has_value())
         computed_values.set_cursor(cursor.value());
 
+    auto image_rendering = specified_style.image_rendering();
+    if (image_rendering.has_value())
+        computed_values.set_image_rendering(image_rendering.value());
+
     auto pointer_events = specified_style.pointer_events();
     if (pointer_events.has_value())
         computed_values.set_pointer_events(pointer_events.value());
@@ -428,17 +431,40 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
     if (computed_values.opacity() == 0)
         m_visible = false;
 
-    if (auto width = specified_style.property(CSS::PropertyID::Width); width.has_value() && !width.value()->has_auto())
-        m_has_definite_width = true;
-    computed_values.set_width(specified_style.length_percentage_or_fallback(CSS::PropertyID::Width, CSS::Length {}));
-    computed_values.set_min_width(specified_style.length_percentage_or_fallback(CSS::PropertyID::MinWidth, CSS::Length {}));
-    computed_values.set_max_width(specified_style.length_percentage_or_fallback(CSS::PropertyID::MaxWidth, CSS::Length {}));
+    auto is_definite_size = [&](CSS::PropertyID property_id, bool width) {
+        auto maybe_value = specified_style.property(property_id);
+        if (!maybe_value.has_value() || maybe_value.value()->has_auto())
+            return false;
+        auto maybe_length_percentage = specified_style.length_percentage(property_id);
+        if (!maybe_length_percentage.has_value())
+            return false;
+        auto length_percentage = maybe_length_percentage.release_value();
+        if (length_percentage.is_length())
+            return true;
+        if (length_percentage.is_percentage()) {
+            auto* containing_block = this->containing_block();
+            return containing_block && (width ? containing_block->m_has_definite_width : containing_block->m_has_definite_height);
+        }
+        // FIXME: Determine if calc() value is definite.
+        return false;
+    };
 
-    if (auto height = specified_style.property(CSS::PropertyID::Height); height.has_value() && !height.value()->has_auto())
-        m_has_definite_height = true;
-    computed_values.set_height(specified_style.length_percentage_or_fallback(CSS::PropertyID::Height, CSS::Length {}));
-    computed_values.set_min_height(specified_style.length_percentage_or_fallback(CSS::PropertyID::MinHeight, CSS::Length {}));
-    computed_values.set_max_height(specified_style.length_percentage_or_fallback(CSS::PropertyID::MaxHeight, CSS::Length {}));
+    m_has_definite_width = is_definite_size(CSS::PropertyID::Width, true);
+    m_has_definite_height = is_definite_size(CSS::PropertyID::Height, false);
+
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::Width); maybe_length_percentage.has_value())
+        computed_values.set_width(maybe_length_percentage.release_value());
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::MinWidth); maybe_length_percentage.has_value())
+        computed_values.set_min_width(maybe_length_percentage.release_value());
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::MaxWidth); maybe_length_percentage.has_value())
+        computed_values.set_max_width(maybe_length_percentage.release_value());
+
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::Height); maybe_length_percentage.has_value())
+        computed_values.set_height(maybe_length_percentage.release_value());
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::MinHeight); maybe_length_percentage.has_value())
+        computed_values.set_min_height(maybe_length_percentage.release_value());
+    if (auto maybe_length_percentage = specified_style.length_percentage(CSS::PropertyID::MaxHeight); maybe_length_percentage.has_value())
+        computed_values.set_max_height(maybe_length_percentage.release_value());
 
     computed_values.set_offset(specified_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::Length::make_auto()));
     computed_values.set_margin(specified_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
@@ -457,13 +483,15 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
         if (border.line_style == CSS::LineStyle::None)
             border.width = 0;
         else
-            border.width = specified_style.length_or_fallback(width_property, {}).resolved_or_zero(*this).to_px(*this);
+            border.width = specified_style.length_or_fallback(width_property, CSS::Length::make_px(0)).to_px(*this);
     };
 
     do_border_style(computed_values.border_left(), CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor, CSS::PropertyID::BorderLeftStyle);
     do_border_style(computed_values.border_top(), CSS::PropertyID::BorderTopWidth, CSS::PropertyID::BorderTopColor, CSS::PropertyID::BorderTopStyle);
     do_border_style(computed_values.border_right(), CSS::PropertyID::BorderRightWidth, CSS::PropertyID::BorderRightColor, CSS::PropertyID::BorderRightStyle);
     do_border_style(computed_values.border_bottom(), CSS::PropertyID::BorderBottomWidth, CSS::PropertyID::BorderBottomColor, CSS::PropertyID::BorderBottomStyle);
+
+    computed_values.set_content(specified_style.content());
 
     if (auto fill = specified_style.property(CSS::PropertyID::Fill); fill.has_value())
         computed_values.set_fill(fill.value()->to_color(*this));
@@ -515,6 +543,25 @@ bool Node::is_root_element() const
 String Node::class_name() const
 {
     return demangle(typeid(*this).name());
+}
+
+String Node::debug_description() const
+{
+    StringBuilder builder;
+    builder.append(class_name().substring_view(13));
+    if (dom_node()) {
+        builder.appendff("<{}>", dom_node()->node_name());
+        if (dom_node()->is_element()) {
+            auto& element = static_cast<DOM::Element const&>(*dom_node());
+            if (auto id = element.get_attribute(HTML::AttributeNames::id); !id.is_null())
+                builder.appendff("#{}", id);
+            for (auto const& class_name : element.class_names())
+                builder.appendff(".{}", class_name);
+        }
+    } else {
+        builder.append("(anonymous)");
+    }
+    return builder.to_string();
 }
 
 bool Node::is_inline_block() const

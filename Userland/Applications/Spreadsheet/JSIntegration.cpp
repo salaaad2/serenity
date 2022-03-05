@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2020-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -97,10 +97,6 @@ SheetGlobalObject::SheetGlobalObject(Sheet& sheet)
 {
 }
 
-SheetGlobalObject::~SheetGlobalObject()
-{
-}
-
 JS::ThrowCompletionOr<bool> SheetGlobalObject::internal_has_property(JS::PropertyKey const& name) const
 {
     if (name.is_string()) {
@@ -164,8 +160,9 @@ void SheetGlobalObject::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
     for (auto& it : m_sheet.cells()) {
-        if (it.value->exception())
-            visitor.visit(it.value->exception());
+        if (auto opt_thrown_value = it.value->thrown_value(); opt_thrown_value.has_value())
+            visitor.visit(*opt_thrown_value);
+
         visitor.visit(it.value->evaluated_data());
     }
 }
@@ -358,10 +355,6 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_column_bound)
 WorkbookObject::WorkbookObject(Workbook& workbook, JS::GlobalObject& global_object)
     : JS::Object(*JS::Object::create(global_object, global_object.object_prototype()))
     , m_workbook(workbook)
-{
-}
-
-WorkbookObject::~WorkbookObject()
 {
 }
 

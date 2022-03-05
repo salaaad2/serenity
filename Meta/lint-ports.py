@@ -32,7 +32,6 @@ IGNORE_FILES = {
 PORT_NAME_REGEX = re.compile(r'([ .()[\]{}\w-]+)\.patch')
 PORTS_MISSING_DESCRIPTIONS = {
     'Another-World',
-    'binutils',
     'chester',
     'cmatrix',
     'c-ray',
@@ -52,7 +51,6 @@ PORTS_MISSING_DESCRIPTIONS = {
     'freetype',
     'gawk',
     'gcc',
-    'gdb',
     'genemu',
     'gettext',
     'git',

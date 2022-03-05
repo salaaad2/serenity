@@ -9,9 +9,11 @@
 
 #include <AK/HashMap.h>
 #include <AK/NonnullRefPtrVector.h>
+#include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/Parser/StyleComponentValueRule.h>
+#include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleProperties.h>
 #include <LibWeb/Forward.h>
 
@@ -52,11 +54,10 @@ public:
     DOM::Document const& document() const { return m_document; }
 
     NonnullRefPtr<StyleProperties> create_document_style() const;
-    NonnullRefPtr<StyleProperties> compute_style(DOM::Element&) const;
+    NonnullRefPtr<StyleProperties> compute_style(DOM::Element&, Optional<CSS::Selector::PseudoElement> = {}) const;
 
     // https://www.w3.org/TR/css-cascade/#origin
     enum class CascadeOrigin {
-        Any, // FIXME: This is not part of the spec. Get rid of it.
         Author,
         User,
         UserAgent,
@@ -64,26 +65,21 @@ public:
         Transition,
     };
 
-    Vector<MatchingRule> collect_matching_rules(DOM::Element const&, CascadeOrigin = CascadeOrigin::Any) const;
-    void sort_matching_rules(Vector<MatchingRule>&) const;
-    struct CustomPropertyResolutionTuple {
-        Optional<StyleProperty> style {};
-        u32 specificity { 0 };
-    };
-    CustomPropertyResolutionTuple resolve_custom_property_with_specificity(DOM::Element&, String const&) const;
-    Optional<StyleProperty> resolve_custom_property(DOM::Element&, String const&) const;
+    Vector<MatchingRule> collect_matching_rules(DOM::Element const&, CascadeOrigin, Optional<CSS::Selector::PseudoElement>) const;
+
+    void invalidate_rule_cache();
 
 private:
-    void compute_cascaded_values(StyleProperties&, DOM::Element&) const;
-    void compute_font(StyleProperties&, DOM::Element const*) const;
-    void compute_defaulted_values(StyleProperties&, DOM::Element const*) const;
-    void absolutize_values(StyleProperties&, DOM::Element const*) const;
-    void transform_box_type_if_needed(StyleProperties&, DOM::Element const&) const;
+    void compute_cascaded_values(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>) const;
+    void compute_font(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
+    void compute_defaulted_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
+    void absolutize_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
+    void transform_box_type_if_needed(StyleProperties&, DOM::Element const&, Optional<CSS::Selector::PseudoElement>) const;
 
-    void compute_defaulted_property_value(StyleProperties&, DOM::Element const*, CSS::PropertyID) const;
+    void compute_defaulted_property_value(StyleProperties&, DOM::Element const*, CSS::PropertyID, Optional<CSS::Selector::PseudoElement>) const;
 
-    RefPtr<StyleValue> resolve_unresolved_style_value(DOM::Element&, PropertyID, UnresolvedStyleValue const&) const;
-    bool expand_unresolved_values(DOM::Element&, StringView property_name, HashMap<String, NonnullRefPtr<PropertyDependencyNode>>& dependencies, Vector<StyleComponentValueRule> const& source, Vector<StyleComponentValueRule>& dest, size_t source_start_index = 0) const;
+    RefPtr<StyleValue> resolve_unresolved_style_value(DOM::Element&, PropertyID, UnresolvedStyleValue const&, HashMap<FlyString, StyleProperty> const&) const;
+    bool expand_unresolved_values(DOM::Element&, StringView property_name, HashMap<FlyString, NonnullRefPtr<PropertyDependencyNode>>& dependencies, Vector<StyleComponentValueRule> const& source, Vector<StyleComponentValueRule>& dest, size_t source_start_index, HashMap<FlyString, StyleProperty> const& custom_properties) const;
 
     template<typename Callback>
     void for_each_stylesheet(CascadeOrigin, Callback) const;
@@ -93,9 +89,22 @@ private:
         Vector<MatchingRule> author_rules;
     };
 
-    void cascade_declarations(StyleProperties&, DOM::Element&, Vector<MatchingRule> const&, CascadeOrigin, bool important) const;
+    void cascade_declarations(StyleProperties&, DOM::Element&, Vector<MatchingRule> const&, CascadeOrigin, Important important, HashMap<FlyString, StyleProperty> const&) const;
+
+    void build_rule_cache();
+    void build_rule_cache_if_needed() const;
 
     DOM::Document& m_document;
+
+    struct RuleCache {
+        HashMap<FlyString, Vector<MatchingRule>> rules_by_id;
+        HashMap<FlyString, Vector<MatchingRule>> rules_by_class;
+        HashMap<FlyString, Vector<MatchingRule>> rules_by_tag_name;
+        HashMap<Selector::PseudoElement, Vector<MatchingRule>> rules_by_pseudo_element;
+        Vector<MatchingRule> other_rules;
+        int generation { 0 };
+    };
+    OwnPtr<RuleCache> m_rule_cache;
 };
 
 }

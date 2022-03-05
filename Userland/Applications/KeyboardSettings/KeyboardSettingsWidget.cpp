@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020, Hüseyin Aslıtürk <asliturk@hotmail.com>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -22,13 +23,14 @@
 #include <LibGUI/Model.h>
 #include <LibGUI/Widget.h>
 #include <LibGUI/Window.h>
+#include <LibGfx/FontDatabase.h>
 #include <LibKeyboard/CharacterMap.h>
 #include <spawn.h>
 
 class KeymapSelectionDialog final : public GUI::Dialog {
     C_OBJECT(KeymapSelectionDialog)
 public:
-    virtual ~KeymapSelectionDialog() override {};
+    virtual ~KeymapSelectionDialog() override = default;
 
     static String select_keymap(Window* parent_window, Vector<String> const& selected_keymaps)
     {
@@ -106,9 +108,13 @@ public:
     int row_count(GUI::ModelIndex const&) const override { return m_data.size(); }
     int column_count(GUI::ModelIndex const&) const override { return 1; }
 
-    GUI::Variant data(GUI::ModelIndex const& index, GUI::ModelRole) const override
+    GUI::Variant data(GUI::ModelIndex const& index, GUI::ModelRole role) const override
     {
-        return m_data.at(index.row());
+        String const& data = m_data.at(index.row());
+        if (role == GUI::ModelRole::Font && data == m_active_keymap)
+            return Gfx::FontDatabase::default_font().bold_variant();
+
+        return data;
     }
 
     void remove_at(size_t index)
@@ -123,10 +129,17 @@ public:
         invalidate();
     }
 
+    void set_active_keymap(String const& keymap)
+    {
+        m_active_keymap = keymap;
+        invalidate();
+    }
+
     Vector<String> const& keymaps() const { return m_data; }
 
 private:
     Vector<String> m_data;
+    String m_active_keymap;
 };
 
 KeyboardSettingsWidget::KeyboardSettingsWidget()
@@ -143,7 +156,7 @@ KeyboardSettingsWidget::KeyboardSettingsWidget()
     m_current_applied_keymap = keymap_object.get("keymap").to_string();
     dbgln("KeyboardSettings thinks the current keymap is: {}", m_current_applied_keymap);
 
-    auto mapper_config(Core::ConfigFile::open("/etc/Keyboard.ini"));
+    auto mapper_config(Core::ConfigFile::open("/etc/Keyboard.ini").release_value_but_fixme_should_propagate_errors());
     auto keymaps = mapper_config->read_entry("Mapping", "Keymaps", "");
 
     auto keymaps_vector = keymaps.split(',');
@@ -158,11 +171,14 @@ KeyboardSettingsWidget::KeyboardSettingsWidget()
         keymaps_list_model.add_keymap(keymap);
     }
 
+    keymaps_list_model.set_active_keymap(m_current_applied_keymap);
+
     m_add_keymap_button = find_descendant_of_type_named<GUI::Button>("add_keymap_button");
 
     m_add_keymap_button->on_click = [&](auto) {
         auto keymap = KeymapSelectionDialog::select_keymap(window(), keymaps_list_model.keymaps());
-        keymaps_list_model.add_keymap(keymap);
+        if (!keymap.is_empty())
+            keymaps_list_model.add_keymap(keymap);
     };
 
     m_remove_keymap_button = find_descendant_of_type_named<GUI::Button>("remove_keymap_button");

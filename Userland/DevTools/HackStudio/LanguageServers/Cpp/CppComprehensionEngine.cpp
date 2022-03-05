@@ -16,7 +16,7 @@
 #include <LibCpp/Parser.h>
 #include <LibCpp/Preprocessor.h>
 #include <LibRegex/Regex.h>
-#include <Userland/DevTools/HackStudio/LanguageServers/ClientConnection.h>
+#include <Userland/DevTools/HackStudio/LanguageServers/ConnectionFromClient.h>
 
 namespace LanguageServers::Cpp {
 
@@ -198,6 +198,9 @@ Vector<StringView> CppComprehensionEngine::scope_of_reference_to_symbol(const AS
 
     Vector<StringView> scope_parts;
     for (auto& scope_part : name->scope()) {
+        // If the target node is part of a scope reference, we want to end the scope chain before it.
+        if (&scope_part == &node)
+            break;
         scope_parts.append(scope_part.name());
     }
     return scope_parts;
@@ -248,7 +251,9 @@ String CppComprehensionEngine::type_of_property(const DocumentData& document, co
             continue;
 
         VERIFY(verify_cast<NamedType>(*type).name());
-        return verify_cast<NamedType>(*type).name()->full_name();
+        if (verify_cast<NamedType>(*type).name())
+            return verify_cast<NamedType>(*type).name()->full_name();
+        return String::empty();
     }
     return {};
 }
@@ -260,9 +265,11 @@ String CppComprehensionEngine::type_of_variable(const Identifier& identifier) co
         for (auto& decl : current->declarations()) {
             if (decl.is_variable_or_parameter_declaration()) {
                 auto& var_or_param = verify_cast<VariableOrParameterDeclaration>(decl);
-                if (var_or_param.name() == identifier.name() && var_or_param.type()->is_named_type()) {
+                if (var_or_param.full_name() == identifier.name() && var_or_param.type()->is_named_type()) {
                     VERIFY(verify_cast<NamedType>(*var_or_param.type()).name());
-                    return verify_cast<NamedType>(*var_or_param.type()).name()->full_name();
+                    if (verify_cast<NamedType>(*var_or_param.type()).name())
+                        return verify_cast<NamedType>(*var_or_param.type()).name()->full_name();
+                    return String::empty();
                 }
             }
         }
@@ -312,14 +319,14 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::properties_of_typ
     }
 
     auto& struct_or_class = verify_cast<StructOrClassDeclaration>(*decl);
-    VERIFY(struct_or_class.name() == type_symbol.name);
+    VERIFY(struct_or_class.full_name() == type_symbol.name);
 
     Vector<Symbol> properties;
     for (auto& member : struct_or_class.members()) {
         Vector<StringView> scope(type_symbol.scope);
         scope.append(type_symbol.name);
         // FIXME: We don't have to create the Symbol here, it should already exist in the 'm_symbol' table of some DocumentData we already parsed.
-        properties.append(Symbol::create(member.name(), scope, member, Symbol::IsLocal::No));
+        properties.append(Symbol::create(member.full_name(), scope, member, Symbol::IsLocal::No));
     }
     return properties;
 }
@@ -339,7 +346,7 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::get_child_symbols
     Vector<Symbol> symbols;
 
     for (auto& decl : node.declarations()) {
-        symbols.append(Symbol::create(decl.name(), scope, decl, is_local));
+        symbols.append(Symbol::create(decl.full_name(), scope, decl, is_local));
 
         bool should_recurse = decl.is_namespace() || decl.is_struct_or_class() || decl.is_function();
         bool are_child_symbols_local = decl.is_function();
@@ -348,7 +355,7 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::get_child_symbols
             continue;
 
         auto new_scope = scope;
-        new_scope.append(decl.name());
+        new_scope.append(decl.full_name());
         symbols.extend(get_child_symbols(decl, new_scope, are_child_symbols_local ? Symbol::IsLocal::Yes : is_local));
     }
 
@@ -401,16 +408,22 @@ Optional<GUI::AutocompleteProvider::ProjectLocation> CppComprehensionEngine::fin
         return {};
 
     const auto& document = *document_ptr;
+    auto decl = find_declaration_of(document, identifier_position);
+    if (decl) {
+        return GUI::AutocompleteProvider::ProjectLocation { decl->filename(), decl->start().line, decl->start().column };
+    }
+
+    return find_preprocessor_definition(document, identifier_position);
+}
+
+RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentData& document, const GUI::TextPosition& identifier_position)
+{
     auto node = document.parser().node_at(Cpp::Position { identifier_position.line(), identifier_position.column() });
     if (!node) {
         dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "no node at position {}:{}", identifier_position.line(), identifier_position.column());
         return {};
     }
-    auto decl = find_declaration_of(document, *node);
-    if (decl)
-        return GUI::AutocompleteProvider::ProjectLocation { decl->filename(), decl->start().line, decl->start().column };
-
-    return find_preprocessor_definition(document, identifier_position);
+    return find_declaration_of(document, *node);
 }
 
 Optional<GUI::AutocompleteProvider::ProjectLocation> CppComprehensionEngine::find_preprocessor_definition(const DocumentData& document, const GUI::TextPosition& text_position)
@@ -434,19 +447,49 @@ struct TargetDeclaration {
         Variable,
         Type,
         Function,
-        Property
+        Property,
+        Scope
     } type;
     String name;
 };
 
+static Optional<TargetDeclaration> get_target_declaration(const ASTNode& node, String name);
 static Optional<TargetDeclaration> get_target_declaration(const ASTNode& node)
 {
-    if (!node.is_identifier()) {
-        dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "node is not an identifier");
-        return {};
+    if (node.is_identifier()) {
+        return get_target_declaration(node, static_cast<const Identifier&>(node).name());
     }
 
-    String name = static_cast<const Identifier&>(node).name();
+    if (node.is_declaration()) {
+        return get_target_declaration(node, verify_cast<Declaration>(node).full_name());
+    }
+
+    if (node.is_type() && node.parent() && node.parent()->is_declaration()) {
+        return get_target_declaration(*node.parent(), verify_cast<Declaration>(node.parent())->full_name());
+    }
+
+    dbgln("get_target_declaration: Invalid argument node of type: {}", node.class_name());
+    return {};
+}
+
+static Optional<TargetDeclaration> get_target_declaration(const ASTNode& node, String name)
+{
+    if (node.parent() && node.parent()->is_name()) {
+        auto& name_node = *verify_cast<Name>(node.parent());
+        if (&node != name_node.name()) {
+            // Node is part of scope reference chain
+            return TargetDeclaration { TargetDeclaration::Type::Scope, name };
+        }
+        if (name_node.parent() && name_node.parent()->is_declaration()) {
+            auto declaration = verify_cast<Declaration>(name_node.parent());
+            if (declaration->is_struct_or_class() || declaration->is_enum()) {
+                return TargetDeclaration { TargetDeclaration::Type::Type, name };
+            }
+            if (declaration->is_function()) {
+                return TargetDeclaration { TargetDeclaration::Type::Function, name };
+            }
+        }
+    }
 
     if ((node.parent() && node.parent()->is_function_call()) || (node.parent()->is_name() && node.parent()->parent() && node.parent()->parent()->is_function_call())) {
         return TargetDeclaration { TargetDeclaration::Type::Function, name };
@@ -460,14 +503,9 @@ static Optional<TargetDeclaration> get_target_declaration(const ASTNode& node)
 
     return TargetDeclaration { TargetDeclaration::Type::Variable, name };
 }
-
 RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentData& document_data, const ASTNode& node) const
 {
     dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "find_declaration_of: {} ({})", document_data.parser().text_of_node(node), node.class_name());
-    if (!node.is_identifier()) {
-        dbgln("node is not an identifier, can't find declaration");
-        return {};
-    }
 
     auto target_decl = get_target_declaration(node);
     if (!target_decl.has_value())
@@ -479,9 +517,10 @@ RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentDa
     auto symbol_matches = [&](const Symbol& symbol) {
         bool match_function = target_decl.value().type == TargetDeclaration::Function && symbol.declaration->is_function();
         bool match_variable = target_decl.value().type == TargetDeclaration::Variable && symbol.declaration->is_variable_declaration();
-        bool match_type = target_decl.value().type == TargetDeclaration::Type && symbol.declaration->is_struct_or_class();
+        bool match_type = target_decl.value().type == TargetDeclaration::Type && (symbol.declaration->is_struct_or_class() || symbol.declaration->is_enum());
         bool match_property = target_decl.value().type == TargetDeclaration::Property && symbol.declaration->parent()->is_declaration() && verify_cast<Declaration>(symbol.declaration->parent())->is_struct_or_class();
         bool match_parameter = target_decl.value().type == TargetDeclaration::Variable && symbol.declaration->is_parameter();
+        bool match_scope = target_decl.value().type == TargetDeclaration::Scope && (symbol.declaration->is_namespace() || symbol.declaration->is_struct_or_class());
 
         if (match_property) {
             // FIXME: This is not really correct, we also need to check that the type of the struct/class matches (not just the property name)
@@ -494,7 +533,7 @@ RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentDa
             return false;
         }
 
-        if (match_function || match_type) {
+        if (match_function || match_type || match_scope) {
             if (symbol.name.name == target_decl->name)
                 return true;
         }
@@ -628,11 +667,11 @@ Vector<StringView> CppComprehensionEngine::scope_of_node(const ASTNode& node) co
 
     StringView containing_scope;
     if (parent_decl.is_namespace())
-        containing_scope = static_cast<NamespaceDeclaration&>(parent_decl).name();
+        containing_scope = static_cast<NamespaceDeclaration&>(parent_decl).full_name();
     if (parent_decl.is_struct_or_class())
-        containing_scope = static_cast<StructOrClassDeclaration&>(parent_decl).name();
+        containing_scope = static_cast<StructOrClassDeclaration&>(parent_decl).full_name();
     if (parent_decl.is_function())
-        containing_scope = static_cast<FunctionDeclaration&>(parent_decl).name();
+        containing_scope = static_cast<FunctionDeclaration&>(parent_decl).full_name();
 
     parent_scope.append(containing_scope);
     return parent_scope;
@@ -754,19 +793,22 @@ String CppComprehensionEngine::SymbolName::to_string() const
 
 bool CppComprehensionEngine::is_symbol_available(const Symbol& symbol, const Vector<StringView>& current_scope, const Vector<StringView>& reference_scope)
 {
+
     if (!reference_scope.is_empty()) {
         return reference_scope == symbol.name.scope;
     }
 
-    // FIXME: Consider "using namespace ..."
+    // FIXME: Take "using namespace ..." into consideration
 
     // Check if current_scope starts with symbol's scope
     if (symbol.name.scope.size() > current_scope.size())
         return false;
+
     for (size_t i = 0; i < symbol.name.scope.size(); ++i) {
         if (current_scope[i] != symbol.name.scope[i])
             return false;
     }
+
     return true;
 }
 
@@ -879,6 +921,81 @@ Optional<CppComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::get
     }
 
     return hint;
+}
+
+Vector<GUI::AutocompleteProvider::TokenInfo> CppComprehensionEngine::get_tokens_info(const String& filename)
+{
+    dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "CppComprehensionEngine::get_tokens_info: {}", filename);
+
+    const auto* document_ptr = get_or_create_document_data(filename);
+    if (!document_ptr)
+        return {};
+
+    const auto& document = *document_ptr;
+
+    Vector<GUI::AutocompleteProvider::TokenInfo> tokens_info;
+    size_t i = 0;
+    for (auto const& token : document.preprocessor().unprocessed_tokens()) {
+
+        tokens_info.append({ get_token_semantic_type(document, token),
+            token.start().line, token.start().column, token.end().line, token.end().column });
+        ++i;
+    }
+    return tokens_info;
+}
+
+GUI::AutocompleteProvider::TokenInfo::SemanticType CppComprehensionEngine::get_token_semantic_type(DocumentData const& document, Token const& token)
+{
+    using GUI::AutocompleteProvider;
+    switch (token.type()) {
+    case Cpp::Token::Type::Identifier:
+        return get_semantic_type_for_identifier(document, token.start());
+    case Cpp::Token::Type::Keyword:
+        return AutocompleteProvider::TokenInfo::SemanticType::Keyword;
+    case Cpp::Token::Type::KnownType:
+        return AutocompleteProvider::TokenInfo::SemanticType::Type;
+    case Cpp::Token::Type::DoubleQuotedString:
+    case Cpp::Token::Type::SingleQuotedString:
+    case Cpp::Token::Type::RawString:
+        return AutocompleteProvider::TokenInfo::SemanticType::String;
+    case Cpp::Token::Type::Integer:
+    case Cpp::Token::Type::Float:
+        return AutocompleteProvider::TokenInfo::SemanticType::Number;
+    case Cpp::Token::Type::IncludePath:
+        return AutocompleteProvider::TokenInfo::SemanticType::IncludePath;
+    case Cpp::Token::Type::EscapeSequence:
+        return AutocompleteProvider::TokenInfo::SemanticType::Keyword;
+    case Cpp::Token::Type::PreprocessorStatement:
+    case Cpp::Token::Type::IncludeStatement:
+        return AutocompleteProvider::TokenInfo::SemanticType::PreprocessorStatement;
+    case Cpp::Token::Type::Comment:
+        return AutocompleteProvider::TokenInfo::SemanticType::Comment;
+    default:
+        return AutocompleteProvider::TokenInfo::SemanticType::Unknown;
+    }
+}
+
+GUI::AutocompleteProvider::TokenInfo::SemanticType CppComprehensionEngine::get_semantic_type_for_identifier(DocumentData const& document, Position position)
+{
+    auto decl = find_declaration_of(document, GUI::TextPosition { position.line, position.column });
+    if (!decl)
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::Identifier;
+
+    if (decl->is_function())
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::Function;
+    if (decl->is_parameter())
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::Parameter;
+    if (decl->is_variable_declaration()) {
+        if (decl->is_member())
+            return GUI::AutocompleteProvider::TokenInfo::SemanticType::Member;
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::Variable;
+    }
+    if (decl->is_struct_or_class() || decl->is_enum())
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::CustomType;
+    if (decl->is_namespace())
+        return GUI::AutocompleteProvider::TokenInfo::SemanticType::Namespace;
+
+    return GUI::AutocompleteProvider::TokenInfo::SemanticType::Identifier;
 }
 
 }

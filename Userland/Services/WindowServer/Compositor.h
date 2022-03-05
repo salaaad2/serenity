@@ -17,7 +17,7 @@
 namespace WindowServer {
 
 class Animation;
-class ClientConnection;
+class ConnectionFromClient;
 class Compositor;
 class Cursor;
 class MultiScaleBitmaps;
@@ -105,19 +105,19 @@ public:
 
     bool set_wallpaper_mode(const String& mode);
 
-    bool set_wallpaper(const String& path, Function<void(bool)>&& callback);
-    String wallpaper_path() const { return m_wallpaper_path; }
+    bool set_wallpaper(RefPtr<Gfx::Bitmap>);
+    RefPtr<Gfx::Bitmap> wallpaper_bitmap() const { return m_wallpaper; }
 
     void invalidate_cursor(bool = false);
     Gfx::IntRect current_cursor_rect() const;
     const Cursor* current_cursor() const { return m_current_cursor; }
     void current_cursor_was_reloaded(const Cursor* new_cursor) { m_current_cursor = new_cursor; }
 
-    void increment_display_link_count(Badge<ClientConnection>);
-    void decrement_display_link_count(Badge<ClientConnection>);
+    void increment_display_link_count(Badge<ConnectionFromClient>);
+    void decrement_display_link_count(Badge<ConnectionFromClient>);
 
-    void increment_show_screen_number(Badge<ClientConnection>);
-    void decrement_show_screen_number(Badge<ClientConnection>);
+    void increment_show_screen_number(Badge<ConnectionFromClient>);
+    void decrement_show_screen_number(Badge<ConnectionFromClient>);
     bool showing_screen_numbers() const { return m_show_screen_number_count > 0; }
 
     void invalidate_after_theme_or_font_change()
@@ -174,9 +174,9 @@ public:
 
     void did_construct_window_manager(Badge<WindowManager>);
 
-    const Gfx::Bitmap* cursor_bitmap_for_screenshot(Badge<ClientConnection>, Screen&) const;
-    const Gfx::Bitmap& front_bitmap_for_screenshot(Badge<ClientConnection>, Screen&) const;
-    Gfx::Color color_at_position(Badge<ClientConnection>, Screen&, Gfx::IntPoint const&) const;
+    const Gfx::Bitmap* cursor_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen&) const;
+    const Gfx::Bitmap& front_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen&) const;
+    Gfx::Color color_at_position(Badge<ConnectionFromClient>, Screen&, Gfx::IntPoint const&) const;
 
     void register_animation(Badge<Animation>, Animation&);
     void unregister_animation(Badge<Animation>, Animation&);
@@ -227,7 +227,6 @@ private:
     Gfx::DisjointRectSet m_opaque_wallpaper_rects;
     Gfx::DisjointRectSet m_transparent_wallpaper_rects;
 
-    String m_wallpaper_path { "" };
     WallpaperMode m_wallpaper_mode { WallpaperMode::Unchecked };
     RefPtr<Gfx::Bitmap> m_wallpaper;
 

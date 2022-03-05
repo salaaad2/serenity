@@ -76,18 +76,43 @@
 #include <LibWeb/HTML/HTMLUListElement.h>
 #include <LibWeb/HTML/HTMLUnknownElement.h>
 #include <LibWeb/HTML/HTMLVideoElement.h>
+#include <LibWeb/SVG/SVGCircleElement.h>
+#include <LibWeb/SVG/SVGEllipseElement.h>
 #include <LibWeb/SVG/SVGGElement.h>
+#include <LibWeb/SVG/SVGLineElement.h>
 #include <LibWeb/SVG/SVGPathElement.h>
+#include <LibWeb/SVG/SVGPolygonElement.h>
+#include <LibWeb/SVG/SVGPolylineElement.h>
+#include <LibWeb/SVG/SVGRectElement.h>
 #include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWeb/SVG/TagNames.h>
 
 namespace Web::DOM {
 
-NonnullRefPtr<Element> create_element(Document& document, const FlyString& tag_name, const FlyString& namespace_)
+// https://dom.spec.whatwg.org/#concept-create-element
+NonnullRefPtr<Element> create_element(Document& document, FlyString local_name, FlyString namespace_, FlyString prefix)
 {
-    auto lowercase_tag_name = tag_name.to_lowercase();
-    // FIXME: Add prefix when we support it.
-    auto qualified_name = QualifiedName(tag_name, {}, namespace_);
+    // 1. If prefix was not given, let prefix be null.
+    // NOTE: This is already taken care of by `prefix` having a default value.
+
+    // FIXME: 2. If is was not given, let is be null.
+    // FIXME: 3. Let result be null.
+    // FIXME: 4. Let definition be the result of looking up a custom element definition given document, namespace, localName, and is.
+    // FIXME: 5. If definition is non-null, and definition’s name is not equal to its local name (i.e., definition represents a customized built-in element), then: ...
+    // FIXME: 6. Otherwise, if definition is non-null, then: ...
+
+    // 7. Otherwise:
+    //    1. Let interface be the element interface for localName and namespace.
+    //    2. Set result to a new element that implements interface, with no attributes, namespace set to namespace, namespace prefix set to prefix,
+    //       local name set to localName, custom element state set to "uncustomized", custom element definition set to null, is value set to is,
+    //       and node document set to document.
+    //    FIXME: 3. If namespace is the HTML namespace, and either localName is a valid custom element name or is is non-null,
+    //           then set result’s custom element state to "undefined".
+    // 8. Return result.
+
+    auto lowercase_tag_name = local_name.to_lowercase();
+
+    auto qualified_name = QualifiedName { local_name, prefix, namespace_ };
     if (lowercase_tag_name == HTML::TagNames::a)
         return adopt_ref(*new HTML::HTMLAnchorElement(document, move(qualified_name)));
     if (lowercase_tag_name == HTML::TagNames::area)
@@ -234,8 +259,20 @@ NonnullRefPtr<Element> create_element(Document& document, const FlyString& tag_n
         return adopt_ref(*new HTML::HTMLElement(document, move(qualified_name)));
     if (lowercase_tag_name == SVG::TagNames::svg)
         return adopt_ref(*new SVG::SVGSVGElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::circle)
+        return adopt_ref(*new SVG::SVGCircleElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::ellipse)
+        return adopt_ref(*new SVG::SVGEllipseElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::line)
+        return adopt_ref(*new SVG::SVGLineElement(document, move(qualified_name)));
     if (lowercase_tag_name == SVG::TagNames::path)
         return adopt_ref(*new SVG::SVGPathElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::polygon)
+        return adopt_ref(*new SVG::SVGPolygonElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::polyline)
+        return adopt_ref(*new SVG::SVGPolylineElement(document, move(qualified_name)));
+    if (lowercase_tag_name == SVG::TagNames::rect)
+        return adopt_ref(*new SVG::SVGRectElement(document, move(qualified_name)));
     if (lowercase_tag_name == SVG::TagNames::g)
         return adopt_ref(*new SVG::SVGGElement(document, move(qualified_name)));
 

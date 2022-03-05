@@ -19,6 +19,9 @@ template<typename T>
 concept FloatingPoint = IsFloatingPoint<T>;
 
 template<typename T>
+concept Fundamental = IsFundamental<T>;
+
+template<typename T>
 concept Arithmetic = IsArithmetic<T>;
 
 template<typename T>
@@ -32,6 +35,9 @@ concept Enum = IsEnum<T>;
 
 template<typename T, typename U>
 concept SameAs = IsSame<T, U>;
+
+template<typename T, template<typename...> typename S>
+concept SpecializationOf = IsSpecializationOf<T, S>;
 
 template<typename T>
 concept AnyString = Detail::IsConstructible<StringView, T>;
@@ -106,11 +112,13 @@ using AK::Concepts::Arithmetic;
 using AK::Concepts::ArrayLike;
 using AK::Concepts::Enum;
 using AK::Concepts::FloatingPoint;
+using AK::Concepts::Fundamental;
 using AK::Concepts::Integral;
 using AK::Concepts::IterableContainer;
 using AK::Concepts::IteratorFunction;
 using AK::Concepts::IteratorPairWith;
 using AK::Concepts::SameAs;
 using AK::Concepts::Signed;
+using AK::Concepts::SpecializationOf;
 using AK::Concepts::Unsigned;
 using AK::Concepts::VoidFunction;

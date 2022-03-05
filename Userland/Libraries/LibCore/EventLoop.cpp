@@ -302,7 +302,8 @@ private:
 };
 
 EventLoop::EventLoop([[maybe_unused]] MakeInspectable make_inspectable)
-    : m_private(make<Private>())
+    : m_wake_pipe_fds(&s_wake_pipe_fds)
+    , m_private(make<Private>())
 {
 #ifdef __serenity__
     if (!s_global_initializers_ran) {
@@ -396,14 +397,14 @@ public:
     EventLoopPusher(EventLoop& event_loop)
         : m_event_loop(event_loop)
     {
-        if (!is_main_event_loop()) {
+        if (EventLoop::has_been_instantiated()) {
             m_event_loop.take_pending_events_from(EventLoop::current());
             s_event_loop_stack->append(event_loop);
         }
     }
     ~EventLoopPusher()
     {
-        if (!is_main_event_loop()) {
+        if (EventLoop::has_been_instantiated()) {
             s_event_loop_stack->take_last();
             EventLoop::current().take_pending_events_from(m_event_loop);
         }
@@ -487,11 +488,13 @@ size_t EventLoop::pump(WaitMode mode)
     return processed_events;
 }
 
-void EventLoop::post_event(Object& receiver, NonnullOwnPtr<Event>&& event)
+void EventLoop::post_event(Object& receiver, NonnullOwnPtr<Event>&& event, ShouldWake should_wake)
 {
     Threading::MutexLocker lock(m_private->lock);
     dbgln_if(EVENTLOOP_DEBUG, "Core::EventLoop::post_event: ({}) << receiver={}, event={}", m_queued_events.size(), receiver, event);
     m_queued_events.empend(receiver, move(event));
+    if (should_wake == ShouldWake::Yes)
+        wake();
 }
 
 SignalHandlers::SignalHandlers(int signo, void (*handle_signal)(int))
@@ -790,6 +793,7 @@ void EventLoopTimer::reload(const Time& now)
 
 Optional<Time> EventLoop::get_next_timer_expiration()
 {
+    auto now = Time::now_monotonic_coarse();
     Optional<Time> soonest {};
     for (auto& it : *s_timers) {
         auto& fire_time = it.value->fire_time;
@@ -798,6 +802,10 @@ Optional<Time> EventLoop::get_next_timer_expiration()
             && owner && !owner->is_visible_for_timer_purposes()) {
             continue;
         }
+        // OPTIMIZATION: If we have a timer that needs to fire right away, we can stop looking here.
+        // FIXME: This whole operation could be O(1) with a better data structure.
+        if (fire_time < now)
+            return now;
         if (!soonest.has_value() || fire_time < soonest.value())
             soonest = fire_time;
     }
@@ -839,10 +847,16 @@ void EventLoop::unregister_notifier(Badge<Notifier>, Notifier& notifier)
     s_notifiers->remove(&notifier);
 }
 
+void EventLoop::wake_current()
+{
+    EventLoop::current().wake();
+}
+
 void EventLoop::wake()
 {
+    dbgln_if(EVENTLOOP_DEBUG, "Core::EventLoop::wake()");
     int wake_event = 0;
-    int nwritten = write(s_wake_pipe_fds[1], &wake_event, sizeof(wake_event));
+    int nwritten = write((*m_wake_pipe_fds)[1], &wake_event, sizeof(wake_event));
     if (nwritten < 0) {
         perror("EventLoop::wake: write");
         VERIFY_NOT_REACHED();

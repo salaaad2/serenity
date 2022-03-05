@@ -14,6 +14,11 @@
 
 namespace Web::Layout {
 
+struct LineBoxFragmentCoordinate {
+    size_t line_box_index { 0 };
+    size_t fragment_index { 0 };
+};
+
 class Box : public NodeWithStyleAndBoxModelMetrics {
 public:
     struct OverflowData {
@@ -37,7 +42,7 @@ public:
     float content_width() const { return m_content_size.width(); }
     float content_height() const { return m_content_size.height(); }
 
-    Gfx::FloatRect padded_rect() const
+    Gfx::FloatRect absolute_padding_box_rect() const
     {
         auto absolute_rect = this->absolute_rect();
         Gfx::FloatRect rect;
@@ -48,27 +53,15 @@ public:
         return rect;
     }
 
-    Gfx::FloatRect bordered_rect() const
+    Gfx::FloatRect absolute_border_box_rect() const
     {
-        auto padded_rect = this->padded_rect();
+        auto padded_rect = this->absolute_padding_box_rect();
         Gfx::FloatRect rect;
         rect.set_x(padded_rect.x() - box_model().border.left);
         rect.set_width(padded_rect.width() + box_model().border.left + box_model().border.right);
         rect.set_y(padded_rect.y() - box_model().border.top);
         rect.set_height(padded_rect.height() + box_model().border.top + box_model().border.bottom);
         return rect;
-    }
-
-    float margin_box_width() const
-    {
-        auto margin_box = box_model().margin_box();
-        return content_width() + margin_box.left + margin_box.right;
-    }
-
-    float margin_box_height() const
-    {
-        auto margin_box = box_model().margin_box();
-        return content_height() + margin_box.top + margin_box.bottom;
     }
 
     float border_box_width() const
@@ -83,33 +76,6 @@ public:
         return content_height() + border_box.top + border_box.bottom;
     }
 
-    Gfx::FloatRect content_box_as_relative_rect() const
-    {
-        return { m_offset, m_content_size };
-    }
-
-    Gfx::FloatRect border_box_as_relative_rect() const
-    {
-        auto rect = content_box_as_relative_rect();
-        auto border_box = box_model().border_box();
-        rect.set_x(rect.x() - border_box.left);
-        rect.set_width(rect.width() + border_box.left + border_box.right);
-        rect.set_y(rect.y() - border_box.top);
-        rect.set_height(rect.height() + border_box.top + border_box.bottom);
-        return rect;
-    }
-
-    Gfx::FloatRect margin_box_as_relative_rect() const
-    {
-        auto rect = content_box_as_relative_rect();
-        auto margin_box = box_model().margin_box();
-        rect.set_x(rect.x() - margin_box.left);
-        rect.set_width(rect.width() + margin_box.left + margin_box.right);
-        rect.set_y(rect.y() - margin_box.top);
-        rect.set_height(rect.height() + margin_box.top + margin_box.bottom);
-        return rect;
-    }
-
     float absolute_x() const { return absolute_rect().x(); }
     float absolute_y() const { return absolute_rect().y(); }
     Gfx::FloatPoint absolute_position() const { return absolute_rect().location(); }
@@ -121,7 +87,7 @@ public:
 
     bool is_body() const;
 
-    void set_containing_line_box_fragment(LineBoxFragment&);
+    void set_containing_line_box_fragment(Optional<LineBoxFragmentCoordinate>);
 
     StackingContext* stacking_context() { return m_stacking_context; }
     const StackingContext* stacking_context() const { return m_stacking_context; }
@@ -143,40 +109,19 @@ public:
     bool has_intrinsic_height() const { return intrinsic_height().has_value(); }
     bool has_intrinsic_aspect_ratio() const { return intrinsic_aspect_ratio().has_value(); }
 
-    bool has_overflow() const { return m_overflow_data; }
+    bool has_overflow() const { return m_overflow_data.has_value(); }
 
     Optional<Gfx::FloatRect> scrollable_overflow_rect() const
     {
-        if (!m_overflow_data)
+        if (!m_overflow_data.has_value())
             return {};
         return m_overflow_data->scrollable_overflow_rect;
     }
 
-    OverflowData& ensure_overflow_data()
-    {
-        if (!m_overflow_data)
-            m_overflow_data = make<OverflowData>();
-        return *m_overflow_data;
-    }
-
-    void clear_overflow_data() { m_overflow_data = nullptr; }
+    void set_overflow_data(Optional<OverflowData> data) { m_overflow_data = move(data); }
 
     virtual void before_children_paint(PaintContext&, PaintPhase) override;
     virtual void after_children_paint(PaintContext&, PaintPhase) override;
-
-    Gfx::FloatRect margin_box_rect_in_ancestor_coordinate_space(Box const& ancestor_box) const
-    {
-        auto rect = margin_box_as_relative_rect();
-        for (auto const* current = parent(); current; current = current->parent()) {
-            if (current == &ancestor_box)
-                break;
-            if (is<Box>(*current)) {
-                auto offset = static_cast<Box const&>(*current).effective_offset();
-                rect.translate_by(offset);
-            }
-        }
-        return rect;
-    }
 
 protected:
     Box(DOM::Document& document, DOM::Node* node, NonnullRefPtr<CSS::StyleProperties> style)
@@ -198,11 +143,11 @@ private:
     Gfx::FloatSize m_content_size;
 
     // Some boxes hang off of line box fragments. (inline-block, inline-table, replaced, etc)
-    WeakPtr<LineBoxFragment> m_containing_line_box_fragment;
+    Optional<LineBoxFragmentCoordinate> m_containing_line_box_fragment;
 
     OwnPtr<StackingContext> m_stacking_context;
 
-    OwnPtr<OverflowData> m_overflow_data;
+    Optional<OverflowData> m_overflow_data;
 };
 
 template<>

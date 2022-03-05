@@ -12,7 +12,7 @@
 #include "Player.h"
 #include "VisualizationWidget.h"
 #include <AK/NonnullRefPtr.h>
-#include <LibAudio/ClientConnection.h>
+#include <LibAudio/ConnectionFromClient.h>
 #include <LibGUI/Splitter.h>
 #include <LibGUI/Widget.h>
 
@@ -32,6 +32,8 @@ public:
         auto new_visualization = T::construct();
         m_player_view->insert_child_before(new_visualization, *static_cast<Core::Object*>(m_playback_progress_slider.ptr()));
         m_visualization = new_visualization;
+        if (!loaded_filename().is_empty())
+            m_visualization->start_new_file(loaded_filename());
     }
 
     virtual void play_state_changed(PlayState) override;
@@ -50,7 +52,7 @@ protected:
     void keydown_event(GUI::KeyEvent&) override;
 
 private:
-    SoundPlayerWidgetAdvancedView(GUI::Window&, Audio::ClientConnection&);
+    SoundPlayerWidgetAdvancedView(GUI::Window&, Audio::ConnectionFromClient&);
 
     void sync_previous_next_buttons();
 

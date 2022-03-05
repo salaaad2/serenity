@@ -191,11 +191,18 @@ public:
             [&](auto& hash) { hash.reset(); });
     }
 
+#ifndef KERNEL
     virtual String class_name() const override
     {
         return m_algorithm.visit(
             [&](const Empty&) -> String { return "UninitializedHashManager"; },
             [&](const auto& hash) { return hash.class_name(); });
+    }
+#endif
+
+    inline HashKind kind() const
+    {
+        return m_kind;
     }
 
     inline bool is(HashKind kind) const

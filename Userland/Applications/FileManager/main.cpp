@@ -2,6 +2,7 @@
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2021, Mustafa Quraish <mustafa@cs.toronto.edu>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -322,7 +323,7 @@ bool add_launch_handler_actions_to_menu(RefPtr<GUI::Menu>& menu, DirectoryView c
 
 ErrorOr<int> run_in_desktop_mode()
 {
-    static constexpr char const* process_name = "FileManager (Desktop)";
+    constexpr char const* process_name = "FileManager (Desktop)";
     set_process_name(process_name, strlen(process_name));
     pthread_setname_np(pthread_self(), process_name);
 
@@ -506,14 +507,20 @@ ErrorOr<int> run_in_desktop_mode()
     struct BackgroundWallpaperListener : Config::Listener {
         virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override
         {
-            if (domain == "WindowManager" && group == "Background" && key == "Wallpaper")
-                GUI::Desktop::the().set_wallpaper(value, false);
+            if (domain == "WindowManager" && group == "Background" && key == "Wallpaper") {
+                auto wallpaper_bitmap_or_error = Gfx::Bitmap::try_load_from_file(value);
+                if (wallpaper_bitmap_or_error.is_error())
+                    dbgln("Failed to load wallpaper bitmap from path: {}", wallpaper_bitmap_or_error.error());
+                else
+                    GUI::Desktop::the().set_wallpaper(wallpaper_bitmap_or_error.release_value(), {});
+            }
         }
     } wallpaper_listener;
 
     auto selected_wallpaper = Config::read_string("WindowManager", "Background", "Wallpaper", "");
     if (!selected_wallpaper.is_empty()) {
-        GUI::Desktop::the().set_wallpaper(selected_wallpaper, false);
+        auto wallpaper_bitmap = TRY(Gfx::Bitmap::try_load_from_file(selected_wallpaper));
+        GUI::Desktop::the().set_wallpaper(wallpaper_bitmap, {});
     }
 
     window->show();
@@ -970,7 +977,7 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
     TRY(view_menu->try_add_separator());
     TRY(view_menu->try_add_action(action_show_dotfiles));
 
-    auto go_to_location_action = GUI::Action::create("Go to &Location...", { Mod_Ctrl, Key_L }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png").release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    auto go_to_location_action = GUI::Action::create("Go to &Location...", { Mod_Ctrl, Key_L }, Key_F6, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png").release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         toolbar_container.set_visible(true);
         location_toolbar.set_visible(true);
         breadcrumb_toolbar.set_visible(false);

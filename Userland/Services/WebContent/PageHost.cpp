@@ -5,7 +5,7 @@
  */
 
 #include "PageHost.h"
-#include "ClientConnection.h"
+#include "ConnectionFromClient.h"
 #include <LibGfx/Painter.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibGfx/SystemTheme.h>
@@ -16,7 +16,7 @@
 
 namespace WebContent {
 
-PageHost::PageHost(ClientConnection& client)
+PageHost::PageHost(ConnectionFromClient& client)
     : m_client(client)
     , m_page(make<Web::Page>(*this))
 {
@@ -29,6 +29,11 @@ PageHost::PageHost(ClientConnection& client)
 
 PageHost::~PageHost()
 {
+}
+
+void PageHost::set_has_focus(bool has_focus)
+{
+    m_has_focus = has_focus;
 }
 
 void PageHost::setup_palette()
@@ -85,6 +90,7 @@ void PageHost::paint(const Gfx::IntRect& content_rect, Gfx::Bitmap& target)
     Web::PaintContext context(painter, palette(), content_rect.top_left());
     context.set_should_show_line_box_borders(m_should_show_line_box_borders);
     context.set_viewport_rect(content_rect);
+    context.set_has_focus(m_has_focus);
     layout_root->paint_all_phases(context);
 }
 
@@ -197,17 +203,31 @@ void PageHost::page_did_request_link_context_menu(const Gfx::IntPoint& content_p
 
 void PageHost::page_did_request_alert(const String& message)
 {
-    m_client.did_request_alert(message);
+    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestAlert>(message);
+    if (!response) {
+        dbgln("WebContent client disconnected during DidRequestAlert. Exiting peacefully.");
+        exit(0);
+    }
 }
 
 bool PageHost::page_did_request_confirm(const String& message)
 {
-    return m_client.did_request_confirm(message);
+    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestConfirm>(message);
+    if (!response) {
+        dbgln("WebContent client disconnected during DidRequestConfirm. Exiting peacefully.");
+        exit(0);
+    }
+    return response->take_result();
 }
 
 String PageHost::page_did_request_prompt(const String& message, const String& default_)
 {
-    return m_client.did_request_prompt(message, default_);
+    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestPrompt>(message, default_);
+    if (!response) {
+        dbgln("WebContent client disconnected during DidRequestPrompt. Exiting peacefully.");
+        exit(0);
+    }
+    return response->take_response();
 }
 
 void PageHost::page_did_change_favicon(const Gfx::Bitmap& favicon)
@@ -223,7 +243,12 @@ void PageHost::page_did_request_image_context_menu(const Gfx::IntPoint& content_
 
 String PageHost::page_did_request_cookie(const URL& url, Web::Cookie::Source source)
 {
-    return m_client.did_request_cookie(url, static_cast<u8>(source));
+    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestCookie>(move(url), static_cast<u8>(source));
+    if (!response) {
+        dbgln("WebContent client disconnected during DidRequestCookie. Exiting peacefully.");
+        exit(0);
+    }
+    return response->take_cookie();
 }
 
 void PageHost::page_did_set_cookie(const URL& url, const Web::Cookie::ParsedCookie& cookie, Web::Cookie::Source source)

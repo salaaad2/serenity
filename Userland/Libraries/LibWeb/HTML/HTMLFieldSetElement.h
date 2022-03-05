@@ -6,15 +6,15 @@
 
 #pragma once
 
-#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
 
 namespace Web::HTML {
 
-class HTMLFieldSetElement final : public HTMLElement {
+class HTMLFieldSetElement final : public FormAssociatedElement {
 public:
     using WrapperType = Bindings::HTMLFieldSetElementWrapper;
 
-    HTMLFieldSetElement(DOM::Document&, QualifiedName);
+    HTMLFieldSetElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLFieldSetElement() override;
 
     const String& type() const
@@ -22,6 +22,13 @@ public:
         static String fieldset = "fieldset";
         return fieldset;
     }
+
+    // ^FormAssociatedElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_auto_capitalize_inheriting() const override { return true; }
 };
 
 }

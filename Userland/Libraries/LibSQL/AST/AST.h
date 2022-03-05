@@ -14,7 +14,8 @@
 #include <AK/String.h>
 #include <LibSQL/AST/Token.h>
 #include <LibSQL/Forward.h>
-#include <LibSQL/SQLResult.h>
+#include <LibSQL/Result.h>
+#include <LibSQL/ResultSet.h>
 #include <LibSQL/Type.h>
 
 namespace SQL::AST {
@@ -298,14 +299,16 @@ private:
 
 struct ExecutionContext {
     NonnullRefPtr<Database> database;
-    RefPtr<SQLResult> result { nullptr };
     class Statement const* statement;
     Tuple* current_row { nullptr };
 };
 
 class Expression : public ASTNode {
 public:
-    virtual Value evaluate(ExecutionContext&) const;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const
+    {
+        return Result { SQLCommand::Unknown, SQLErrorCode::NotYetImplemented };
+    }
 };
 
 class ErrorExpression final : public Expression {
@@ -319,7 +322,7 @@ public:
     }
 
     double value() const { return m_value; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     double m_value;
@@ -333,7 +336,7 @@ public:
     }
 
     const String& value() const { return m_value; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     String m_value;
@@ -354,13 +357,13 @@ private:
 
 class NullLiteral : public Expression {
 public:
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 };
 
 class NestedExpression : public Expression {
 public:
     const NonnullRefPtr<Expression>& expression() const { return m_expression; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 protected:
     explicit NestedExpression(NonnullRefPtr<Expression> expression)
@@ -431,7 +434,7 @@ public:
     const String& schema_name() const { return m_schema_name; }
     const String& table_name() const { return m_table_name; }
     const String& column_name() const { return m_column_name; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     String m_schema_name;
@@ -474,7 +477,7 @@ public:
     }
 
     UnaryOperator type() const { return m_type; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     UnaryOperator m_type;
@@ -530,7 +533,7 @@ public:
     }
 
     BinaryOperator type() const { return m_type; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     BinaryOperator m_type;
@@ -544,7 +547,7 @@ public:
     }
 
     const NonnullRefPtrVector<Expression>& expressions() const { return m_expressions; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     NonnullRefPtrVector<Expression> m_expressions;
@@ -637,7 +640,7 @@ public:
 
     MatchOperator type() const { return m_type; }
     const RefPtr<Expression>& escape() const { return m_escape; }
-    virtual Value evaluate(ExecutionContext&) const override;
+    virtual ResultOr<Value> evaluate(ExecutionContext&) const override;
 
 private:
     MatchOperator m_type;
@@ -725,8 +728,12 @@ private:
 
 class Statement : public ASTNode {
 public:
-    RefPtr<SQLResult> execute(AK::NonnullRefPtr<Database> database) const;
-    virtual RefPtr<SQLResult> execute(ExecutionContext&) const { return nullptr; }
+    ResultOr<ResultSet> execute(AK::NonnullRefPtr<Database> database) const;
+
+    virtual ResultOr<ResultSet> execute(ExecutionContext&) const
+    {
+        return Result { SQLCommand::Unknown, SQLErrorCode::NotYetImplemented };
+    }
 };
 
 class ErrorStatement final : public Statement {
@@ -743,7 +750,7 @@ public:
     const String& schema_name() const { return m_schema_name; }
     bool is_error_if_schema_exists() const { return m_is_error_if_schema_exists; }
 
-    RefPtr<SQLResult> execute(ExecutionContext&) const override;
+    ResultOr<ResultSet> execute(ExecutionContext&) const override;
 
 private:
     String m_schema_name;
@@ -782,7 +789,7 @@ public:
     bool is_temporary() const { return m_is_temporary; }
     bool is_error_if_table_exists() const { return m_is_error_if_table_exists; }
 
-    RefPtr<SQLResult> execute(ExecutionContext&) const override;
+    ResultOr<ResultSet> execute(ExecutionContext&) const override;
 
 private:
     String m_schema_name;
@@ -945,7 +952,7 @@ public:
     bool has_selection() const { return !m_select_statement.is_null(); }
     const RefPtr<Select>& select_statement() const { return m_select_statement; }
 
-    virtual RefPtr<SQLResult> execute(ExecutionContext&) const override;
+    virtual ResultOr<ResultSet> execute(ExecutionContext&) const override;
 
 private:
     RefPtr<CommonTableExpressionList> m_common_table_expression_list;
@@ -1038,7 +1045,7 @@ public:
     const RefPtr<GroupByClause>& group_by_clause() const { return m_group_by_clause; }
     const NonnullRefPtrVector<OrderingTerm>& ordering_term_list() const { return m_ordering_term_list; }
     const RefPtr<LimitClause>& limit_clause() const { return m_limit_clause; }
-    RefPtr<SQLResult> execute(ExecutionContext&) const override;
+    ResultOr<ResultSet> execute(ExecutionContext&) const override;
 
 private:
     RefPtr<CommonTableExpressionList> m_common_table_expression_list;
@@ -1059,7 +1066,7 @@ public:
     }
 
     NonnullRefPtr<QualifiedTableName> qualified_table_name() const { return m_qualified_table_name; }
-    RefPtr<SQLResult> execute(ExecutionContext&) const override;
+    ResultOr<ResultSet> execute(ExecutionContext&) const override;
 
 private:
     NonnullRefPtr<QualifiedTableName> m_qualified_table_name;

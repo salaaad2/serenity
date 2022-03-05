@@ -45,11 +45,11 @@ public:
     virtual void unref_event_target() override { unref(); }
     virtual JS::Object* create_wrapper(JS::GlobalObject&) override;
 
-    void add_listener(RefPtr<DOM::EventListener> listener);
-    void remove_listener(RefPtr<DOM::EventListener> listener);
+    void add_listener(RefPtr<DOM::IDLEventListener> listener);
+    void remove_listener(RefPtr<DOM::IDLEventListener> listener);
 
-    void set_onchange(HTML::EventHandler);
-    HTML::EventHandler onchange();
+    void set_onchange(Optional<Bindings::CallbackType>);
+    Bindings::CallbackType* onchange();
 
 private:
     MediaQueryList(DOM::Document&, NonnullRefPtrVector<MediaQuery>&&);

@@ -12,16 +12,14 @@ namespace Web::HTML {
 
 class BrowsingContextContainer : public HTMLElement {
 public:
-    BrowsingContextContainer(DOM::Document&, QualifiedName);
+    BrowsingContextContainer(DOM::Document&, DOM::QualifiedName);
     virtual ~BrowsingContextContainer() override;
 
     BrowsingContext* nested_browsing_context() { return m_nested_browsing_context; }
     const BrowsingContext* nested_browsing_context() const { return m_nested_browsing_context; }
 
     const DOM::Document* content_document() const;
-
-    Origin content_origin() const;
-    bool may_access_from_origin(const Origin&) const;
+    DOM::Document const* content_document_without_origin_check() const;
 
     virtual void inserted() override;
 

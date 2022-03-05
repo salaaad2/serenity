@@ -11,14 +11,14 @@
 #include <AK/Try.h>
 
 static ManualSectionNode s_sections[] = {
-    { "1", "User programs" },
-    { "2", "System calls" },
-    { "3", "Library functions" },
-    { "4", "Special files" },
-    { "5", "File formats" },
+    { "1", "User Programs" },
+    { "2", "System Calls" },
+    { "3", "Library Functions" },
+    { "4", "Special Files" },
+    { "5", "File Formats" },
     { "6", "Games" },
     { "7", "Miscellanea" },
-    { "8", "Sysadmin tools" }
+    { "8", "Sysadmin Tools" }
 };
 
 ManualModel::ManualModel()
@@ -174,12 +174,12 @@ void ManualModel::update_section_node_on_toggle(const GUI::ModelIndex& index, co
 TriState ManualModel::data_matches(const GUI::ModelIndex& index, const GUI::Variant& term) const
 {
     auto name = page_name(index);
-    if (name.contains(term.as_string()))
+    if (name.contains(term.as_string(), CaseSensitivity::CaseInsensitive))
         return TriState::True;
 
     auto view_result = page_view(page_path(index));
     if (view_result.is_error() || view_result.value().is_empty())
         return TriState::False;
 
-    return view_result.value().contains(term.as_string()) ? TriState::True : TriState::False;
+    return view_result.value().contains(term.as_string(), CaseSensitivity::CaseInsensitive) ? TriState::True : TriState::False;
 }

@@ -9,6 +9,7 @@
 #include <LibGfx/Painter.h>
 #include <LibGfx/StylePainter.h>
 #include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/Layout/CheckBox.h>
 #include <LibWeb/Layout/Label.h>
 
@@ -61,8 +62,10 @@ void CheckBox::handle_mouseup(Badge<EventHandler>, const Gfx::IntPoint& position
     if (!is_inside_node_or_label)
         is_inside_node_or_label = Label::is_inside_associated_label(*this, position);
 
-    if (is_inside_node_or_label)
-        dom_node().set_checked(!dom_node().checked());
+    if (is_inside_node_or_label) {
+        dom_node().did_click_checkbox({});
+        dom_node().set_checked(!dom_node().checked(), HTML::HTMLInputElement::ChangeSource::User);
+    }
 
     m_being_pressed = false;
     m_tracking_mouse = false;
@@ -87,22 +90,29 @@ void CheckBox::handle_mousemove(Badge<EventHandler>, const Gfx::IntPoint& positi
 
 void CheckBox::handle_associated_label_mousedown(Badge<Label>)
 {
+    if (!dom_node().enabled())
+        return;
+
     m_being_pressed = true;
     set_needs_display();
 }
 
 void CheckBox::handle_associated_label_mouseup(Badge<Label>)
 {
+    if (!dom_node().enabled())
+        return;
+
     // NOTE: Changing the checked state of the DOM node may run arbitrary JS, which could disappear this node.
     NonnullRefPtr protect = *this;
 
-    dom_node().set_checked(!dom_node().checked());
+    dom_node().did_click_checkbox({});
+    dom_node().set_checked(!dom_node().checked(), HTML::HTMLInputElement::ChangeSource::User);
     m_being_pressed = false;
 }
 
 void CheckBox::handle_associated_label_mousemove(Badge<Label>, bool is_inside_node_or_label)
 {
-    if (m_being_pressed == is_inside_node_or_label)
+    if (m_being_pressed == is_inside_node_or_label || !dom_node().enabled())
         return;
 
     m_being_pressed = is_inside_node_or_label;

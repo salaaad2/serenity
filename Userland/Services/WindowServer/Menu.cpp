@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020, Shannon Booth <shannon.ml.booth@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,7 +20,7 @@
 #include <LibGfx/Painter.h>
 #include <LibGfx/StylePainter.h>
 #include <LibGfx/Triangle.h>
-#include <WindowServer/ClientConnection.h>
+#include <WindowServer/ConnectionFromClient.h>
 #include <WindowServer/WindowClientEndpoint.h>
 
 namespace WindowServer {
@@ -37,7 +38,7 @@ u32 find_ampersand_shortcut_character(StringView string)
     return 0;
 }
 
-Menu::Menu(ClientConnection* client, int menu_id, String name)
+Menu::Menu(ConnectionFromClient* client, int menu_id, String name)
     : Core::Object(client)
     , m_client(client)
     , m_menu_id(menu_id)
@@ -55,7 +56,7 @@ const Gfx::Font& Menu::font() const
     return Gfx::FontDatabase::default_font();
 }
 
-static const char* s_submenu_arrow_bitmap_data = {
+static constexpr Gfx::CharacterBitmap s_submenu_arrow_bitmap {
     "         "
     "   #     "
     "   ##    "
@@ -64,13 +65,12 @@ static const char* s_submenu_arrow_bitmap_data = {
     "   ###   "
     "   ##    "
     "   #     "
-    "         "
+    "         ",
+    9, 9
 };
 
-static const int s_submenu_arrow_bitmap_width = 9;
-static const int s_submenu_arrow_bitmap_height = 9;
-static const int s_item_icon_width = 16;
-static const int s_stripe_width = 24;
+static constexpr int s_item_icon_width = 16;
+static constexpr int s_stripe_width = 24;
 
 int Menu::content_width() const
 {
@@ -269,15 +269,14 @@ void Menu::draw(MenuItem const& item, bool is_drawing_all)
         }
         painter.set_font(previous_font);
         if (item.is_submenu()) {
-            static auto& submenu_arrow_bitmap = Gfx::CharacterBitmap::create_from_ascii(s_submenu_arrow_bitmap_data, s_submenu_arrow_bitmap_width, s_submenu_arrow_bitmap_height).leak_ref();
             Gfx::IntRect submenu_arrow_rect {
-                item.rect().right() - s_submenu_arrow_bitmap_width - 2,
+                item.rect().right() - static_cast<int>(s_submenu_arrow_bitmap.width()) - 2,
                 0,
-                s_submenu_arrow_bitmap_width,
-                s_submenu_arrow_bitmap_height
+                s_submenu_arrow_bitmap.width(),
+                s_submenu_arrow_bitmap.height()
             };
             submenu_arrow_rect.center_vertically_within(item.rect());
-            painter.draw_bitmap(submenu_arrow_rect.location(), submenu_arrow_bitmap, text_color);
+            painter.draw_bitmap(submenu_arrow_rect.location(), s_submenu_arrow_bitmap, text_color);
         }
     } else if (item.type() == MenuItem::Separator) {
         Gfx::IntPoint p1(item.rect().translated(stripe_rect.width() + 4, 0).x(), item.rect().center().y() - 1);
@@ -560,6 +559,11 @@ MenuItem* Menu::item_with_identifier(unsigned identifier)
             return &item;
     }
     return nullptr;
+}
+
+bool Menu::remove_item_with_identifier(unsigned identifier)
+{
+    return m_items.remove_first_matching([&](auto& item) { return item->identifier() == identifier; });
 }
 
 int Menu::item_index_at(const Gfx::IntPoint& position)

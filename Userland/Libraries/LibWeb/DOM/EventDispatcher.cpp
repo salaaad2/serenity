@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,17 +12,19 @@
 #include <LibWeb/Bindings/EventTargetWrapperFactory.h>
 #include <LibWeb/Bindings/EventWrapper.h>
 #include <LibWeb/Bindings/EventWrapperFactory.h>
-#include <LibWeb/Bindings/ScriptExecutionContext.h>
+#include <LibWeb/Bindings/IDLAbstractOperations.h>
 #include <LibWeb/Bindings/WindowObject.h>
+#include <LibWeb/DOM/AbortSignal.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventDispatcher.h>
-#include <LibWeb/DOM/EventListener.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/DOM/IDLEventListener.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Window.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/UIEvents/MouseEvent.h>
 
 namespace Web::DOM {
@@ -49,64 +51,89 @@ static EventTarget* retarget(EventTarget* left, EventTarget* right)
 }
 
 // https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke
-bool EventDispatcher::inner_invoke(Event& event, Vector<EventTarget::EventListenerRegistration>& listeners, Event::Phase phase, bool invocation_target_in_shadow_tree)
+bool EventDispatcher::inner_invoke(Event& event, Vector<NonnullRefPtr<DOM::DOMEventListener>>& listeners, Event::Phase phase, bool invocation_target_in_shadow_tree)
 {
+    // 1. Let found be false.
     bool found = false;
 
+    // 2. For each listener in listeners, whose removed is false:
     for (auto& listener : listeners) {
-        if (listener.listener->removed())
+        if (listener->removed)
             continue;
 
-        if (event.type() != listener.listener->type())
+        // 1. If event’s type attribute value is not listener’s type, then continue.
+        if (event.type() != listener->type)
             continue;
 
+        // 2. Set found to true.
         found = true;
 
-        if (phase == Event::Phase::CapturingPhase && !listener.listener->capture())
+        // 3. If phase is "capturing" and listener’s capture is false, then continue.
+        if (phase == Event::Phase::CapturingPhase && !listener->capture)
             continue;
 
-        if (phase == Event::Phase::BubblingPhase && listener.listener->capture())
+        // 4. If phase is "bubbling" and listener’s capture is true, then continue.
+        if (phase == Event::Phase::BubblingPhase && listener->capture)
             continue;
 
-        if (listener.listener->once())
-            event.current_target()->remove_from_event_listener_list(listener.listener);
+        // 5. If listener’s once is true, then remove listener from event’s currentTarget attribute value’s event listener list.
+        if (listener->once)
+            event.current_target()->remove_from_event_listener_list(listener);
 
-        auto& function = listener.listener->function();
-        auto& global = function.global_object();
+        // 6. Let global be listener callback’s associated Realm’s global object.
+        auto& callback = listener->callback->callback();
+        auto& global = callback.callback.cell()->global_object();
 
+        // 7. Let currentEvent be undefined.
         RefPtr<Event> current_event;
 
+        // 8. If global is a Window object, then:
         if (is<Bindings::WindowObject>(global)) {
             auto& bindings_window_global = verify_cast<Bindings::WindowObject>(global);
             auto& window_impl = bindings_window_global.impl();
+
+            // 1. Set currentEvent to global’s current event.
             current_event = window_impl.current_event();
+
+            // 2. If invocationTargetInShadowTree is false, then set global’s current event to event.
             if (!invocation_target_in_shadow_tree)
                 window_impl.set_current_event(&event);
         }
 
-        if (listener.listener->passive())
+        // 9. If listener’s passive is true, then set event’s in passive listener flag.
+        if (listener->passive)
             event.set_in_passive_listener(true);
 
+        // 10. Call a user object’s operation with listener’s callback, "handleEvent", « event », and event’s currentTarget attribute value. If this throws an exception, then:
+        // FIXME: These should be wrapped for us in call_user_object_operation, but it currently doesn't do that.
         auto* this_value = Bindings::wrap(global, *event.current_target());
         auto* wrapped_event = Bindings::wrap(global, event);
-        auto& vm = global.vm();
-        [[maybe_unused]] auto rc = JS::call(global, function, this_value, wrapped_event);
-        if (vm.exception()) {
-            vm.clear_exception();
-            // FIXME: Set legacyOutputDidListenersThrowFlag if given. (Only used by IndexedDB currently)
+        auto result = Bindings::IDL::call_user_object_operation(callback, "handleEvent", this_value, wrapped_event);
+
+        // If this throws an exception, then:
+        if (result.is_error()) {
+            // 1. Report the exception.
+            HTML::report_exception(result);
+
+            // FIXME: 2. Set legacyOutputDidListenersThrowFlag if given. (Only used by IndexedDB currently)
         }
 
+        // 11. Unset event’s in passive listener flag.
         event.set_in_passive_listener(false);
+
+        // 12. If global is a Window object, then set global’s current event to currentEvent.
         if (is<Bindings::WindowObject>(global)) {
             auto& bindings_window_global = verify_cast<Bindings::WindowObject>(global);
             auto& window_impl = bindings_window_global.impl();
             window_impl.set_current_event(current_event);
         }
 
+        // 13. If event’s stop immediate propagation flag is set, then return found.
         if (event.should_stop_immediate_propagation())
             return found;
     }
 
+    // 3. Return found.
     return found;
 }
 
@@ -129,7 +156,7 @@ void EventDispatcher::invoke(Event::PathEntry& struct_, Event& event, Event::Pha
     event.set_current_target(struct_.invocation_target);
 
     // NOTE: This is an intentional copy. Any event listeners added after this point will not be invoked.
-    auto listeners = event.current_target()->listeners();
+    auto listeners = event.current_target()->event_listener_list();
     bool invocation_target_in_shadow_tree = struct_.invocation_target_in_shadow_tree;
 
     bool found = inner_invoke(event, listeners, phase, invocation_target_in_shadow_tree);
@@ -256,7 +283,7 @@ bool EventDispatcher::dispatch(NonnullRefPtr<EventTarget> target, NonnullRefPtr<
             }
         }
 
-        if (activation_target && activation_target->legacy_pre_activation_behavior)
+        if (activation_target)
             activation_target->legacy_pre_activation_behavior();
 
         for (ssize_t i = event->path().size() - 1; i >= 0; --i) {
@@ -302,8 +329,7 @@ bool EventDispatcher::dispatch(NonnullRefPtr<EventTarget> target, NonnullRefPtr<
             // NOTE: Since activation_target is set, it will have activation behavior.
             activation_target->activation_behavior(event);
         } else {
-            if (activation_target->legacy_cancelled_activation_behavior)
-                activation_target->legacy_cancelled_activation_behavior();
+            activation_target->legacy_cancelled_activation_behavior();
         }
     }
 

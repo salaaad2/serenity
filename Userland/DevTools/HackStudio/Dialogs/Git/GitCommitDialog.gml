@@ -1,6 +1,5 @@
 @GUI::Frame {
     fill_with_background_color: true
-
     layout: @GUI::VerticalBoxLayout {
         spacing: 4
         margins: [4, 4, 4, 4]
@@ -17,7 +16,7 @@
     }
 
     @GUI::Widget {
-        layout: @GUI::HorizontalBoxLayout
+        layout: @GUI::HorizontalBoxLayout {}
         shrink_to_fit: true
 
         @GUI::Label {

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +10,7 @@
 #include "BookmarksBarWidget.h"
 #include "Tab.h"
 #include "WindowActions.h"
+#include <LibConfig/Listener.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/Window.h>
 
@@ -17,11 +19,12 @@ namespace Browser {
 class CookieJar;
 class Tab;
 
-class BrowserWindow final : public GUI::Window {
+class BrowserWindow final : public GUI::Window
+    , public Config::Listener {
     C_OBJECT(BrowserWindow);
 
 public:
-    virtual ~BrowserWindow() override;
+    virtual ~BrowserWindow() override = default;
 
     GUI::TabWidget& tab_widget();
     Tab& active_tab();
@@ -37,12 +40,17 @@ public:
     GUI::Action& inspect_dom_tree_action() { return *m_inspect_dom_tree_action; }
     GUI::Action& inspect_dom_node_action() { return *m_inspect_dom_node_action; }
 
+    void content_filters_changed();
+
 private:
     explicit BrowserWindow(CookieJar&, URL);
 
     void build_menus();
     ErrorOr<void> load_search_engines(GUI::Menu& settings_menu);
     void set_window_title_for_tab(Tab const&);
+
+    virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override;
+    virtual void config_bool_did_change(String const& domain, String const& group, String const& key, bool value) override;
 
     RefPtr<GUI::Action> m_go_back_action;
     RefPtr<GUI::Action> m_go_forward_action;

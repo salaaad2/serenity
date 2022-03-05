@@ -14,22 +14,32 @@ Lagom can be used to fuzz parts of SerenityOS's code base. Fuzzers can be run lo
 
 ### Fuzzing locally
 
-Lagom can be used to fuzz parts of SerenityOS's code base. This requires building with `clang`, so it's convenient to use a different build directory for that. Fuzzers work best with Address Sanitizer enabled. Run CMake like this:
+Lagom can be used to fuzz parts of SerenityOS's code base. This requires building with `clang`, so it's convenient to use a different build directory for that. Fuzzers work best with Address Sanitizer enabled. The fuzzer build requires code generators to be pre-built without fuzzing in a two stage build. To build with LLVM's libFuzzer, invoke
+the ``BuildFuzzers.sh`` script with no arguments. The script does the equivalent of the CMake commands below:
 
-    # From the root of the SerenityOS checkout:
-    cmake -GNinja -S Meta/Lagom -B Build/lagom-fuzzers \
+```sh
+    # From the Meta/Lagom directory:
+    # Stage 1: Build and install code generators and other tools
+    cmake -GNinja -B Build/tools \
+      -DBUILD_LAGOM=OFF \
+      -DCMAKE_INSTALL_PREFIX=Build/tool-install
+    ninja -C Build/tools install
+    # Stage 2: Build fuzzers, making sure the build can find the tools we just built
+    cmake -GNinja -B Build/lagom-fuzzers \
       -DBUILD_LAGOM=ON \
       -DENABLE_FUZZER_SANITIZER=ON \
       -DENABLE_ADDRESS_SANITIZER=ON \
       -DENABLE_UNDEFINED_SANITIZER=ON \
+      -DCMAKE_PREFIX_PATH=Build/tool-install \
       -DCMAKE_CXX_COMPILER=clang++ \
       -DCMAKE_C_COMPILER=clang
     cd Build/lagom-fuzzers
     ninja
     # Or as a handy rebuild-rerun line:
     ninja FuzzJs && ./Fuzzers/FuzzJs
+```
 
-(Note that we require clang >= 12, so depending on your package manager you may need to specify `clang++-12` and `clang-12` instead.)
+(Note that we require clang >= 13, see the pick_clang() function in the script for the paths that are searched)
 
 Any fuzzing results (particularly slow inputs, crashes, etc.) will be dropped in the current directory.
 
@@ -130,3 +140,29 @@ You may run into annoying issues with the stacktrace:
 
 That means it couldn't find the executable `llvm-symbolizer`, which could be in your OS's package `llvm`.
 `llvm-symbolizer-11` will [not be recognized](https://stackoverflow.com/a/42845444/).
+
+## Using Lagom in an External Project
+It is possible to use Lagom for your own projects outside of Serenity too!
+
+An example of this in use can be found [on Linus' LibJS test262 runner](https://github.com/linusg/libjs-test262).
+
+To implement this yourself:
+- Download a copy of [linusg/libjs-test262/cmake/FetchLagom.cmake](https://github.com/linusg/libjs-test262/blob/7832c333c1504eecf1c5f9e4247aa6b34a52a3be/cmake/FetchLagom.cmake) and place it wherever you wish
+- In your root `CMakeLists.txt`, add the following commands:
+  ```cmake
+  include(FetchContent)
+  include(cmake/FetchLagom.cmake) # If you've placed the file downloaded above differently, be sure to reflect that in this command :^)
+  ```
+- In addition, you will need to also add some compile options that Serenity uses to ensure no warnings or errors:
+  ```cmake
+  add_compile_options(-Wno-literal-suffix) # AK::StringView defines operator"" sv, which GCC complains does not have an underscore.
+  add_compile_options(-fno-gnu-keywords)   # JS::Value has a method named typeof, which also happens to be a GNU keyword.
+  ```
+
+Now, you can link against Lagom libraries.
+
+Things to keep in mind:
+- You should prefer to use a library's `Lagom::` alias when linking
+  - Example: `Lagom::Core` vs `LibCore`
+- If you still _need_ to use the standard library, you may have to compile with the `AK_DONT_REPLACE_STD` macro.
+  - Serenity defines its own `move` and `forward` functions inside of `AK/StdLibExtras.h` that will clash with the standard library's definitions. This macro will make Serenity use the standard library's `move` and `forward` instead.

@@ -10,6 +10,7 @@
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Bytecode/Op.h>
+#include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Realm.h>
@@ -44,7 +45,9 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
     dbgln_if(JS_BYTECODE_DEBUG, "Bytecode::Interpreter will run unit {:p}", &executable);
 
     TemporaryChange restore_executable { m_current_executable, &executable };
+    VERIFY(m_saved_exception.is_null());
 
+    bool pushed_execution_context = false;
     ExecutionContext execution_context(vm().heap());
     if (vm().execution_context_stack().is_empty() || !vm().running_execution_context().lexical_environment) {
         // The "normal" interpreter pushes an execution context without environment so in that case we also want to push one.
@@ -57,13 +60,14 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         // FIXME: How do we know if we're in strict mode? Maybe the Bytecode::Block should know this?
         // execution_context.is_strict_mode = ???;
         MUST(vm().push_execution_context(execution_context, global_object()));
+        pushed_execution_context = true;
     }
 
     auto block = entry_point ?: &executable.basic_blocks.first();
     if (!m_manually_entered_frames.is_empty() && m_manually_entered_frames.last()) {
         m_register_windows.append(make<RegisterWindow>(m_register_windows.last()));
     } else {
-        m_register_windows.append(make<RegisterWindow>());
+        m_register_windows.append(make<RegisterWindow>(MarkedVector<Value>(vm().heap()), MarkedVector<Environment*>(vm().heap()), MarkedVector<Environment*>(vm().heap())));
     }
 
     registers().resize(executable.number_of_registers);
@@ -76,9 +80,10 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         bool will_return = false;
         while (!pc.at_end()) {
             auto& instruction = *pc;
-            instruction.execute(*this);
-            if (vm().exception()) {
-                m_saved_exception = {};
+            auto ran_or_error = instruction.execute(*this);
+            if (ran_or_error.is_error()) {
+                auto exception_value = *ran_or_error.throw_completion().value();
+                m_saved_exception = make_handle(exception_value);
                 if (m_unwind_contexts.is_empty())
                     break;
                 auto& unwind_context = m_unwind_contexts.last();
@@ -87,8 +92,8 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
                 if (unwind_context.handler) {
                     block = unwind_context.handler;
                     unwind_context.handler = nullptr;
-                    accumulator() = vm().exception()->value();
-                    vm().clear_exception();
+                    accumulator() = exception_value;
+                    m_saved_exception = {};
                     will_jump = true;
                     break;
                 }
@@ -96,8 +101,6 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
                     block = unwind_context.finalizer;
                     m_unwind_contexts.take_last();
                     will_jump = true;
-                    m_saved_exception = Handle<Exception>::create(vm().exception());
-                    vm().clear_exception();
                     break;
                 }
             }
@@ -119,7 +122,7 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         if (pc.at_end() && !will_jump)
             break;
 
-        if (vm().exception())
+        if (!m_saved_exception.is_null())
             break;
     }
 
@@ -142,30 +145,29 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         m_manually_entered_frames.take_last();
     }
 
-    Value exception_value;
-    if (vm().exception()) {
-        exception_value = vm().exception()->value();
-        vm().clear_exception();
-    }
-
     auto return_value = m_return_value.value_or(js_undefined());
     m_return_value = {};
 
     // NOTE: The return value from a called function is put into $0 in the caller context.
     if (!m_register_windows.is_empty())
-        m_register_windows.last()[0] = return_value;
+        m_register_windows.last().registers[0] = return_value;
 
     // At this point we may have already run any queued promise jobs via on_call_stack_emptied,
     // in which case this is a no-op.
     vm().run_queued_promise_jobs();
 
-    if (vm().execution_context_stack().size() == 1)
+    if (pushed_execution_context) {
+        VERIFY(&vm().running_execution_context() == &execution_context);
         vm().pop_execution_context();
+    }
 
     vm().finish_execution_generation();
 
-    if (!exception_value.is_empty())
-        return { throw_completion(exception_value), move(frame) };
+    if (!m_saved_exception.is_null()) {
+        Value thrown_value = m_saved_exception.value();
+        m_saved_exception = {};
+        return { throw_completion(thrown_value), move(frame) };
+    }
 
     return { return_value, move(frame) };
 }
@@ -180,14 +182,24 @@ void Interpreter::leave_unwind_context()
     m_unwind_contexts.take_last();
 }
 
-void Interpreter::continue_pending_unwind(Label const& resume_label)
+ThrowCompletionOr<void> Interpreter::continue_pending_unwind(Label const& resume_label)
 {
     if (!m_saved_exception.is_null()) {
-        vm().set_exception(*m_saved_exception.cell());
+        auto result = throw_completion(m_saved_exception.value());
         m_saved_exception = {};
-    } else {
-        jump(resume_label);
+        return result;
     }
+
+    jump(resume_label);
+    return {};
+}
+
+VM::InterpreterExecutionScope Interpreter::ast_interpreter_scope()
+{
+    if (!m_ast_interpreter)
+        m_ast_interpreter = JS::Interpreter::create_with_existing_realm(m_realm);
+
+    return { *m_ast_interpreter };
 }
 
 AK::Array<OwnPtr<PassManager>, static_cast<UnderlyingType<Interpreter::OptimizationLevel>>(Interpreter::OptimizationLevel::__Count)> Interpreter::s_optimization_pipelines {};

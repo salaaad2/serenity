@@ -43,6 +43,9 @@ ErrorOr<void> mount(int source_fd, StringView target, StringView fs_type, int fl
 ErrorOr<void> umount(StringView mount_point);
 ErrorOr<long> ptrace(int request, pid_t tid, void* address, void* data);
 ErrorOr<void> disown(pid_t pid);
+ErrorOr<void> profiling_enable(pid_t, u64 event_mask);
+ErrorOr<void> profiling_disable(pid_t);
+ErrorOr<void> profiling_free_buffer(pid_t);
 #endif
 
 #ifndef AK_OS_BSD_GENERIC
@@ -55,7 +58,7 @@ ErrorOr<int> accept4(int sockfd, struct sockaddr*, socklen_t*, int flags);
 #endif
 
 ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigaction* old_action);
-#if defined(__APPLE__) || defined(__OpenBSD__)
+#if defined(__APPLE__) || defined(__OpenBSD__) || defined(__FreeBSD__)
 ErrorOr<sig_t> signal(int signal, sig_t handler);
 #else
 ErrorOr<sighandler_t> signal(int signal, sighandler_t handler);
@@ -64,6 +67,7 @@ ErrorOr<struct stat> fstat(int fd);
 ErrorOr<int> fcntl(int fd, int command, ...);
 ErrorOr<void*> mmap(void* address, size_t, int protection, int flags, int fd, off_t, size_t alignment = 0, StringView name = {});
 ErrorOr<void> munmap(void* address, size_t);
+ErrorOr<int> anon_create(size_t size, int options);
 ErrorOr<int> open(StringView path, int options, ...);
 ErrorOr<void> close(int fd);
 ErrorOr<void> ftruncate(int fd, off_t length);
@@ -72,6 +76,7 @@ ErrorOr<struct stat> lstat(StringView path);
 ErrorOr<ssize_t> read(int fd, Bytes buffer);
 ErrorOr<ssize_t> write(int fd, ReadonlyBytes buffer);
 ErrorOr<void> kill(pid_t, int signal);
+ErrorOr<void> killpg(int pgrp, int signal);
 ErrorOr<int> dup(int source_fd);
 ErrorOr<int> dup2(int source_fd, int destination_fd);
 ErrorOr<String> ptsname(int fd);
@@ -81,6 +86,7 @@ ErrorOr<String> getcwd();
 ErrorOr<void> ioctl(int fd, unsigned request, ...);
 ErrorOr<struct termios> tcgetattr(int fd);
 ErrorOr<void> tcsetattr(int fd, int optional_actions, struct termios const&);
+ErrorOr<int> tcsetpgrp(int fd, pid_t pgrp);
 ErrorOr<void> chmod(StringView pathname, mode_t mode);
 ErrorOr<void> lchown(StringView pathname, uid_t uid, gid_t gid);
 ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid);
@@ -107,9 +113,11 @@ ErrorOr<bool> isatty(int fd);
 ErrorOr<void> symlink(StringView target, StringView link_path);
 ErrorOr<void> mkdir(StringView path, mode_t);
 ErrorOr<void> chdir(StringView path);
+ErrorOr<void> rmdir(StringView path);
 ErrorOr<pid_t> fork();
 ErrorOr<int> mkstemp(Span<char> pattern);
 ErrorOr<void> fchmod(int fd, mode_t mode);
+ErrorOr<void> fchown(int fd, uid_t, gid_t);
 ErrorOr<void> rename(StringView old_path, StringView new_path);
 ErrorOr<void> unlink(StringView path);
 ErrorOr<void> utime(StringView path, Optional<struct utimbuf>);
@@ -137,5 +145,9 @@ ErrorOr<void> socketpair(int domain, int type, int protocol, int sv[2]);
 ErrorOr<Vector<gid_t>> getgroups();
 ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev);
 ErrorOr<void> mkfifo(StringView pathname, mode_t mode);
+ErrorOr<void> setenv(StringView, StringView, bool);
+ErrorOr<int> posix_openpt(int flags);
+ErrorOr<void> grantpt(int fildes);
+ErrorOr<void> unlockpt(int fildes);
 
 }

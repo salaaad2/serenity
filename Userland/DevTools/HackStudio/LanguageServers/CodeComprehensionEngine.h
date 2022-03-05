@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Itamar S. <itamar8910@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -13,12 +14,12 @@
 
 namespace LanguageServers {
 
-class ClientConnection;
+class ConnectionFromClient;
 
 class CodeComprehensionEngine {
 public:
     CodeComprehensionEngine(const FileDB& filedb, bool store_all_declarations = false);
-    virtual ~CodeComprehensionEngine();
+    virtual ~CodeComprehensionEngine() = default;
 
     virtual Vector<GUI::AutocompleteProvider::Entry> get_suggestions(const String& file, const GUI::TextPosition& autocomplete_position) = 0;
 
@@ -33,6 +34,8 @@ public:
         size_t current_index { 0 };
     };
     virtual Optional<FunctionParamsHint> get_function_params_hint(const String&, const GUI::TextPosition&) { return {}; }
+
+    virtual Vector<GUI::AutocompleteProvider::TokenInfo> get_tokens_info(const String&) { return {}; }
 
 public:
     Function<void(const String&, Vector<GUI::AutocompleteProvider::Declaration>&&)> set_declarations_of_document_callback;

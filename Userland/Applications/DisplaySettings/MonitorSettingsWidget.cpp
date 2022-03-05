@@ -10,11 +10,11 @@
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/ComboBox.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/ItemListModel.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/MessageBox.h>
 #include <LibGUI/RadioButton.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/SystemTheme.h>
 
 namespace DisplaySettings {
@@ -46,6 +46,26 @@ void MonitorSettingsWidget::create_resolution_list()
     m_resolutions.append({ 2560, 1080 });
     m_resolutions.append({ 2560, 1440 });
     m_resolutions.append({ 3440, 1440 });
+
+    for (auto resolution : m_resolutions) {
+        // Use Euclid's Algorithm to calculate greatest common factor
+        i32 a = resolution.width();
+        i32 b = resolution.height();
+        i32 gcf = 0;
+        for (;;) {
+            i32 r = a % b;
+            if (r == 0) {
+                gcf = b;
+                break;
+            }
+            a = b;
+            b = r;
+        }
+
+        i32 aspect_width = resolution.width() / gcf;
+        i32 aspect_height = resolution.height() / gcf;
+        m_resolution_strings.append(String::formatted("{}x{} ({}:{})", resolution.width(), resolution.height(), aspect_width, aspect_height));
+    }
 }
 
 void MonitorSettingsWidget::create_frame()
@@ -64,7 +84,7 @@ void MonitorSettingsWidget::create_frame()
 
     m_resolution_combo = *find_descendant_of_type_named<GUI::ComboBox>("resolution_combo");
     m_resolution_combo->set_only_allow_values_from_model(true);
-    m_resolution_combo->set_model(*GUI::ItemListModel<Gfx::IntSize>::create(m_resolutions));
+    m_resolution_combo->set_model(*GUI::ItemListModel<String>::create(m_resolution_strings));
     m_resolution_combo->on_change = [this](auto&, const GUI::ModelIndex& index) {
         auto& selected_screen = m_screen_layout.screens[m_selected_screen_index];
         selected_screen.resolution = m_resolutions.at(index.row());
@@ -120,7 +140,7 @@ static String display_name_from_edid(EDID::Parser const& edid)
 
 void MonitorSettingsWidget::load_current_settings()
 {
-    m_screen_layout = GUI::WindowServerConnection::the().get_screen_layout();
+    m_screen_layout = GUI::ConnectionToWindowServer::the().get_screen_layout();
 
     m_screens.clear();
     m_screen_edids.clear();
@@ -194,30 +214,42 @@ void MonitorSettingsWidget::apply_settings()
 {
     // Fetch the latest configuration again, in case it has been changed by someone else.
     // This isn't technically race free, but if the user automates changing settings we can't help...
-    auto current_layout = GUI::WindowServerConnection::the().get_screen_layout();
+    auto current_layout = GUI::ConnectionToWindowServer::the().get_screen_layout();
     if (m_screen_layout != current_layout) {
-        auto result = GUI::WindowServerConnection::the().set_screen_layout(m_screen_layout, false);
+        auto result = GUI::ConnectionToWindowServer::the().set_screen_layout(m_screen_layout, false);
         if (result.success()) {
             load_current_settings(); // Refresh
 
-            auto box = GUI::MessageBox::construct(window(), String::formatted("Do you want to keep the new settings? They will be reverted after 10 seconds."),
-                "Apply new screen layout", GUI::MessageBox::Type::Question, GUI::MessageBox::InputType::YesNo);
+            auto seconds_until_revert = 10;
+
+            auto box_text = [&seconds_until_revert] {
+                return String::formatted("Do you want to keep the new settings? They will be reverted after {} {}.",
+                    seconds_until_revert, seconds_until_revert == 1 ? "second" : "seconds");
+            };
+
+            auto box = GUI::MessageBox::construct(window(), box_text(), "Apply new screen layout",
+                GUI::MessageBox::Type::Question, GUI::MessageBox::InputType::YesNo);
             box->set_icon(window()->icon());
 
             // If after 10 seconds the user doesn't close the message box, just close it.
-            auto timer = Core::Timer::construct(10000, [&] {
-                box->close();
+            auto revert_timer = Core::Timer::create_repeating(1000, [&] {
+                seconds_until_revert -= 1;
+                box->set_text(box_text());
+                if (seconds_until_revert <= 0) {
+                    box->close();
+                }
             });
+            revert_timer->start();
 
             // If the user selects "No", closes the window or the window gets closed by the 10 seconds timer, revert the changes.
             if (box->exec() == GUI::MessageBox::ExecYes) {
-                auto save_result = GUI::WindowServerConnection::the().save_screen_layout();
+                auto save_result = GUI::ConnectionToWindowServer::the().save_screen_layout();
                 if (!save_result.success()) {
                     GUI::MessageBox::show(window(), String::formatted("Error saving settings: {}", save_result.error_msg()),
                         "Unable to save setting", GUI::MessageBox::Type::Error);
                 }
             } else {
-                auto restore_result = GUI::WindowServerConnection::the().set_screen_layout(current_layout, false);
+                auto restore_result = GUI::ConnectionToWindowServer::the().set_screen_layout(current_layout, false);
                 if (!restore_result.success()) {
                     GUI::MessageBox::show(window(), String::formatted("Error restoring settings: {}", restore_result.error_msg()),
                         "Unable to restore setting", GUI::MessageBox::Type::Error);
@@ -237,7 +269,7 @@ void MonitorSettingsWidget::show_screen_numbers(bool show)
     if (m_showing_screen_numbers == show)
         return;
     m_showing_screen_numbers = show;
-    GUI::WindowServerConnection::the().async_show_screen_numbers(show);
+    GUI::ConnectionToWindowServer::the().async_show_screen_numbers(show);
 }
 
 void MonitorSettingsWidget::show_event(GUI::ShowEvent&)

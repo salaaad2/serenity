@@ -84,6 +84,9 @@ class Processor {
     static Atomic<u32> g_total_processors;
     u8 m_physical_address_bit_width;
     u8 m_virtual_address_bit_width;
+#if ARCH(X86_64)
+    bool m_has_qemu_hvf_quirk;
+#endif
 
     ProcessorInfo* m_info;
     Thread* m_current_thread;
@@ -203,6 +206,17 @@ public:
                 callback(*procs[i]);
         }
         return IterationDecision::Continue;
+    }
+
+    static inline ErrorOr<void> try_for_each(Function<ErrorOr<void>(Processor&)> callback)
+    {
+        auto& procs = processors();
+        size_t count = procs.size();
+        for (size_t i = 0; i < count; i++) {
+            if (procs[i] != nullptr)
+                TRY(callback(*procs[i]));
+        }
+        return {};
     }
 
     ALWAYS_INLINE u8 physical_address_bit_width() const { return m_physical_address_bit_width; }

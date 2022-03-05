@@ -14,6 +14,7 @@
 #include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/BoundFunction.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
@@ -26,7 +27,6 @@
 #include <LibJS/Runtime/PromiseReaction.h>
 #include <LibJS/Runtime/Reference.h>
 #include <LibJS/Runtime/Symbol.h>
-#include <LibJS/Runtime/TemporaryClearException.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/SourceTextModule.h>
 #include <LibJS/SyntheticModule.h>
@@ -46,6 +46,27 @@ VM::VM(OwnPtr<CustomData> custom_data)
     for (size_t i = 0; i < 128; ++i) {
         m_single_ascii_character_strings[i] = m_heap.allocate_without_global_object<PrimitiveString>(String::formatted("{:c}", i));
     }
+
+    // Default hook implementations. These can be overridden by the host, for example, LibWeb overrides the default hooks to place promise jobs on the microtask queue.
+    host_promise_rejection_tracker = [this](Promise& promise, Promise::RejectionOperation operation) {
+        promise_rejection_tracker(promise, operation);
+    };
+
+    host_call_job_callback = [](GlobalObject& global_object, JobCallback& job_callback, Value this_value, MarkedVector<Value> arguments) {
+        return call_job_callback(global_object, job_callback, this_value, move(arguments));
+    };
+
+    host_enqueue_finalization_registry_cleanup_job = [this](FinalizationRegistry& finalization_registry) {
+        enqueue_finalization_registry_cleanup_job(finalization_registry);
+    };
+
+    host_enqueue_promise_job = [this](Function<ThrowCompletionOr<Value>()> job, Realm* realm) {
+        enqueue_promise_job(move(job), realm);
+    };
+
+    host_make_job_callback = [](FunctionObject& function_object) {
+        return make_job_callback(function_object);
+    };
 
     host_resolve_imported_module = [&](ScriptOrModule referencing_script_or_module, ModuleRequest const& specifier) {
         return resolve_imported_module(move(referencing_script_or_module), specifier);
@@ -91,6 +112,23 @@ VM::VM(OwnPtr<CustomData> custom_data)
 
     host_get_supported_import_assertions = [&] {
         return Vector<String> { "type" };
+    };
+
+    // 1.1.7 HostResizeArrayBuffer ( buffer, newByteLength ), https://tc39.es/proposal-resizablearraybuffer/#sec-hostresizearraybuffer
+    host_resize_array_buffer = [](GlobalObject& global_object, size_t new_byte_length) {
+        // The host-defined abstract operation HostResizeArrayBuffer takes arguments buffer (an ArrayBuffer) and newByteLength (a non-negative integer).
+        // The host-defined abstract operation HostResizeArrayBuffer takes arguments buffer (an ArrayBuffer object) and newByteLength.
+        // It gives the host an opportunity to perform implementation-defined resizing of buffer. If the host chooses not to handle resizing of buffer, it may return unhandled for the default behavior.
+        // The implementation of HostResizeArrayBuffer must conform to the following requirements:
+        //   * The abstract operation must return either NormalCompletion(handled), NormalCompletion(unhandled), or an abrupt throw completion.
+        //   * The abstract operation does not detach buffer.
+        //   * If the abstract operation completes normally with handled, buffer.[[ArrayBufferByteLength]] is newByteLength.
+        // The default implementation of HostResizeArrayBuffer is to return unhandled.
+
+        (void)global_object;
+        (void)new_byte_length;
+
+        return HostResizeArrayBufferResult::Unhandled;
     };
 
 #define __JS_ENUMERATE(SymbolName, snake_name) \
@@ -152,8 +190,6 @@ void VM::gather_roots(HashTable<Cell*>& roots)
     for (auto* string : m_single_ascii_character_strings)
         roots.set(string);
 
-    roots.set(m_exception);
-
     auto gather_roots_from_execution_context_stack = [&roots](Vector<ExecutionContext*> const& stack) {
         for (auto& execution_context : stack) {
             if (execution_context->this_value.is_cell())
@@ -179,9 +215,6 @@ void VM::gather_roots(HashTable<Cell*>& roots)
 
     for (auto& symbol : m_global_symbol_map)
         roots.set(symbol.value);
-
-    for (auto* job : m_promise_jobs)
-        roots.set(job);
 
     for (auto* finalization_registry : m_finalization_registry_cleanup_jobs)
         roots.set(finalization_registry);
@@ -564,11 +597,6 @@ ThrowCompletionOr<void> VM::initialize_instance_elements(Object& object, ECMAScr
     return {};
 }
 
-void VM::throw_exception(Exception& exception)
-{
-    set_exception(exception);
-}
-
 // 9.4.4 ResolveThisBinding ( ), https://tc39.es/ecma262/#sec-resolvethisbinding
 ThrowCompletionOr<Value> VM::resolve_this_binding(GlobalObject& global_object)
 {
@@ -610,51 +638,32 @@ bool VM::in_strict_mode() const
 void VM::run_queued_promise_jobs()
 {
     dbgln_if(PROMISE_DEBUG, "Running queued promise jobs");
-    // Temporarily get rid of the exception, if any - job functions must be called
-    // either way, and that can't happen if we already have an exception stored.
-    TemporaryClearException temporary_clear_exception(*this);
+
     while (!m_promise_jobs.is_empty()) {
-        auto* job = m_promise_jobs.take_first();
-        dbgln_if(PROMISE_DEBUG, "Calling promise job function @ {}", job);
+        auto job = m_promise_jobs.take_first();
+        dbgln_if(PROMISE_DEBUG, "Calling promise job function");
 
-        // NOTE: If the execution context stack is empty, we make and push a temporary context.
-        ExecutionContext execution_context(heap());
-        bool pushed_execution_context = false;
-        if (m_execution_context_stack.is_empty()) {
-            static FlyString promise_execution_context_name = "(promise execution context)";
-            execution_context.function_name = promise_execution_context_name;
-            // FIXME: Propagate potential failure
-            MUST(push_execution_context(execution_context, job->global_object()));
-            pushed_execution_context = true;
-        }
-
-        [[maybe_unused]] auto result = call(job->global_object(), *job, js_undefined());
-
-        // This doesn't match the spec, it actually defines that Job Abstract Closures must return
-        // a normal completion. In reality that's not the case however, and all major engines clear
-        // exceptions when running Promise jobs. See the commit where these two lines were initially
-        // added for a much more detailed explanation.
-        clear_exception();
-
-        if (pushed_execution_context)
-            pop_execution_context();
+        [[maybe_unused]] auto result = job();
     }
-    // Ensure no job has created a new exception, they must clean up after themselves.
-    // If they don't, we help a little (see above) so that this assumption remains valid.
-    VERIFY(!m_exception);
 }
 
 // 9.5.4 HostEnqueuePromiseJob ( job, realm ), https://tc39.es/ecma262/#sec-hostenqueuepromisejob
-void VM::enqueue_promise_job(NativeFunction& job)
+void VM::enqueue_promise_job(Function<ThrowCompletionOr<Value>()> job, Realm*)
 {
-    m_promise_jobs.append(&job);
+    // An implementation of HostEnqueuePromiseJob must conform to the requirements in 9.5 as well as the following:
+    // - FIXME: If realm is not null, each time job is invoked the implementation must perform implementation-defined steps such that execution is prepared to evaluate ECMAScript code at the time of job's invocation.
+    // - FIXME: Let scriptOrModule be GetActiveScriptOrModule() at the time HostEnqueuePromiseJob is invoked. If realm is not null, each time job is invoked the implementation must perform implementation-defined steps
+    //          such that scriptOrModule is the active script or module at the time of job's invocation.
+    // - Jobs must run in the same order as the HostEnqueuePromiseJob invocations that scheduled them.
+    m_promise_jobs.append(move(job));
 }
 
 void VM::run_queued_finalization_registry_cleanup_jobs()
 {
     while (!m_finalization_registry_cleanup_jobs.is_empty()) {
         auto* registry = m_finalization_registry_cleanup_jobs.take_first();
-        registry->cleanup();
+        // FIXME: Handle any uncatched exceptions here.
+        (void)registry->cleanup();
     }
 }
 
@@ -665,7 +674,7 @@ void VM::enqueue_finalization_registry_cleanup_job(FinalizationRegistry& registr
 }
 
 // 27.2.1.9 HostPromiseRejectionTracker ( promise, operation ), https://tc39.es/ecma262/#sec-host-promise-rejection-tracker
-void VM::promise_rejection_tracker(const Promise& promise, Promise::RejectionOperation operation) const
+void VM::promise_rejection_tracker(Promise& promise, Promise::RejectionOperation operation) const
 {
     switch (operation) {
     case Promise::RejectionOperation::Reject:
@@ -770,7 +779,7 @@ ThrowCompletionOr<void> VM::link_and_eval_module(Module& module)
             dbgln("Warning: Using multiple modules as entry point can lead to unexpected results");
 
         m_loaded_modules.empend(
-            &module,
+            module.make_weak_ptr(),
             module.filename(),
             String {}, // Null type
             module,
@@ -793,8 +802,6 @@ ThrowCompletionOr<void> VM::link_and_eval_module(Module& module)
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] Linking passed, now evaluating module {}", filepath);
     auto evaluated_or_error = module.evaluate(*this);
 
-    VERIFY(!exception());
-
     if (evaluated_or_error.is_error())
         return evaluated_or_error.throw_completion();
 
@@ -806,10 +813,8 @@ ThrowCompletionOr<void> VM::link_and_eval_module(Module& module)
     // FIXME: This will break if we start doing promises actually asynchronously.
     VERIFY(evaluated_value->state() != Promise::State::Pending);
 
-    if (evaluated_value->state() == Promise::State::Rejected) {
-        VERIFY(!exception());
+    if (evaluated_value->state() == Promise::State::Rejected)
         return JS::throw_completion(evaluated_value->result());
-    }
 
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] Evaluating passed for module {}", module.filename());
     return {};
@@ -836,7 +841,7 @@ ThrowCompletionOr<NonnullRefPtr<Module>> VM::resolve_imported_module(ScriptOrMod
         [&](Empty) {
             return "."sv;
         },
-        [&](auto* script_or_module) {
+        [&](auto& script_or_module) {
             return script_or_module->filename();
         });
 
@@ -848,7 +853,7 @@ ThrowCompletionOr<NonnullRefPtr<Module>> VM::resolve_imported_module(ScriptOrMod
         [&](Empty) -> String {
             return ".";
         },
-        [&](auto* script_or_module) {
+        [&](auto& script_or_module) {
             if constexpr (IsSame<Script*, decltype(script_or_module)>) {
                 return String::formatted("Script @ {}", script_or_module);
             }
@@ -954,13 +959,10 @@ void VM::import_module_dynamically(ScriptOrModule referencing_script_or_module, 
         }
     }
 
-    VERIFY(!exception());
     // Note: If host_resolve_imported_module returns a module it has been loaded successfully and the next call in finish_dynamic_import will retrieve it again.
     auto module_or_error = host_resolve_imported_module(referencing_script_or_module, module_request);
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] HostImportModuleDynamically(..., {}) -> {}", module_request.module_specifier, module_or_error.is_error() ? "failed" : "passed");
     if (module_or_error.is_throw_completion()) {
-        // Note: We should not leak the exception thrown in host_resolve_imported_module.
-        clear_exception();
         promise->reject(*module_or_error.throw_completion().value());
     } else {
         auto module = module_or_error.release_value();
@@ -969,11 +971,8 @@ void VM::import_module_dynamically(ScriptOrModule referencing_script_or_module, 
         auto evaluated_or_error = link_and_eval_module(source_text_module);
 
         if (evaluated_or_error.is_throw_completion()) {
-            // Note: Again we don't want to leak the exception from link_and_eval_module.
-            clear_exception();
             promise->reject(*evaluated_or_error.throw_completion().value());
         } else {
-            VERIFY(!exception());
             promise->fulfill(js_undefined());
         }
     }
@@ -1001,7 +1000,6 @@ void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, Modu
         // d. Let namespace be GetModuleNamespace(moduleRecord).
         auto namespace_ = module_record->get_module_namespace(vm);
 
-        VERIFY(!vm.exception());
         // e. If namespace is an abrupt completion, then
         if (namespace_.is_throw_completion()) {
             // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « namespace.[[Value]] »).
@@ -1017,7 +1015,7 @@ void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, Modu
     };
 
     // 2. Let onFulfilled be ! CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
-    auto* on_fulfilled = NativeFunction::create(current_realm()->global_object(), "", move(fulfilled_closure));
+    auto* on_fulfilled = NativeFunction::create(current_realm()->global_object(), move(fulfilled_closure), 0, "");
 
     // 3. Let rejectedClosure be a new Abstract Closure with parameters (error) that captures promiseCapability and performs the following steps when called:
     auto rejected_closure = [rejected_function = make_handle(promise_capability.reject)](VM& vm, GlobalObject& global_object) -> ThrowCompletionOr<Value> {
@@ -1029,12 +1027,10 @@ void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, Modu
     };
 
     // 4. Let onRejected be ! CreateBuiltinFunction(rejectedClosure, 0, "", « »).
-    auto* on_rejected = NativeFunction::create(current_realm()->global_object(), "", move(rejected_closure));
+    auto* on_rejected = NativeFunction::create(current_realm()->global_object(), move(rejected_closure), 0, "");
 
     // 5. Perform ! PerformPromiseThen(innerPromise, onFulfilled, onRejected).
     inner_promise->perform_then(on_fulfilled, on_rejected, {});
-
-    VERIFY(!exception());
 }
 
 }

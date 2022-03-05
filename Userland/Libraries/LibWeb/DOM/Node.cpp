@@ -19,7 +19,7 @@
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventDispatcher.h>
-#include <LibWeb/DOM/EventListener.h>
+#include <LibWeb/DOM/IDLEventListener.h>
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
@@ -57,7 +57,7 @@ Node* Node::from_id(i32 node_id)
 }
 
 Node::Node(Document& document, NodeType type)
-    : EventTarget(static_cast<Bindings::ScriptExecutionContext&>(document))
+    : EventTarget()
     , m_document(&document)
     , m_type(type)
     , m_id(allocate_node_id(this))
@@ -81,8 +81,11 @@ Node::~Node()
 const HTML::HTMLAnchorElement* Node::enclosing_link_element() const
 {
     for (auto* node = this; node; node = node->parent()) {
-        if (is<HTML::HTMLAnchorElement>(*node) && verify_cast<HTML::HTMLAnchorElement>(*node).has_attribute(HTML::AttributeNames::href))
-            return verify_cast<HTML::HTMLAnchorElement>(node);
+        if (!is<HTML::HTMLAnchorElement>(*node))
+            continue;
+        auto const& anchor_element = static_cast<HTML::HTMLAnchorElement const&>(*node);
+        if (anchor_element.has_attribute(HTML::AttributeNames::href))
+            return &anchor_element;
     }
     return nullptr;
 }
@@ -143,6 +146,32 @@ void Node::set_text_content(String const& content)
     }
 
     set_needs_style_update(true);
+}
+
+// https://dom.spec.whatwg.org/#dom-node-nodevalue
+String Node::node_value() const
+{
+    if (is<Attribute>(this)) {
+        return verify_cast<Attribute>(this)->value();
+    }
+    if (is<CharacterData>(this)) {
+        return verify_cast<CharacterData>(this)->data();
+    }
+
+    return {};
+}
+
+// https://dom.spec.whatwg.org/#ref-for-dom-node-nodevalue%E2%91%A0
+void Node::set_node_value(const String& value)
+{
+
+    if (is<Attribute>(this)) {
+        verify_cast<Attribute>(this)->set_value(value);
+    } else if (is<CharacterData>(this)) {
+        verify_cast<CharacterData>(this)->set_data(value);
+    }
+
+    // Otherwise: Do nothing.
 }
 
 void Node::invalidate_style()
@@ -322,6 +351,12 @@ ExceptionOr<NonnullRefPtr<Node>> Node::pre_insert(NonnullRefPtr<Node> node, RefP
     return node;
 }
 
+// https://dom.spec.whatwg.org/#dom-node-removechild
+ExceptionOr<NonnullRefPtr<Node>> Node::remove_child(NonnullRefPtr<Node> child)
+{
+    return pre_remove(child);
+}
+
 // https://dom.spec.whatwg.org/#concept-node-pre-remove
 ExceptionOr<NonnullRefPtr<Node>> Node::pre_remove(NonnullRefPtr<Node> child)
 {
@@ -357,7 +392,7 @@ void Node::remove(bool suppress_observers)
     // FIXME: Let oldPreviousSibling be node’s previous sibling. (Currently unused so not included)
     // FIXME: Let oldNextSibling be node’s next sibling. (Currently unused so not included)
 
-    parent->remove_child(*this);
+    parent->TreeNode::remove_child(*this);
 
     // FIXME: If node is assigned, then run assign slottables for node’s assigned slot.
 
@@ -691,47 +726,52 @@ bool Node::is_uninteresting_whitespace_node() const
 
 void Node::serialize_tree_as_json(JsonObjectSerializer<StringBuilder>& object) const
 {
-    object.add("name", node_name().view());
-    object.add("id", id());
+    MUST(object.add("name", node_name().view()));
+    MUST(object.add("id", id()));
     if (is_document()) {
-        object.add("type", "document");
+        MUST(object.add("type", "document"));
     } else if (is_element()) {
-        object.add("type", "element");
+        MUST(object.add("type", "element"));
 
         auto const* element = static_cast<DOM::Element const*>(this);
         if (element->has_attributes()) {
-            auto attributes = object.add_object("attributes");
+            auto attributes = MUST(object.add_object("attributes"));
             element->for_each_attribute([&attributes](auto& name, auto& value) {
-                attributes.add(name, value);
+                MUST(attributes.add(name, value));
             });
+            MUST(attributes.finish());
         }
 
         if (element->is_browsing_context_container()) {
             auto const* container = static_cast<HTML::BrowsingContextContainer const*>(element);
             if (auto const* content_document = container->content_document()) {
-                auto children = object.add_array("children");
-                JsonObjectSerializer<StringBuilder> content_document_object = children.add_object();
+                auto children = MUST(object.add_array("children"));
+                JsonObjectSerializer<StringBuilder> content_document_object = MUST(children.add_object());
                 content_document->serialize_tree_as_json(content_document_object);
+                MUST(content_document_object.finish());
+                MUST(children.finish());
             }
         }
     } else if (is_text()) {
-        object.add("type", "text");
+        MUST(object.add("type", "text"));
 
         auto text_node = static_cast<DOM::Text const*>(this);
-        object.add("text", text_node->data());
+        MUST(object.add("text", text_node->data()));
     } else if (is_comment()) {
-        object.add("type"sv, "comment"sv);
-        object.add("data"sv, static_cast<DOM::Comment const&>(*this).data());
+        MUST(object.add("type"sv, "comment"sv));
+        MUST(object.add("data"sv, static_cast<DOM::Comment const&>(*this).data()));
     }
 
     if (has_child_nodes()) {
-        auto children = object.add_array("children");
+        auto children = MUST(object.add_array("children"));
         for_each_child([&children](DOM::Node& child) {
             if (child.is_uninteresting_whitespace_node())
                 return;
-            JsonObjectSerializer<StringBuilder> child_object = children.add_object();
+            JsonObjectSerializer<StringBuilder> child_object = MUST(children.add_object());
             child.serialize_tree_as_json(child_object);
+            MUST(child_object.finish());
         });
+        MUST(children.finish());
     }
 }
 
@@ -925,6 +965,37 @@ NonnullRefPtr<Node> Node::get_root_node(GetRootNodeOptions const& options)
         return shadow_including_root();
 
     return root();
+}
+
+String Node::debug_description() const
+{
+    StringBuilder builder;
+    builder.append(node_name().to_lowercase());
+    if (is_element()) {
+        auto& element = static_cast<DOM::Element const&>(*this);
+        if (auto id = element.get_attribute(HTML::AttributeNames::id); !id.is_null())
+            builder.appendff("#{}", id);
+        for (auto const& class_name : element.class_names())
+            builder.appendff(".{}", class_name);
+    }
+    return builder.to_string();
+}
+
+// https://dom.spec.whatwg.org/#concept-node-length
+size_t Node::length() const
+{
+    // 1. If node is a DocumentType or Attr node, then return 0.
+    if (is_document_type() || is_attribute())
+        return 0;
+
+    // 2. If node is a CharacterData node, then return node’s data’s length.
+    if (is_character_data()) {
+        auto* character_data_node = verify_cast<CharacterData>(this);
+        return character_data_node->data().length();
+    }
+
+    // 3. Return the number of node’s children.
+    return child_count();
 }
 
 }

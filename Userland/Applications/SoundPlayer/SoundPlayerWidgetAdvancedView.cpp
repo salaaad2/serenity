@@ -24,7 +24,7 @@
 #include <LibGUI/Window.h>
 #include <LibGfx/Bitmap.h>
 
-SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window, Audio::ClientConnection& connection)
+SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window, Audio::ConnectionFromClient& connection)
     : Player(connection)
     , m_window(window)
 {
@@ -206,6 +206,7 @@ void SoundPlayerWidgetAdvancedView::time_elapsed(int seconds)
 
 void SoundPlayerWidgetAdvancedView::file_name_changed(StringView name)
 {
+    m_visualization->start_new_file(name);
     m_window.set_title(String::formatted("{} - Sound Player", name));
 }
 

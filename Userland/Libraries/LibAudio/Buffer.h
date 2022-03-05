@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "AK/TypedTransfer.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Error.h>
 #include <AK/FixedArray.h>
@@ -17,57 +18,14 @@
 #include <AK/Types.h>
 #include <AK/Vector.h>
 #include <AK/kmalloc.h>
+#include <LibAudio/Resampler.h>
 #include <LibAudio/Sample.h>
+#include <LibAudio/SampleFormats.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <string.h>
 
 namespace Audio {
 using namespace AK::Exponentials;
-
-// Supported PCM sample formats.
-enum PcmSampleFormat : u8 {
-    Uint8,
-    Int16,
-    Int24,
-    Int32,
-    Float32,
-    Float64,
-};
-
-// Most of the read code only cares about how many bits to read or write
-u16 pcm_bits_per_sample(PcmSampleFormat format);
-String sample_format_name(PcmSampleFormat format);
-
-// Small helper to resample from one playback rate to another
-// This isn't really "smart", in that we just insert (or drop) samples.
-// Should do better...
-template<typename SampleType>
-class ResampleHelper {
-public:
-    ResampleHelper(u32 source, u32 target);
-
-    // To be used as follows:
-    // while the resampler doesn't need a new sample, read_sample(current) and store the resulting samples.
-    // as long as the resampler needs a new sample, process_sample(current)
-
-    // Stores a new sample
-    void process_sample(SampleType sample_l, SampleType sample_r);
-    // Assigns the given sample to its correct value and returns false if there is a new sample required
-    bool read_sample(SampleType& next_l, SampleType& next_r);
-    Vector<SampleType> resample(Vector<SampleType> to_resample);
-
-    void reset();
-
-    u32 source() const { return m_source; }
-    u32 target() const { return m_target; }
-
-private:
-    const u32 m_source;
-    const u32 m_target;
-    u32 m_current_ratio { 0 };
-    SampleType m_last_sample_l;
-    SampleType m_last_sample_r;
-};
 
 // A buffer of audio samples.
 class Buffer : public RefCounted<Buffer> {
@@ -86,10 +44,18 @@ public:
     static NonnullRefPtr<Buffer> create_empty()
     {
         // If we can't allocate an empty buffer, things are in a very bad state.
-        return MUST(adopt_nonnull_ref_or_enomem(new (nothrow) Buffer(FixedArray<Sample>())));
+        return MUST(adopt_nonnull_ref_or_enomem(new (nothrow) Buffer));
     }
 
     Sample const* samples() const { return (const Sample*)data(); }
+
+    ErrorOr<FixedArray<Sample>> to_sample_array() const
+    {
+        FixedArray<Sample> samples = TRY(FixedArray<Sample>::try_create(m_sample_count));
+        AK::TypedTransfer<Sample>::copy(samples.data(), this->samples(), m_sample_count);
+        return samples;
+    }
+
     int sample_count() const { return m_sample_count; }
     void const* data() const { return m_buffer.data<void>(); }
     int size_in_bytes() const { return m_sample_count * (int)sizeof(Sample); }
@@ -99,9 +65,7 @@ public:
 private:
     template<ArrayLike<Sample> ArrayT>
     explicit Buffer(ArrayT&& samples)
-        // FIXME: AnonymousBuffers can't be empty, so even for empty buffers we create a buffer of size 1 here,
-        //        although the sample count is set to 0 to mark this.
-        : m_buffer(Core::AnonymousBuffer::create_with_size(max(samples.size(), 1) * sizeof(Sample)).release_value())
+        : m_buffer(Core::AnonymousBuffer::create_with_size(samples.size() * sizeof(Sample)).release_value())
         , m_id(allocate_id())
         , m_sample_count(samples.size())
     {
@@ -115,11 +79,14 @@ private:
     {
     }
 
+    // Empty Buffer representation, to avoid tiny anonymous buffers in EOF states
+    Buffer() = default;
+
     static i32 allocate_id();
 
     Core::AnonymousBuffer m_buffer;
-    const i32 m_id;
-    const int m_sample_count;
+    const i32 m_id { -1 };
+    const int m_sample_count { 0 };
 };
 
 // This only works for double resamplers, and therefore cannot be part of the class

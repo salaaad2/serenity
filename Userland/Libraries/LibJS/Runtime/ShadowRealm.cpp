@@ -8,6 +8,7 @@
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
+#include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/ModuleNamespaceObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/PromiseConstructor.h>
@@ -31,8 +32,8 @@ void ShadowRealm::visit_edges(Visitor& visitor)
     visitor.visit(&m_shadow_realm);
 }
 
-// 3.1.2 CopyNameAndLength ( F: a function object, Target: a function object, prefix: a String, optional argCount: a Number, ), https://tc39.es/proposal-shadowrealm/#sec-copynameandlength
-ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, FunctionObject& function, FunctionObject& target, StringView prefix, Optional<unsigned> arg_count)
+// 3.1.2 CopyNameAndLength ( F: a function object, Target: a function object, optional prefix: a String, optional argCount: a Number, ), https://tc39.es/proposal-shadowrealm/#sec-copynameandlength
+ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, FunctionObject& function, FunctionObject& target, Optional<StringView> prefix, Optional<unsigned> arg_count)
 {
     auto& vm = global_object.vm();
 
@@ -86,7 +87,7 @@ ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, Functi
         target_name = js_string(vm, String::empty());
 
     // 8. Perform ! SetFunctionName(F, targetName, prefix).
-    function.set_function_name({ target_name.as_string().string() }, prefix);
+    function.set_function_name({ target_name.as_string().string() }, move(prefix));
 
     return {};
 }
@@ -227,44 +228,39 @@ ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, 
     // NOTE: We don't support this concept yet.
 
     // 9. Let steps be the steps of an ExportGetter function as described below.
+    auto steps = [string = move(export_name_string)](auto& vm, auto& global_object) -> ThrowCompletionOr<Value> {
+        // 1. Assert: exports is a module namespace exotic object.
+        VERIFY(vm.argument(0).is_object());
+        auto& exports = vm.argument(0).as_object();
+        VERIFY(is<ModuleNamespaceObject>(exports));
+
+        // 2. Let f be the active function object.
+        auto* function = vm.running_execution_context().function;
+
+        // 3. Let string be f.[[ExportNameString]].
+        // 4. Assert: Type(string) is String.
+
+        // 5. Let hasOwn be ? HasOwnProperty(exports, string).
+        auto has_own = TRY(exports.has_own_property(string));
+
+        // 6. If hasOwn is false, throw a TypeError exception.
+        if (!has_own)
+            return vm.template throw_completion<TypeError>(global_object, ErrorType::MissingRequiredProperty, string);
+
+        // 7. Let value be ? Get(exports, string).
+        auto value = TRY(exports.get(string));
+
+        // 8. Let realm be f.[[Realm]].
+        auto* realm = function->realm();
+        VERIFY(realm);
+
+        // 9. Return ? GetWrappedValue(realm, value).
+        return get_wrapped_value(global_object, *realm, value);
+    };
+
     // 10. Let onFulfilled be ! CreateBuiltinFunction(steps, 1, "", « [[ExportNameString]] », callerRealm).
     // 11. Set onFulfilled.[[ExportNameString]] to exportNameString.
-    // FIXME: Support passing a realm to NativeFunction::create()
-    (void)caller_realm;
-    auto* on_fulfilled = NativeFunction::create(
-        global_object,
-        "",
-        [string = move(export_name_string)](auto& vm, auto& global_object) -> ThrowCompletionOr<Value> {
-            // 1. Assert: exports is a module namespace exotic object.
-            VERIFY(vm.argument(0).is_object());
-            auto& exports = vm.argument(0).as_object();
-            VERIFY(is<ModuleNamespaceObject>(exports));
-
-            // 2. Let f be the active function object.
-            auto* function = vm.running_execution_context().function;
-
-            // 3. Let string be f.[[ExportNameString]].
-            // 4. Assert: Type(string) is String.
-
-            // 5. Let hasOwn be ? HasOwnProperty(exports, string).
-            auto has_own = TRY(exports.has_own_property(string));
-
-            // 6. If hasOwn is false, throw a TypeError exception.
-            if (!has_own)
-                return vm.template throw_completion<TypeError>(global_object, ErrorType::MissingRequiredProperty, string);
-
-            // 7. Let value be ? Get(exports, string).
-            auto value = TRY(exports.get(string));
-
-            // 8. Let realm be f.[[Realm]].
-            auto* realm = function->realm();
-            VERIFY(realm);
-
-            // 9. Return ? GetWrappedValue(realm, value).
-            return get_wrapped_value(global_object, *realm, value);
-        });
-    on_fulfilled->define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
-    on_fulfilled->define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
+    auto* on_fulfilled = NativeFunction::create(global_object, move(steps), 1, "", &caller_realm);
 
     // 12. Let promiseCapability be ! NewPromiseCapability(%Promise%).
     auto promise_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));

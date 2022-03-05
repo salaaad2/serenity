@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, the SerenityOS developers.
+ * Copyright (c) 2020-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -29,7 +29,7 @@ public:
     constexpr static size_t default_row_count = 100;
     constexpr static size_t default_column_count = 26;
 
-    ~Sheet();
+    virtual ~Sheet() override = default;
 
     Optional<Position> parse_cell_name(StringView) const;
     Optional<size_t> column_index(StringView column_name) const;
@@ -107,11 +107,7 @@ public:
         }
     }
 
-    struct ValueAndException {
-        JS::Value value;
-        JS::Exception* exception { nullptr };
-    };
-    ValueAndException evaluate(StringView, Cell* = nullptr);
+    JS::ThrowCompletionOr<JS::Value> evaluate(StringView, Cell* = nullptr);
     JS::Interpreter& interpreter() const;
     SheetGlobalObject& global_object() const { return *m_global_object; }
 

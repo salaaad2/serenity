@@ -13,6 +13,7 @@
 #include <LibJS/Runtime/FunctionConstructor.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/GeneratorPrototype.h>
+#include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Realm.h>
 
@@ -39,7 +40,7 @@ FunctionConstructor::~FunctionConstructor()
 }
 
 // 20.2.1.1.1 CreateDynamicFunction ( constructor, newTarget, kind, args ), https://tc39.es/ecma262/#sec-createdynamicfunction
-ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic_function(GlobalObject& global_object, FunctionObject& constructor, FunctionObject* new_target, FunctionKind kind, MarkedValueList const& args)
+ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic_function(GlobalObject& global_object, FunctionObject& constructor, FunctionObject* new_target, FunctionKind kind, MarkedVector<Value> const& args)
 {
     auto& vm = global_object.vm();
 

@@ -9,9 +9,9 @@
 #include <AK/IDAllocator.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/ActionGroup.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/MenuItem.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/Bitmap.h>
 
 namespace GUI {
@@ -64,6 +64,14 @@ void Menu::add_action(NonnullRefPtr<Action> action)
     MUST(try_add_action(move(action)));
 }
 
+void Menu::remove_all_actions()
+{
+    for (auto& item : m_items) {
+        ConnectionToWindowServer::the().async_remove_menu_item(m_menu_id, item.identifier());
+    }
+    m_items.clear();
+}
+
 ErrorOr<NonnullRefPtr<Menu>> Menu::try_add_submenu(String name)
 {
     // NOTE: We grow the vector first, to get allocation failure handled immediately.
@@ -111,14 +119,14 @@ void Menu::realize_if_needed(const RefPtr<Action>& default_action)
 void Menu::popup(const Gfx::IntPoint& screen_position, const RefPtr<Action>& default_action)
 {
     realize_if_needed(default_action);
-    WindowServerConnection::the().async_popup_menu(m_menu_id, screen_position);
+    ConnectionToWindowServer::the().async_popup_menu(m_menu_id, screen_position);
 }
 
 void Menu::dismiss()
 {
     if (m_menu_id == -1)
         return;
-    WindowServerConnection::the().async_dismiss_menu(m_menu_id);
+    ConnectionToWindowServer::the().async_dismiss_menu(m_menu_id);
 }
 
 int Menu::realize_menu(RefPtr<Action> default_action)
@@ -126,7 +134,7 @@ int Menu::realize_menu(RefPtr<Action> default_action)
     unrealize_menu();
     m_menu_id = s_menu_id_allocator.allocate();
 
-    WindowServerConnection::the().async_create_menu(m_menu_id, m_name);
+    ConnectionToWindowServer::the().async_create_menu(m_menu_id, m_name);
 
     dbgln_if(MENU_DEBUG, "GUI::Menu::realize_menu(): New menu ID: {}", m_menu_id);
     VERIFY(m_menu_id > 0);
@@ -145,7 +153,7 @@ void Menu::unrealize_menu()
     if (m_menu_id == -1)
         return;
     all_menus().remove(m_menu_id);
-    WindowServerConnection::the().async_destroy_menu(m_menu_id);
+    ConnectionToWindowServer::the().async_destroy_menu(m_menu_id);
     m_menu_id = -1;
 }
 
@@ -170,7 +178,7 @@ void Menu::set_children_actions_enabled(bool enabled)
     }
 }
 
-void Menu::visibility_did_change(Badge<WindowServerConnection>, bool visible)
+void Menu::visibility_did_change(Badge<ConnectionToWindowServer>, bool visible)
 {
     if (m_visible == visible)
         return;
@@ -185,7 +193,7 @@ void Menu::realize_menu_item(MenuItem& item, int item_id)
     item.set_identifier({}, item_id);
     switch (item.type()) {
     case MenuItem::Type::Separator:
-        WindowServerConnection::the().async_add_menu_separator(m_menu_id);
+        ConnectionToWindowServer::the().async_add_menu_separator(m_menu_id);
         break;
     case MenuItem::Type::Action: {
         auto& action = *item.action();
@@ -193,14 +201,14 @@ void Menu::realize_menu_item(MenuItem& item, int item_id)
         bool exclusive = action.group() && action.group()->is_exclusive() && action.is_checkable();
         bool is_default = (m_current_default_action.ptr() == &action);
         auto icon = action.icon() ? action.icon()->to_shareable_bitmap() : Gfx::ShareableBitmap();
-        WindowServerConnection::the().async_add_menu_item(m_menu_id, item_id, -1, action.text(), action.is_enabled(), action.is_checkable(), action.is_checkable() ? action.is_checked() : false, is_default, shortcut_text, icon, exclusive);
+        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, -1, action.text(), action.is_enabled(), action.is_checkable(), action.is_checkable() ? action.is_checked() : false, is_default, shortcut_text, icon, exclusive);
         break;
     }
     case MenuItem::Type::Submenu: {
         auto& submenu = *item.submenu();
         submenu.realize_if_needed(m_current_default_action.strong_ref());
         auto icon = submenu.icon() ? submenu.icon()->to_shareable_bitmap() : Gfx::ShareableBitmap();
-        WindowServerConnection::the().async_add_menu_item(m_menu_id, item_id, submenu.menu_id(), submenu.name(), true, false, false, false, "", icon, false);
+        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, submenu.menu_id(), submenu.name(), true, false, false, false, "", icon, false);
         break;
     }
     case MenuItem::Type::Invalid:

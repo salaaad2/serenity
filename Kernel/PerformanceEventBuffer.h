@@ -68,8 +68,16 @@ struct [[gnu::packed]] SignpostPerformanceEvent {
     FlatPtr arg2;
 };
 
+struct [[gnu::packed]] ReadPerformanceEvent {
+    int fd;
+    size_t size;
+    size_t filename_index;
+    size_t start_timestamp;
+    bool success;
+};
+
 struct [[gnu::packed]] PerformanceEvent {
-    u16 type { 0 };
+    u32 type { 0 };
     u8 stack_size { 0 };
     u32 pid { 0 };
     u32 tid { 0 };
@@ -87,6 +95,7 @@ struct [[gnu::packed]] PerformanceEvent {
         KMallocPerformanceEvent kmalloc;
         KFreePerformanceEvent kfree;
         SignpostPerformanceEvent signpost;
+        ReadPerformanceEvent read;
     } data;
     static constexpr size_t max_stack_frame_count = 64;
     FlatPtr stack[max_stack_frame_count];
@@ -101,11 +110,11 @@ class PerformanceEventBuffer {
 public:
     static OwnPtr<PerformanceEventBuffer> try_create_with_size(size_t buffer_size);
 
-    ErrorOr<void> append(int type, FlatPtr arg1, FlatPtr arg2, StringView arg3, Thread* current_thread = Thread::current());
+    ErrorOr<void> append(int type, FlatPtr arg1, FlatPtr arg2, StringView arg3, Thread* current_thread = Thread::current(), FlatPtr arg4 = 0, u64 arg5 = 0, ErrorOr<FlatPtr> arg6 = 0);
     ErrorOr<void> append_with_ip_and_bp(ProcessID pid, ThreadID tid, FlatPtr eip, FlatPtr ebp,
-        int type, u32 lost_samples, FlatPtr arg1, FlatPtr arg2, StringView arg3);
+        int type, u32 lost_samples, FlatPtr arg1, FlatPtr arg2, StringView arg3, FlatPtr arg4 = 0, u64 arg5 = {}, ErrorOr<FlatPtr> arg6 = 0);
     ErrorOr<void> append_with_ip_and_bp(ProcessID pid, ThreadID tid, const RegisterState& regs,
-        int type, u32 lost_samples, FlatPtr arg1, FlatPtr arg2, StringView arg3);
+        int type, u32 lost_samples, FlatPtr arg1, FlatPtr arg2, StringView arg3, FlatPtr arg4 = 0, u64 arg5 = {}, ErrorOr<FlatPtr> arg6 = 0);
 
     void clear()
     {
@@ -136,7 +145,7 @@ private:
     size_t m_count { 0 };
     NonnullOwnPtr<KBuffer> m_buffer;
 
-    HashTable<NonnullOwnPtr<KString>> m_strings;
+    HashMap<NonnullOwnPtr<KString>, size_t> m_strings;
 };
 
 extern bool g_profiling_all_threads;

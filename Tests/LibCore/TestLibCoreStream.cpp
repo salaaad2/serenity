@@ -9,10 +9,8 @@
 #include <LibCore/LocalServer.h>
 #include <LibCore/Stream.h>
 #include <LibCore/TCPServer.h>
-#include <LibCore/TCPSocket.h>
 #include <LibCore/Timer.h>
 #include <LibCore/UDPServer.h>
-#include <LibCore/UDPSocket.h>
 #include <LibTest/TestCase.h>
 #include <LibThreading/BackgroundAction.h>
 #include <fcntl.h>
@@ -137,11 +135,23 @@ TEST_CASE(file_adopt_invalid_fd)
     EXPECT_EQ(maybe_file.error().code(), EBADF);
 }
 
+TEST_CASE(file_truncate)
+{
+    auto maybe_file = Core::Stream::File::open("/tmp/file-truncate-test.txt", Core::Stream::OpenMode::Write);
+    auto file = maybe_file.release_value();
+
+    EXPECT(!file->truncate(999).is_error());
+    EXPECT_EQ(file->size().release_value(), 999);
+
+    EXPECT(!file->truncate(42).is_error());
+    EXPECT_EQ(file->size().release_value(), 42);
+}
+
 // TCPSocket tests
 
 TEST_CASE(should_error_when_connection_fails)
 {
-    // NOTE: This is required here because Core::TCPSocket requires
+    // NOTE: This is required here because Core::Stream::TCPSocket requires
     //       Core::EventLoop through Core::Notifier.
     Core::EventLoop event_loop;
 

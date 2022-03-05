@@ -14,6 +14,7 @@
 #include <AK/Result.h>
 #include <AK/Span.h>
 #include <AK/String.h>
+#include <AK/Time.h>
 #include <AK/Variant.h>
 #include <LibCore/Notifier.h>
 #include <LibCore/SocketAddress.h>
@@ -80,6 +81,9 @@ public:
     /// Returns the total size of the stream, or an errno in the case of an
     /// error. May not preserve the original position on the stream on failure.
     virtual ErrorOr<off_t> size();
+    /// Shrinks or extends the stream to the given size. Returns an errno in
+    /// the case of an error.
+    virtual ErrorOr<void> truncate(off_t length) = 0;
 };
 
 /// The Socket class is the base class for all concrete BSD-style socket
@@ -196,6 +200,7 @@ public:
     virtual bool is_open() const override;
     virtual void close() override;
     virtual ErrorOr<off_t> seek(i64 offset, SeekMode) override;
+    virtual ErrorOr<void> truncate(off_t length) override;
 
     virtual ~File() override { close(); }
 
@@ -247,6 +252,7 @@ public:
 
     ErrorOr<void> set_blocking(bool enabled);
     ErrorOr<void> set_close_on_exec(bool enabled);
+    ErrorOr<void> set_receive_timeout(Time timeout);
 
     void setup_notifier();
     RefPtr<Core::Notifier> notifier() { return m_notifier; }
@@ -321,8 +327,8 @@ private:
 
 class UDPSocket final : public Socket {
 public:
-    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(String const& host, u16 port);
-    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(SocketAddress const& address);
+    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(String const& host, u16 port, Optional<Time> timeout = {});
+    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(SocketAddress const& address, Optional<Time> timeout = {});
 
     UDPSocket(UDPSocket&& other)
         : Socket(static_cast<Socket&&>(other))
@@ -521,6 +527,10 @@ public:
         if (!buffer.size())
             return Error::from_errno(ENOBUFS);
 
+        // Fill the internal buffer if it has run dry.
+        if (m_buffered_size == 0)
+            TRY(populate_read_buffer());
+
         // Let's try to take all we can from the buffer first.
         size_t buffer_nread = 0;
         if (m_buffered_size > 0) {
@@ -539,20 +549,7 @@ public:
             m_buffered_size -= amount_to_take;
         }
 
-        // If the buffer satisfied the request, then we need not continue.
-        if (buffer_nread == buffer.size()) {
-            return buffer_nread;
-        }
-
-        // Otherwise, let's try an extra read just in case there's something
-        // in our receive buffer.
-        auto stream_nread = TRY(stream().read(buffer.slice(buffer_nread)));
-
-        // Fill the internal buffer if it has run dry.
-        if (m_buffered_size == 0)
-            TRY(populate_read_buffer());
-
-        return buffer_nread + stream_nread;
+        return buffer_nread;
     }
 
     // Reads into the buffer until \n is encountered.
@@ -703,8 +700,23 @@ private:
             return ReadonlyBytes {};
 
         auto fillable_slice = m_buffer.span().slice(m_buffered_size);
-        auto nread = TRY(stream().read(fillable_slice));
-        m_buffered_size += nread;
+        size_t nread = 0;
+        do {
+            auto result = stream().read(fillable_slice);
+            if (result.is_error()) {
+                if (!result.error().is_errno())
+                    return result.error();
+                if (result.error().code() == EINTR)
+                    continue;
+                if (result.error().code() == EAGAIN)
+                    break;
+                return result.error();
+            }
+            auto read_size = result.value();
+            m_buffered_size += read_size;
+            nread += read_size;
+            break;
+        } while (true);
         return fillable_slice.slice(0, nread);
     }
 
@@ -748,6 +760,10 @@ public:
         auto result = TRY(m_helper.stream().seek(offset, mode));
         m_helper.clear_buffer();
         return result;
+    }
+    virtual ErrorOr<void> truncate(off_t length) override
+    {
+        return m_helper.stream().truncate(length);
     }
 
     ErrorOr<size_t> read_line(Bytes buffer) { return m_helper.read_line(move(buffer)); }

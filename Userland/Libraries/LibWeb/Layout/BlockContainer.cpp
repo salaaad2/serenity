@@ -46,7 +46,7 @@ void BlockContainer::paint(PaintContext& context, PaintPhase phase)
     if (should_clip_overflow()) {
         context.painter().save();
         // FIXME: Handle overflow-x and overflow-y being different values.
-        context.painter().add_clip_rect(enclosing_int_rect(padded_rect()));
+        context.painter().add_clip_rect(enclosing_int_rect(absolute_padding_box_rect()));
         context.painter().translate(-m_scroll_offset.to_type<int>());
     }
 
@@ -101,7 +101,7 @@ HitTestResult BlockContainer::hit_test(const Gfx::IntPoint& position, HitTestTyp
 
     if (type == HitTestType::TextCursor && last_good_candidate.layout_node)
         return last_good_candidate;
-    return { absolute_rect().contains(position.x(), position.y()) ? this : nullptr };
+    return { absolute_border_box_rect().contains(position.x(), position.y()) ? this : nullptr };
 }
 
 bool BlockContainer::is_scrollable() const
@@ -128,19 +128,6 @@ bool BlockContainer::handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&
     set_scroll_offset(new_offset);
 
     return true;
-}
-
-LineBox& BlockContainer::ensure_last_line_box()
-{
-    if (m_line_boxes.is_empty())
-        return add_line_box();
-    return m_line_boxes.last();
-}
-
-LineBox& BlockContainer::add_line_box()
-{
-    m_line_boxes.append(LineBox());
-    return m_line_boxes.last();
 }
 
 }

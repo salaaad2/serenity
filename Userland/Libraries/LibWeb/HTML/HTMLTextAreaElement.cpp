@@ -8,8 +8,8 @@
 
 namespace Web::HTML {
 
-HTMLTextAreaElement::HTMLTextAreaElement(DOM::Document& document, QualifiedName qualified_name)
-    : HTMLElement(document, move(qualified_name))
+HTMLTextAreaElement::HTMLTextAreaElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : FormAssociatedElement(document, move(qualified_name))
 {
 }
 

@@ -1,7 +1,6 @@
 @GUI::Widget {
     name: "main"
     fill_with_background_color: true
-
     layout: @GUI::VerticalBoxLayout {
         spacing: 2
     }
@@ -22,9 +21,7 @@
         @GUI::Widget {
             name: "search_results_container"
             visible: false
-
-            layout: @GUI::VerticalBoxLayout {
-            }
+            layout: @GUI::VerticalBoxLayout {}
 
             @GUI::TableView {
                 name: "search_results"
@@ -34,6 +31,6 @@
 
     @GUI::Statusbar {
         name: "statusbar"
-        label_count: 5
+        segment_count: 5
     }
 }

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "EditorWrapper.h"
-#include "LanguageClients/ServerConnections.h"
+#include "LanguageClients/ConnectionsToServer.h"
 #include "Project.h"
 #include <AK/String.h>
 #include <LibGUI/TextEditor.h>
@@ -22,6 +22,7 @@ Project& project();
 String currently_open_file();
 void set_current_editor_wrapper(RefPtr<EditorWrapper>);
 void for_each_open_file(Function<void(ProjectFile const&)>);
+bool semantic_syntax_highlighting_is_enabled();
 
 class Locator;
 Locator& locator();

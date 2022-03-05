@@ -169,6 +169,10 @@ bool EventHandler::handle_mouseup(const Gfx::IntPoint& position, unsigned button
         auto offset = compute_mouse_event_offset(position, *result.layout_node);
         node->dispatch_event(UIEvents::MouseEvent::create(UIEvents::EventNames::mouseup, offset.x(), offset.y(), position.x(), position.y()));
         handled_event = true;
+
+        if (node.ptr() == m_mousedown_target) {
+            node->dispatch_event(UIEvents::MouseEvent::create(UIEvents::EventNames::click, offset.x(), offset.y(), position.x(), position.y()));
+        }
     }
 
     if (button == GUI::MouseButton::Primary)
@@ -196,6 +200,7 @@ bool EventHandler::handle_mousedown(const Gfx::IntPoint& position, unsigned butt
             return false;
 
         auto pointer_events = result.layout_node->computed_values().pointer_events();
+        // FIXME: Handle other values for pointer-events.
         if (pointer_events == CSS::PointerEvents::None)
             return false;
 
@@ -220,6 +225,7 @@ bool EventHandler::handle_mousedown(const Gfx::IntPoint& position, unsigned butt
             page->set_focused_browsing_context({}, m_browsing_context);
 
         auto offset = compute_mouse_event_offset(position, *result.layout_node);
+        m_mousedown_target = node;
         node->dispatch_event(UIEvents::MouseEvent::create(UIEvents::EventNames::mousedown, offset.x(), offset.y(), position.x(), position.y()));
     }
 
@@ -242,9 +248,8 @@ bool EventHandler::handle_mousedown(const Gfx::IntPoint& position, unsigned butt
         if (button == GUI::MouseButton::Primary) {
             if (href.starts_with("javascript:")) {
                 document->run_javascript(href.substring_view(11, href.length() - 11));
-            } else if (href.starts_with('#')) {
-                auto anchor = href.substring_view(1, href.length() - 1);
-                m_browsing_context.scroll_to_anchor(anchor);
+            } else if (!url.fragment().is_null() && url.equals(document->url(), AK::URL::ExcludeFragment::Yes)) {
+                m_browsing_context.scroll_to_anchor(url.fragment());
             } else {
                 document->set_active_element(link);
                 if (m_browsing_context.is_top_level()) {
@@ -266,9 +271,24 @@ bool EventHandler::handle_mousedown(const Gfx::IntPoint& position, unsigned butt
         if (button == GUI::MouseButton::Primary) {
             auto result = layout_root()->hit_test(position, Layout::HitTestType::TextCursor);
             if (result.layout_node && result.layout_node->dom_node()) {
-                m_browsing_context.set_cursor_position(DOM::Position(*result.layout_node->dom_node(), result.index_in_node));
-                layout_root()->set_selection({ { result.layout_node, result.index_in_node }, {} });
-                m_in_mouse_selection = true;
+
+                // See if we want to focus something.
+                bool did_focus_something = false;
+                for (auto candidate = node; candidate; candidate = candidate->parent()) {
+                    if (candidate->is_focusable()) {
+                        document->set_focused_element(verify_cast<DOM::Element>(candidate.ptr()));
+                        did_focus_something = true;
+                        break;
+                    }
+                }
+
+                // If we didn't focus anything, place the document text cursor at the mouse position.
+                // FIXME: This is all rather strange. Find a better solution.
+                if (!did_focus_something) {
+                    m_browsing_context.set_cursor_position(DOM::Position(*result.layout_node->dom_node(), result.index_in_node));
+                    layout_root()->set_selection({ { result.layout_node, result.index_in_node }, {} });
+                    m_in_mouse_selection = true;
+                }
             }
         } else if (button == GUI::MouseButton::Secondary) {
             if (auto* page = m_browsing_context.page())
@@ -315,6 +335,7 @@ bool EventHandler::handle_mousemove(const Gfx::IntPoint& position, unsigned butt
         }
 
         auto pointer_events = result.layout_node->computed_values().pointer_events();
+        // FIXME: Handle other values for pointer-events.
         if (pointer_events == CSS::PointerEvents::None)
             return false;
 
@@ -329,6 +350,12 @@ bool EventHandler::handle_mousemove(const Gfx::IntPoint& position, unsigned butt
                 auto cursor = result.layout_node->computed_values().cursor();
                 if (cursor == CSS::Cursor::Auto)
                     hovered_node_cursor = Gfx::StandardCursor::IBeam;
+                else
+                    hovered_node_cursor = cursor_css_to_gfx(cursor);
+            } else if (node->is_element()) {
+                auto cursor = result.layout_node->computed_values().cursor();
+                if (cursor == CSS::Cursor::Auto)
+                    hovered_node_cursor = Gfx::StandardCursor::Arrow;
                 else
                     hovered_node_cursor = cursor_css_to_gfx(cursor);
             }
@@ -391,14 +418,28 @@ bool EventHandler::focus_next_element()
 
 bool EventHandler::focus_previous_element()
 {
-    // FIXME: Implement Shift-Tab cycling backwards through focusable elements!
-    return false;
+    if (!m_browsing_context.active_document())
+        return false;
+    auto* element = m_browsing_context.active_document()->focused_element();
+    if (!element) {
+        element = m_browsing_context.active_document()->last_child_of_type<DOM::Element>();
+        if (element && element->is_focusable()) {
+            m_browsing_context.active_document()->set_focused_element(element);
+            return true;
+        }
+    }
+
+    for (element = element->previous_element_in_pre_order(); element && !element->is_focusable(); element = element->previous_element_in_pre_order())
+        ;
+
+    m_browsing_context.active_document()->set_focused_element(element);
+    return element;
 }
 
 constexpr bool should_ignore_keydown_event(u32 code_point)
 {
     // FIXME: There are probably also keys with non-zero code points that should be filtered out.
-    return code_point == 0;
+    return code_point == 0 || code_point == 27;
 }
 
 bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_point)
@@ -467,6 +508,16 @@ bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_poin
             if (!m_browsing_context.decrement_cursor_position_offset()) {
                 // FIXME: Move to the previous node.
             }
+            return true;
+        }
+        if (key == KeyCode::Key_Home) {
+            auto& node = *static_cast<DOM::Text*>(const_cast<DOM::Node*>(m_browsing_context.cursor_position().node()));
+            m_browsing_context.set_cursor_position(DOM::Position { node, 0 });
+            return true;
+        }
+        if (key == KeyCode::Key_End) {
+            auto& node = *static_cast<DOM::Text*>(const_cast<DOM::Node*>(m_browsing_context.cursor_position().node()));
+            m_browsing_context.set_cursor_position(DOM::Position { node, (unsigned)node.data().length() });
             return true;
         }
         if (!should_ignore_keydown_event(code_point)) {

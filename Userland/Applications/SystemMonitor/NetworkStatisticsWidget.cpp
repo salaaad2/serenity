@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -111,13 +112,9 @@ NetworkStatisticsWidget::NetworkStatisticsWidget()
     };
 }
 
-NetworkStatisticsWidget::~NetworkStatisticsWidget()
-{
-}
-
 void NetworkStatisticsWidget::update_models()
 {
-    m_adapter_model->invalidate();
-    m_tcp_socket_model->invalidate();
-    m_udp_socket_model->invalidate();
+    m_adapter_model->update();
+    m_tcp_socket_model->update();
+    m_udp_socket_model->update();
 }

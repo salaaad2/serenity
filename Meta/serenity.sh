@@ -185,6 +185,7 @@ cmd_with_target() {
     BUILD_DIR="$SERENITY_SOURCE_DIR/Build/$TARGET$TARGET_TOOLCHAIN"
     if [ "$TARGET" != "lagom" ]; then
         export SERENITY_ARCH="$TARGET"
+        export SERENITY_TOOLCHAIN="$TOOLCHAIN_TYPE"
         if [ "$TOOLCHAIN_TYPE" = "Clang" ]; then
             TOOLCHAIN_DIR="$SERENITY_SOURCE_DIR/Toolchain/Local/clang"
         else
@@ -226,6 +227,14 @@ build_target() {
     fi
 }
 
+build_image() {
+    if [ "$SERENITY_RUN" = "limine" ]; then
+        build_target limine-image
+    else
+        build_target image
+    fi
+}
+
 delete_target() {
     [ ! -d "$BUILD_DIR" ] || rm -rf "$BUILD_DIR"
     [ ! -d "$SUPER_BUILD_DIR" ] || rm -rf "$SUPER_BUILD_DIR"
@@ -242,6 +251,21 @@ build_toolchain() {
 
 ensure_toolchain() {
     [ -d "$TOOLCHAIN_DIR" ] || build_toolchain
+
+    # FIXME: Remove this check when most people have already updated their toolchain
+    if [ "$TOOLCHAIN_TYPE" = "GNU" ]; then
+        local ld_version
+        ld_version="$("$TOOLCHAIN_DIR"/bin/"$TARGET"-pc-serenity-ld -v)"
+        local expected_version="GNU ld (GNU Binutils) 2.38"
+        if [ "$ld_version" != "$expected_version" ]; then
+            echo "Your toolchain has an old version of binutils installed."
+            echo "    installed version: \"$ld_version\""
+            echo "    expected version:  \"$expected_version\""
+            echo "Please run $ARG0 rebuild-toolchain $TARGET to update it."
+            exit 1
+        fi
+    fi
+
 }
 
 delete_toolchain() {
@@ -320,14 +344,14 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
             lagom_unsupported
             build_target
             build_target install
-            build_target image
+            build_image
             ;;
         copy-src)
           lagom_unsupported
           build_target
           build_target install
           export SERENITY_COPY_SOURCE=1
-          build_target image
+          build_image
           ;;
         run)
             if [ "$TARGET" = "lagom" ]; then
@@ -336,7 +360,7 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
             else
                 build_target
                 build_target install
-                build_target image
+                build_image
                 if [ -n "${CMD_ARGS[0]}" ]; then
                     export SERENITY_KERNEL_CMDLINE="${CMD_ARGS[0]}"
                 fi
@@ -352,8 +376,8 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
             else
                 build_target
                 build_target install
-                build_target image
-                tmux new-session "$ARG0" __tmux_cmd "$TARGET" run "${CMD_ARGS[@]}" \; set-option -t 0 mouse on \; split-window "$ARG0" __tmux_cmd "$TARGET" gdb "${CMD_ARGS[@]}" \;
+                build_image
+                tmux new-session "$ARG0" __tmux_cmd "$TARGET" "$TOOLCHAIN_TYPE" run "${CMD_ARGS[@]}" \; set-option -t 0 mouse on \; split-window "$ARG0" __tmux_cmd "$TARGET" "$TOOLCHAIN_TYPE" gdb "${CMD_ARGS[@]}" \;
             fi
             ;;
         test)
@@ -362,7 +386,7 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
                 run_tests "${CMD_ARGS[0]}"
             else
                 build_target install
-                build_target image
+                build_image
                 # In contrast to CI, we don't set 'panic=shutdown' here,
                 # in case the user wants to inspect qemu some more.
                 export SERENITY_KERNEL_CMDLINE="fbdev=off system_mode=self-test"

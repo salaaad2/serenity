@@ -1,3 +1,7 @@
+#import <DOM/Document.idl>
+#import <DOM/Element.idl>
+#import <DOM/EventTarget.idl>
+
 interface Node : EventTarget {
 
     readonly attribute unsigned short nodeType;
@@ -15,6 +19,7 @@ interface Node : EventTarget {
     readonly attribute Document? ownerDocument;
     Node getRootNode(optional GetRootNodeOptions options = {});
 
+    [CEReactions] attribute DOMString? nodeValue;
     // FIXME: [LegacyNullToEmptyString] is not allowed on nullable types as per the Web IDL spec.
     //        However, we only apply it to setters, so this works as a stop gap.
     //        Replace this with something like a special cased [LegacyNullToEmptyString].

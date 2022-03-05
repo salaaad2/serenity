@@ -2,10 +2,10 @@
     fixed_width: 250
     fixed_height: 215
     fill_with_background_color: true
-    layout: @GUI::VerticalBoxLayout
+    layout: @GUI::VerticalBoxLayout {}
 
     @GUI::Widget {
-        layout: @GUI::VerticalBoxLayout
+        layout: @GUI::VerticalBoxLayout {}
 
         @GUI::HorizontalSeparator {
             fixed_height: 2
@@ -22,7 +22,7 @@
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout
+                layout: @GUI::HorizontalBoxLayout {}
 
                 @GUI::Label {
                     name: "label"
@@ -40,6 +40,7 @@
                     fixed_width: 65
                     fixed_height: 28
                     foreground_color: "brown"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -48,6 +49,7 @@
                     fixed_width: 56
                     fixed_height: 28
                     foreground_color: "brown"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -56,11 +58,12 @@
                     fixed_width: 60
                     fixed_height: 28
                     foreground_color: "brown"
+                    focus_policy: "NoFocus"
                 }
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout
+                layout: @GUI::HorizontalBoxLayout {}
 
                 @GUI::Button {
                     name: "mem_clear_button"
@@ -68,6 +71,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "red"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Widget {
@@ -80,6 +84,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -88,6 +93,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -96,6 +102,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -103,6 +110,7 @@
                     text: "/"
                     fixed_width: 35
                     fixed_height: 28
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -111,11 +119,12 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout
+                layout: @GUI::HorizontalBoxLayout {}
 
                 @GUI::Button {
                     name: "mem_recall_button"
@@ -123,6 +132,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "red"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Widget {
@@ -135,6 +145,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -143,6 +154,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -151,6 +163,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -158,6 +171,7 @@
                     text: "*"
                     fixed_width: 35
                     fixed_height: 28
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -166,11 +180,12 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout
+                layout: @GUI::HorizontalBoxLayout {}
 
                 @GUI::Button {
                     name: "mem_save_button"
@@ -178,6 +193,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "red"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Widget {
@@ -190,6 +206,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -198,6 +215,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -206,6 +224,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -213,6 +232,7 @@
                     text: "-"
                     fixed_width: 35
                     fixed_height: 28
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -221,11 +241,12 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
             }
 
             @GUI::Widget {
-                layout: @GUI::HorizontalBoxLayout
+                layout: @GUI::HorizontalBoxLayout {}
 
                 @GUI::Button {
                     name: "mem_add_button"
@@ -233,6 +254,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "red"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Widget {
@@ -245,6 +267,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -253,6 +276,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -261,6 +285,7 @@
                     fixed_width: 35
                     fixed_height: 28
                     foreground_color: "blue"
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {
@@ -268,6 +293,7 @@
                     text: "+"
                     fixed_width: 35
                     fixed_height: 28
+                    focus_policy: "NoFocus"
                 }
 
                 @GUI::Button {

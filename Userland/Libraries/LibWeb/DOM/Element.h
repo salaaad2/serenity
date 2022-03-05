@@ -16,11 +16,11 @@
 #include <LibWeb/DOM/NamedNodeMap.h>
 #include <LibWeb/DOM/NonDocumentTypeChildNode.h>
 #include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/DOM/QualifiedName.h>
 #include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/EventLoop/Task.h>
 #include <LibWeb/HTML/TagNames.h>
 #include <LibWeb/Layout/Node.h>
-#include <LibWeb/QualifiedName.h>
 
 namespace Web::DOM {
 
@@ -32,7 +32,7 @@ class Element
 public:
     using WrapperType = Bindings::ElementWrapper;
 
-    Element(Document&, QualifiedName);
+    Element(Document&, DOM::QualifiedName);
     virtual ~Element() override;
 
     const String& qualified_name() const { return m_qualified_name.as_string(); }
@@ -63,6 +63,7 @@ public:
     RefPtr<DOMTokenList> const& class_list();
 
     DOM::ExceptionOr<bool> matches(StringView selectors) const;
+    DOM::ExceptionOr<DOM::Element const*> closest(StringView selectors) const;
 
     int client_top() const;
     int client_left() const;
@@ -83,6 +84,7 @@ public:
 
     virtual void apply_presentational_hints(CSS::StyleProperties&) const { }
     virtual void parse_attribute(const FlyString& name, const String& value);
+    virtual void did_remove_attribute(FlyString const&) { }
 
     void recompute_style();
 
@@ -103,8 +105,6 @@ public:
     ExceptionOr<void> set_inner_html(String const&);
 
     bool is_focused() const;
-    virtual bool is_focusable() const { return false; }
-
     bool is_active() const;
 
     NonnullRefPtr<HTMLCollection> get_elements_by_class_name(FlyString const&);
@@ -113,15 +113,8 @@ public:
     const ShadowRoot* shadow_root() const { return m_shadow_root; }
     void set_shadow_root(RefPtr<ShadowRoot>);
 
-    Optional<CSS::StyleComputer::CustomPropertyResolutionTuple> resolve_custom_property(const String& custom_property_name) const
-    {
-        return m_custom_properties.get(custom_property_name);
-    }
-    void add_custom_property(const String& custom_property_name, CSS::StyleComputer::CustomPropertyResolutionTuple style_property)
-    {
-        m_custom_properties.set(custom_property_name, style_property);
-    }
-    HashMap<String, CSS::StyleComputer::CustomPropertyResolutionTuple> const& custom_properties() const { return m_custom_properties; }
+    void set_custom_properties(HashMap<FlyString, CSS::StyleProperty> custom_properties) { m_custom_properties = move(custom_properties); }
+    HashMap<FlyString, CSS::StyleProperty> const& custom_properties() const { return m_custom_properties; }
 
     void queue_an_element_task(HTML::Task::Source, Function<void()>);
 
@@ -129,8 +122,14 @@ public:
     bool serializes_as_void() const;
 
     NonnullRefPtr<Geometry::DOMRect> get_bounding_client_rect() const;
+    NonnullRefPtr<Geometry::DOMRectList> get_client_rects() const;
 
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>);
+
+    virtual void did_receive_focus() { }
+    virtual void did_lose_focus() { }
+
+    static RefPtr<Layout::Node> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::StyleProperties>, Element*);
 
 protected:
     virtual void children_changed() override;
@@ -145,7 +144,7 @@ private:
     RefPtr<CSS::CSSStyleDeclaration> m_inline_style;
 
     RefPtr<CSS::StyleProperties> m_specified_css_values;
-    HashMap<String, CSS::StyleComputer::CustomPropertyResolutionTuple> m_custom_properties;
+    HashMap<FlyString, CSS::StyleProperty> m_custom_properties;
 
     RefPtr<DOMTokenList> m_class_list;
     Vector<FlyString> m_classes;
@@ -155,5 +154,7 @@ private:
 
 template<>
 inline bool Node::fast_is<Element>() const { return is_element(); }
+
+ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString qualified_name);
 
 }

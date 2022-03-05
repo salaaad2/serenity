@@ -138,14 +138,14 @@ void test_complete_includes()
     if (suggestions.size() != 1)
         FAIL(project include - bad size);
 
-    if (suggestions[0].completion != "sample_header.h")
+    if (suggestions[0].completion != "\"sample_header.h\"")
         FAIL("project include - wrong results");
 
     suggestions = autocomplete.get_suggestions("complete_includes.cpp", { 1, 18 });
     if (suggestions.size() != 1)
         FAIL(global include - bad size);
 
-    if (suggestions[0].completion != "cdefs.h")
+    if (suggestions[0].completion != "<sys/cdefs.h>")
         FAIL("global include - wrong results");
 
     PASS;

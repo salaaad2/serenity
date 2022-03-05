@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019-2020, Ryan Grieb <ryan.m.grieb@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,11 +18,6 @@
 #include <LibGUI/Window.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/FontDatabase.h>
-
-static const char* short_month_names[] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-};
 
 AddEventDialog::AddEventDialog(Core::DateTime date_time, Window* parent_window)
     : Dialog(parent_window)
@@ -86,18 +82,6 @@ AddEventDialog::AddEventDialog(Core::DateTime date_time, Window* parent_window)
     event_title_textbox.set_focus(true);
 }
 
-AddEventDialog::~AddEventDialog()
-{
-}
-
-AddEventDialog::MonthListModel::MonthListModel()
-{
-}
-
-AddEventDialog::MonthListModel::~MonthListModel()
-{
-}
-
 int AddEventDialog::MonthListModel::row_count(const GUI::ModelIndex&) const
 {
     return 12;
@@ -115,6 +99,11 @@ String AddEventDialog::MonthListModel::column_name(int column) const
 
 GUI::Variant AddEventDialog::MonthListModel::data(const GUI::ModelIndex& index, GUI::ModelRole role) const
 {
+    constexpr Array short_month_names = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+
     auto& month = short_month_names[index.row()];
     if (role == GUI::ModelRole::Display) {
         switch (index.column()) {

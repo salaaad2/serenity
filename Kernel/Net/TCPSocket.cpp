@@ -29,6 +29,15 @@ void TCPSocket::for_each(Function<void(const TCPSocket&)> callback)
     });
 }
 
+ErrorOr<void> TCPSocket::try_for_each(Function<ErrorOr<void>(const TCPSocket&)> callback)
+{
+    return sockets_by_tuple().with_shared([&](const auto& sockets) -> ErrorOr<void> {
+        for (auto& it : sockets)
+            TRY(callback(*it.value));
+        return {};
+    });
+}
+
 bool TCPSocket::unref() const
 {
     bool did_hit_zero = sockets_by_tuple().with_exclusive([&](auto& table) {
@@ -237,17 +246,17 @@ ErrorOr<void> TCPSocket::send_tcp_packet(u16 flags, const UserOrKernelBuffer* pa
     tcp_packet.set_data_offset(tcp_header_size / sizeof(u32));
     tcp_packet.set_flags(flags);
 
-    if (flags & TCPFlags::ACK) {
-        m_last_ack_number_sent = m_ack_number;
-        m_last_ack_sent_time = kgettimeofday();
-        tcp_packet.set_ack_number(m_ack_number);
-    }
-
     if (payload) {
         if (auto result = payload->read(tcp_packet.payload(), payload_size); result.is_error()) {
             routing_decision.adapter->release_packet_buffer(*packet);
             return set_so_error(result.release_error());
         }
+    }
+
+    if (flags & TCPFlags::ACK) {
+        m_last_ack_number_sent = m_ack_number;
+        m_last_ack_sent_time = kgettimeofday();
+        tcp_packet.set_ack_number(m_ack_number);
     }
 
     if (flags & TCPFlags::SYN) {
@@ -501,8 +510,8 @@ bool TCPSocket::protocol_is_disconnected() const
 void TCPSocket::shut_down_for_writing()
 {
     if (state() == State::Established) {
-        dbgln_if(TCP_SOCKET_DEBUG, " Sending FIN/ACK from Established and moving into FinWait1");
-        [[maybe_unused]] auto rc = send_tcp_packet(TCPFlags::FIN | TCPFlags::ACK);
+        dbgln_if(TCP_SOCKET_DEBUG, " Sending FIN from Established and moving into FinWait1");
+        (void)send_tcp_packet(TCPFlags::FIN);
         set_state(State::FinWait1);
     } else {
         dbgln(" Shutting down TCPSocket for writing but not moving to FinWait1 since state is {}", to_string(state()));

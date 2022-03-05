@@ -94,6 +94,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(save_to_file);
     JS_DECLARE_NATIVE_FUNCTION(load_json);
     JS_DECLARE_NATIVE_FUNCTION(last_value_getter);
+    JS_DECLARE_NATIVE_FUNCTION(print);
 };
 
 class ScriptObject final : public JS::GlobalObject {
@@ -107,6 +108,7 @@ public:
 private:
     JS_DECLARE_NATIVE_FUNCTION(load_file);
     JS_DECLARE_NATIVE_FUNCTION(load_json);
+    JS_DECLARE_NATIVE_FUNCTION(print);
 };
 
 static bool s_dump_ast = false;
@@ -358,11 +360,10 @@ static void print_proxy_object(JS::Object const& object, HashTable<JS::Object*>&
 static void print_map(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
     auto& map = static_cast<JS::Map const&>(object);
-    auto& entries = map.entries();
     print_type("Map");
     js_out(" {{");
     bool first = true;
-    for (auto& entry : entries) {
+    for (auto& entry : map) {
         print_separator(first);
         print_value(entry.key, seen_objects);
         js_out(" => ");
@@ -376,13 +377,12 @@ static void print_map(JS::Object const& object, HashTable<JS::Object*>& seen_obj
 static void print_set(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
     auto& set = static_cast<JS::Set const&>(object);
-    auto& values = set.values();
     print_type("Set");
     js_out(" {{");
     bool first = true;
-    for (auto& value : values) {
+    for (auto& entry : set) {
         print_separator(first);
-        print_value(value, seen_objects);
+        print_value(entry.key, seen_objects);
     }
     if (!first)
         js_out(" ");
@@ -423,6 +423,10 @@ static void print_array_buffer(JS::Object const& object, HashTable<JS::Object*>&
     print_type("ArrayBuffer");
     js_out("\n  byteLength: ");
     print_value(JS::Value((double)byte_length), seen_objects);
+    if (array_buffer.is_resizable_array_buffer()) {
+        js_out("\n  maxByteLength: ");
+        print_value(JS::Value((double)array_buffer.max_byte_length()), seen_objects);
+    }
     if (!byte_length)
         return;
     js_outln();
@@ -891,7 +895,6 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
         auto prototype_or_error = object.internal_get_prototype_of();
         if (prototype_or_error.has_value() && prototype_or_error.value() == object.global_object().error_prototype())
             return print_error(object, seen_objects);
-        vm->clear_exception();
 
         if (is<JS::RegExpObject>(object))
             return print_regexp_object(object, seen_objects);
@@ -1027,7 +1030,13 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             script_or_module->parse_node().dump(0);
 
         if (JS::Bytecode::g_dump_bytecode || s_run_bytecode) {
-            auto executable = JS::Bytecode::Generator::generate(script_or_module->parse_node());
+            auto executable_result = JS::Bytecode::Generator::generate(script_or_module->parse_node());
+            if (executable_result.is_error()) {
+                result = vm->throw_completion<JS::InternalError>(interpreter.global_object(), executable_result.error().to_string());
+                return ReturnEarly::No;
+            }
+
+            auto executable = executable_result.release_value();
             executable->name = source_name;
             if (s_opt_bytecode) {
                 auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
@@ -1059,7 +1068,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             if (!hint.is_empty())
                 outln("{}", hint);
             outln(error.to_string());
-            vm->throw_exception<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+            result = JS::SyntaxError::create(interpreter.global_object(), error.to_string());
         } else {
             auto return_early = run_script_or_module(script_or_error.value());
             if (return_early == ReturnEarly::Yes)
@@ -1073,7 +1082,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             if (!hint.is_empty())
                 outln("{}", hint);
             outln(error.to_string());
-            vm->throw_exception<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+            result = JS::SyntaxError::create(interpreter.global_object(), error.to_string());
         } else {
             auto return_early = run_script_or_module(module_or_error.value());
             if (return_early == ReturnEarly::Yes)
@@ -1081,12 +1090,13 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
         }
     }
 
-    auto handle_exception = [&] {
-        auto* exception = vm->exception();
-        vm->clear_exception();
+    auto handle_exception = [&](JS::Value thrown_value) {
         js_out("Uncaught exception: ");
-        print(exception->value());
-        auto& traceback = exception->traceback();
+        print(thrown_value);
+
+        if (!thrown_value.is_object() || !is<JS::Error>(thrown_value.as_object()))
+            return;
+        auto& traceback = static_cast<JS::Error const&>(thrown_value.as_object()).traceback();
         if (traceback.size() > 1) {
             unsigned repetitions = 0;
             for (size_t i = 0; i < traceback.size(); ++i) {
@@ -1117,21 +1127,11 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
         last_value = JS::make_handle(result.value());
 
     if (result.is_error()) {
-        if (!vm->exception()) {
-            // Until js no longer relies on vm->exception() we have to set it in case the exception was cleared
-            VERIFY(result.throw_completion().value().has_value());
-            auto throw_value = result.release_error().release_value().release_value();
-            auto* exception = interpreter.heap().allocate<JS::Exception>(interpreter.global_object(), throw_value);
-            vm->set_exception(*exception);
-        }
-        handle_exception();
+        VERIFY(result.throw_completion().value().has_value());
+        handle_exception(*result.release_error().value());
         return false;
     } else if (s_print_last_result) {
         print(result.value());
-        if (vm->exception()) {
-            handle_exception();
-            return false;
-        }
     }
     return true;
 }
@@ -1177,6 +1177,7 @@ void ReplObject::initialize_global_object()
     define_native_function("load", load_file, 1, attr);
     define_native_function("save", save_to_file, 1, attr);
     define_native_function("loadJSON", load_json, 1, attr);
+    define_native_function("print", print, 1, attr);
 
     define_native_accessor(
         "_",
@@ -1236,6 +1237,12 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_json)
     return load_json_impl(vm, global_object);
 }
 
+JS_DEFINE_NATIVE_FUNCTION(ReplObject::print)
+{
+    ::print(vm.argument(0));
+    return JS::js_undefined();
+}
+
 void ScriptObject::initialize_global_object()
 {
     Base::initialize_global_object();
@@ -1243,6 +1250,7 @@ void ScriptObject::initialize_global_object()
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
     define_native_function("load", load_file, 1, attr);
     define_native_function("loadJSON", load_json, 1, attr);
+    define_native_function("print", print, 1, attr);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_file)
@@ -1253,6 +1261,12 @@ JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_file)
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_json)
 {
     return load_json_impl(vm, global_object);
+}
+
+JS_DEFINE_NATIVE_FUNCTION(ScriptObject::print)
+{
+    ::print(vm.argument(0));
+    return JS::js_undefined();
 }
 
 static void repl(JS::Interpreter& interpreter)
@@ -1357,6 +1371,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     bool gc_on_every_allocation = false;
     bool disable_syntax_highlight = false;
+    StringView evaluate_script;
     Vector<StringView> script_paths;
 
     Core::ArgsParser args_parser;
@@ -1367,10 +1382,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(s_opt_bytecode, "Optimize the bytecode", "optimize-bytecode", 'p');
     args_parser.add_option(s_as_module, "Treat as module", "as-module", 'm');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');
-    args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'c');
+    args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'i');
     args_parser.add_option(s_disable_source_location_hints, "Disable source location hints", "disable-source-location-hints", 'h');
     args_parser.add_option(gc_on_every_allocation, "GC on every allocation", "gc-on-every-allocation", 'g');
     args_parser.add_option(disable_syntax_highlight, "Disable live syntax highlighting", "no-syntax-highlight", 's');
+    args_parser.add_option(evaluate_script, "Evaluate argument as a script", "evaluate", 'c', "script");
     args_parser.add_positional_argument(script_paths, "Path to script files", "scripts", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
@@ -1401,12 +1417,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
     OwnPtr<JS::Interpreter> interpreter;
 
-    interrupt_interpreter = [&] {
-        auto error = JS::Error::create(interpreter->global_object(), "Received SIGINT");
-        vm->throw_exception(interpreter->global_object(), error);
-    };
+    // FIXME: Figure out some way to interrupt the interpreter now that vm.exception() is gone.
 
-    if (script_paths.is_empty()) {
+    if (evaluate_script.is_empty() && script_paths.is_empty()) {
         s_print_last_result = true;
         interpreter = JS::Interpreter::create<ReplObject>(*vm);
         ReplConsoleClient console_client(interpreter->global_object().console());
@@ -1628,20 +1641,29 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             sigint_handler();
         });
 
-        if (script_paths.size() > 1)
-            warnln("Warning: Multiple files supplied, this will concatenate the sources and resolve modules as if it was the first file");
-
         StringBuilder builder;
-        for (auto& path : script_paths) {
-            auto file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
-            auto file_contents = file->read_all();
-            auto source = StringView { file_contents };
-            builder.append(source);
+        StringView source_name;
+
+        if (evaluate_script.is_empty()) {
+            if (script_paths.size() > 1)
+                warnln("Warning: Multiple files supplied, this will concatenate the sources and resolve modules as if it was the first file");
+
+            for (auto& path : script_paths) {
+                auto file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
+                auto file_contents = file->read_all();
+                auto source = StringView { file_contents };
+                builder.append(source);
+            }
+
+            source_name = script_paths[0];
+        } else {
+            builder.append(evaluate_script);
+            source_name = "eval"sv;
         }
 
         // We resolve modules as if it is the first file
 
-        if (!parse_and_run(*interpreter, builder.string_view(), script_paths[0]))
+        if (!parse_and_run(*interpreter, builder.string_view(), source_name))
             return 1;
     }
 

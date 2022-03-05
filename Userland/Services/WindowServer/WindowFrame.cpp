@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "ClientConnection.h"
+#include "ConnectionFromClient.h"
 #include <AK/Badge.h>
 #include <LibGfx/Font.h>
 #include <LibGfx/Painter.h>
@@ -84,7 +84,16 @@ void WindowFrame::window_was_constructed(Badge<Window>)
             m_window.handle_window_menu_action(WindowMenuAction::MaximizeOrRestore);
         });
         button->on_middle_click = [&](auto&) {
-            m_window.set_vertically_maximized();
+            if (m_window.tile_type() == WindowTileType::VerticallyMaximized)
+                m_window.set_untiled();
+            else
+                m_window.set_tiled(WindowTileType::VerticallyMaximized);
+        };
+        button->on_secondary_click = [&](auto&) {
+            if (m_window.tile_type() == WindowTileType::HorizontallyMaximized)
+                m_window.set_untiled();
+            else
+                m_window.set_tiled(WindowTileType::HorizontallyMaximized);
         };
         m_maximize_button = button.ptr();
         m_buttons.append(move(button));
@@ -181,6 +190,9 @@ MultiScaleBitmaps const* WindowFrame::shadow_bitmap() const
     case WindowType::WindowSwitcher:
         return nullptr;
     default:
+        // FIXME: Support shadow for themes with border radius
+        if (WindowManager::the().palette().window_border_radius() > 0)
+            return nullptr;
         if (auto* highlight_window = WindowManager::the().highlight_window())
             return highlight_window == &m_window ? s_active_window_shadow : s_inactive_window_shadow;
         return m_window.is_active() ? s_active_window_shadow : s_inactive_window_shadow;
@@ -532,7 +544,7 @@ Gfx::IntRect WindowFrame::rect() const
 
 Gfx::IntRect WindowFrame::constrained_render_rect_to_screen(const Gfx::IntRect& render_rect) const
 {
-    if (m_window.is_maximized() || m_window.tiled() != WindowTileType::None)
+    if (m_window.is_tiled())
         return render_rect.intersected(Screen::closest_to_rect(rect()).rect());
     return render_rect;
 }
@@ -559,7 +571,8 @@ Gfx::IntRect WindowFrame::unconstrained_render_rect() const
 
 Gfx::DisjointRectSet WindowFrame::opaque_render_rects() const
 {
-    if (has_alpha_channel()) {
+    auto border_radius = WindowManager::the().palette().window_border_radius();
+    if (has_alpha_channel() || border_radius > 0) {
         if (m_window.is_opaque())
             return constrained_render_rect_to_screen(m_window.rect());
         return {};
@@ -573,7 +586,8 @@ Gfx::DisjointRectSet WindowFrame::opaque_render_rects() const
 
 Gfx::DisjointRectSet WindowFrame::transparent_render_rects() const
 {
-    if (has_alpha_channel()) {
+    auto border_radius = WindowManager::the().palette().window_border_radius();
+    if (has_alpha_channel() || border_radius > 0) {
         if (m_window.is_opaque()) {
             Gfx::DisjointRectSet transparent_rects;
             transparent_rects.add_many(render_rect().shatter(m_window.rect()));
@@ -615,7 +629,7 @@ void WindowFrame::invalidate(Gfx::IntRect relative_rect)
     auto window_rect = m_window.rect();
     relative_rect.translate_by(frame_rect.x() - window_rect.x(), frame_rect.y() - window_rect.y());
     set_dirty();
-    m_window.invalidate(relative_rect);
+    m_window.invalidate(relative_rect, true);
 }
 
 void WindowFrame::window_rect_changed(const Gfx::IntRect& old_rect, const Gfx::IntRect& new_rect)

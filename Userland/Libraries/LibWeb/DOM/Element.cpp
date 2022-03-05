@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/AnyOf.h>
+#include <AK/CharacterTypes.h>
+#include <AK/Debug.h>
 #include <AK/StringBuilder.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -20,6 +22,7 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/DOMParsing/InnerHTML.h>
 #include <LibWeb/Geometry/DOMRect.h>
+#include <LibWeb/Geometry/DOMRectList.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -35,7 +38,7 @@
 
 namespace Web::DOM {
 
-Element::Element(Document& document, QualifiedName qualified_name)
+Element::Element(Document& document, DOM::QualifiedName qualified_name)
     : ParentNode(document, NodeType::ELEMENT_NODE)
     , m_qualified_name(move(qualified_name))
     , m_attributes(NamedNodeMap::create(*this))
@@ -98,13 +101,15 @@ ExceptionOr<void> Element::set_attribute(const FlyString& name, const String& va
 }
 
 // https://dom.spec.whatwg.org/#validate-and-extract
-static ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString qualified_name)
+ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString qualified_name)
 {
     // 1. If namespace is the empty string, then set it to null.
     if (namespace_.is_empty())
         namespace_ = {};
 
-    // FIXME: 2. Validate qualifiedName.
+    // 2. Validate qualifiedName.
+    if (auto result = Document::validate_qualified_name(qualified_name); result.is_exception())
+        return result.exception();
 
     // 3. Let prefix be null.
     FlyString prefix = {};
@@ -137,7 +142,7 @@ static ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, Fly
         return NamespaceError::create("Namespace is the XMLNS namespace and neither qualifiedName nor prefix is 'xmlns'.");
 
     // 10. Return namespace, prefix, and localName.
-    return QualifiedName { namespace_, prefix, local_name };
+    return QualifiedName { local_name, prefix, namespace_ };
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributens
@@ -158,6 +163,8 @@ ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyStri
 void Element::remove_attribute(const FlyString& name)
 {
     m_attributes->remove_attribute(name);
+
+    did_remove_attribute(name);
 
     // FIXME: Invalidate less.
     document().invalidate_style();
@@ -192,45 +199,50 @@ bool Element::has_class(const FlyString& class_name, CaseSensitivity case_sensit
 
 RefPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
-    auto display = style->display();
-
     if (local_name() == "noscript" && document().is_scripting_enabled())
         return nullptr;
 
+    auto display = style->display();
+    return create_layout_node_for_display_type(document(), display, move(style), this);
+}
+
+RefPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::StyleProperties> style, Element* element)
+{
     if (display.is_table_inside())
-        return adopt_ref(*new Layout::TableBox(document(), this, move(style)));
+        return adopt_ref(*new Layout::TableBox(document, element, move(style)));
 
     if (display.is_list_item())
-        return adopt_ref(*new Layout::ListItemBox(document(), *this, move(style)));
+        return adopt_ref(*new Layout::ListItemBox(document, element, move(style)));
 
     if (display.is_table_row())
-        return adopt_ref(*new Layout::TableRowBox(document(), this, move(style)));
+        return adopt_ref(*new Layout::TableRowBox(document, element, move(style)));
 
     if (display.is_table_cell())
-        return adopt_ref(*new Layout::TableCellBox(document(), this, move(style)));
+        return adopt_ref(*new Layout::TableCellBox(document, element, move(style)));
 
     if (display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group())
-        return adopt_ref(*new Layout::TableRowGroupBox(document(), *this, move(style)));
+        return adopt_ref(*new Layout::TableRowGroupBox(document, element, move(style)));
 
     if (display.is_table_column() || display.is_table_column_group() || display.is_table_caption()) {
         // FIXME: This is just an incorrect placeholder until we improve table layout support.
-        return adopt_ref(*new Layout::BlockContainer(document(), this, move(style)));
+        return adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
     }
 
     if (display.is_inline_outside()) {
         if (display.is_flow_root_inside()) {
-            auto block = adopt_ref(*new Layout::BlockContainer(document(), this, move(style)));
+            auto block = adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
             block->set_inline(true);
             return block;
         }
         if (display.is_flow_inside())
-            return adopt_ref(*new Layout::InlineNode(document(), *this, move(style)));
+            return adopt_ref(*new Layout::InlineNode(document, element, move(style)));
 
-        TODO();
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_string());
+        return adopt_ref(*new Layout::InlineNode(document, element, move(style)));
     }
 
     if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_flex_inside())
-        return adopt_ref(*new Layout::BlockContainer(document(), this, move(style)));
+        return adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
 
     TODO();
 }
@@ -238,7 +250,7 @@ RefPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StylePropert
 void Element::parse_attribute(const FlyString& name, const String& value)
 {
     if (name == HTML::AttributeNames::class_) {
-        auto new_classes = value.split_view(' ');
+        auto new_classes = value.split_view(is_ascii_space);
         m_classes.clear();
         m_classes.ensure_capacity(new_classes.size());
         for (auto& new_class : new_classes) {
@@ -292,9 +304,19 @@ void Element::recompute_style()
     auto new_specified_css_values = document().style_computer().compute_style(*this);
     m_specified_css_values = new_specified_css_values;
     if (!layout_node()) {
+        // This element doesn't have a corresponding layout node.
+
+        // If the new style is display:none, bail.
         if (new_specified_css_values->display().is_none())
             return;
-        // We need a new layout tree here!
+
+        // If we're inside a display:none ancestor or an ancestor that can't have children, bail.
+        for (auto* ancestor = parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+            if (!ancestor->layout_node() || !ancestor->layout_node()->can_have_children())
+                return;
+        }
+
+        // Okay, we need a new layout subtree here.
         Layout::TreeBuilder tree_builder;
         (void)tree_builder.build(*this);
         return;
@@ -351,6 +373,32 @@ DOM::ExceptionOr<bool> Element::matches(StringView selectors) const
             return true;
     }
     return false;
+}
+
+// https://dom.spec.whatwg.org/#dom-element-closest
+DOM::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) const
+{
+    auto maybe_selectors = parse_selector(CSS::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
+    if (!maybe_selectors.has_value())
+        return DOM::SyntaxError::create("Failed to parse selector");
+
+    auto matches_selectors = [](CSS::SelectorList const& selector_list, Element const* element) {
+        for (auto& selector : selector_list) {
+            if (!SelectorEngine::matches(selector, *element))
+                return false;
+        }
+        return true;
+    };
+
+    auto const selector_list = maybe_selectors.release_value();
+    for (auto* element = this; element; element = element->parent_element()) {
+        if (!matches_selectors(selector_list, element))
+            continue;
+
+        return element;
+    }
+
+    return nullptr;
 }
 
 ExceptionOr<void> Element::set_inner_html(String const& markup)
@@ -445,6 +493,30 @@ NonnullRefPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
 
     auto& box = static_cast<Layout::Box const&>(*layout_node());
     return Geometry::DOMRect::create(box.absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()));
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
+NonnullRefPtr<Geometry::DOMRectList> Element::get_client_rects() const
+{
+    NonnullRefPtrVector<Geometry::DOMRect> rects;
+
+    // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList object and stop this algorithm.
+    if (!layout_node() || !layout_node()->is_box())
+        return Geometry::DOMRectList::create(move(rects));
+
+    // FIXME: 2. If the element has an associated SVG layout box return a DOMRectList object containing a single DOMRect object that describes
+    // the bounding box of the element as defined by the SVG specification, applying the transforms that apply to the element and its ancestors.
+
+    // FIXME: 3. Return a DOMRectList object containing DOMRect objects in content order, one for each box fragment,
+    // describing its border area (including those with a height or width of zero) with the following constraints:
+    // - Apply the transforms that apply to the element and its ancestors.
+    // - If the element on which the method was invoked has a computed value for the display property of table
+    // or inline-table include both the table box and the caption box, if any, but not the anonymous container box.
+    // - Replace each anonymous block box with its child box(es) and repeat this until no anonymous block boxes are left in the final list.
+
+    auto bounding_rect = get_bounding_client_rect();
+    rects.append(bounding_rect);
+    return Geometry::DOMRectList::create(move(rects));
 }
 
 int Element::client_top() const

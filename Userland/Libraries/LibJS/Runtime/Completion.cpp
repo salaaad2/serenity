@@ -63,7 +63,7 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
     };
 
     // 4. Let onFulfilled be ! CreateBuiltinFunction(fulfilledClosure, 1, "", « »).
-    auto on_fulfilled = NativeFunction::create(global_object, "", move(fulfilled_closure));
+    auto* on_fulfilled = NativeFunction::create(global_object, move(fulfilled_closure), 1, "");
 
     // 5. Let rejectedClosure be a new Abstract Closure with parameters (reason) that captures asyncContext and performs the following steps when called:
     auto rejected_closure = [&success, &result](VM& vm, GlobalObject&) -> ThrowCompletionOr<Value> {
@@ -87,7 +87,7 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
     };
 
     // 6. Let onRejected be ! CreateBuiltinFunction(rejectedClosure, 1, "", « »).
-    auto on_rejected = NativeFunction::create(global_object, "", move(rejected_closure));
+    auto* on_rejected = NativeFunction::create(global_object, move(rejected_closure), 1, "");
 
     // 7. Perform ! PerformPromiseThen(promise, onFulfilled, onRejected).
     auto* promise = verify_cast<Promise>(promise_object);
@@ -98,7 +98,7 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
     //        running all queued promise jobs.
     // Note: This is not used by LibJS itself, and is performed for the embedder (i.e. LibWeb).
     if (Core::EventLoop::has_been_instantiated())
-        Core::EventLoop::current().spin_until([&] { return promise->state() != Promise::State::Pending; });
+        Core::EventLoop::current().spin_until([&] { return success.has_value(); });
 
     // 8. Remove asyncContext from the execution context stack and restore the execution context that is at the top of the execution context stack as the running execution context.
     // NOTE: Since we don't push any EC, this step is not performed.
@@ -115,10 +115,6 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
 
     if (success.value())
         return result;
-    // NOTE: This is temporary until we remove VM::exception(). It's required as callers of
-    //       AwaitExpression still need to check for an exception rather than a completion
-    //       type as long as ASTNode::execute() returns a plain Value.
-    vm.throw_exception(global_object, result);
     return throw_completion(result);
 }
 

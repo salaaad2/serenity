@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2020, Sergey Bugaev <bugaevc@serenityos.org>
  * Copyright (c) 2021, Mustafa Quraish <mustafa@cs.toronto.edu>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +10,7 @@
 
 #include <AK/Vector.h>
 #include <LibConfig/Listener.h>
+#include <LibCore/DateTime.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGUI/Model.h>
 
@@ -22,12 +24,18 @@ public:
         Data,
         Type,
         Size,
+        Time,
         __Count
     };
 
-    virtual ~ClipboardHistoryModel() override;
+    struct ClipboardItem {
+        GUI::Clipboard::DataAndType data_and_type;
+        Core::DateTime time;
+    };
 
-    const GUI::Clipboard::DataAndType& item_at(int index) const { return m_history_items[index]; }
+    virtual ~ClipboardHistoryModel() override = default;
+
+    const ClipboardItem& item_at(int index) const { return m_history_items[index]; }
     void remove_item(int index);
 
     // ^GUI::Model
@@ -48,6 +56,6 @@ private:
     // ^GUI::Clipboard::ClipboardClient
     virtual void clipboard_content_did_change(const String&) override { add_item(GUI::Clipboard::the().fetch_data_and_type()); }
 
-    Vector<GUI::Clipboard::DataAndType> m_history_items;
+    Vector<ClipboardItem> m_history_items;
     size_t m_history_limit;
 };

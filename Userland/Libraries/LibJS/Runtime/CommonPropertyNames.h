@@ -314,6 +314,7 @@ namespace JS {
     P(log10)                                 \
     P(map)                                   \
     P(max)                                   \
+    P(maxByteLength)                         \
     P(maximize)                              \
     P(mergeFields)                           \
     P(message)                               \
@@ -379,6 +380,8 @@ namespace JS {
     P(reject)                                \
     P(relativeTo)                            \
     P(repeat)                                \
+    P(resize)                                \
+    P(resizable)                             \
     P(resolve)                               \
     P(resolvedOptions)                       \
     P(reverse)                               \
@@ -436,6 +439,7 @@ namespace JS {
     P(source)                                \
     P(splice)                                \
     P(sqrt)                                  \
+    P(stack)                                 \
     P(startOfDay)                            \
     P(startsWith)                            \
     P(status)                                \

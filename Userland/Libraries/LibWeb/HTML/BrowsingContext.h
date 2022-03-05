@@ -36,7 +36,7 @@ public:
     void register_viewport_client(ViewportClient&);
     void unregister_viewport_client(ViewportClient&);
 
-    bool is_top_level() const { return !container(); }
+    bool is_top_level() const;
     bool is_focused_context() const;
 
     DOM::Document const* active_document() const { return m_active_document; }
@@ -50,6 +50,7 @@ public:
     Gfx::IntSize const& size() const { return m_size; }
     void set_size(Gfx::IntSize const&);
 
+    void set_needs_display();
     void set_needs_display(Gfx::IntRect const&);
 
     Gfx::IntPoint const& viewport_scroll_offset() const { return m_viewport_scroll_offset; }
@@ -103,6 +104,8 @@ public:
     DOM::Document const* container_document() const;
 
     bool has_a_rendering_opportunity() const;
+
+    RefPtr<DOM::Node> currently_focused_area();
 
 private:
     explicit BrowsingContext(Page&, HTML::BrowsingContextContainer*);

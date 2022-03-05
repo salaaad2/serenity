@@ -1,13 +1,14 @@
 /*
  * Copyright (c) 2021, Timur Sultanov <SultanovTS@yandex.ru>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "KeymapStatusWindow.h"
 #include <LibCore/Process.h>
+#include <LibGUI/ConnectionToWindowMangerServer.h>
 #include <LibGUI/Painter.h>
-#include <LibGUI/WindowManagerServerConnection.h>
 #include <LibKeyboard/CharacterMap.h>
 
 void KeymapStatusWidget::mousedown_event(GUI::MouseEvent& event)
@@ -30,10 +31,6 @@ KeymapStatusWindow::KeymapStatusWindow()
     m_status_widget->set_text(current_keymap_name.substring(0, 2));
 }
 
-KeymapStatusWindow::~KeymapStatusWindow()
-{
-}
-
 void KeymapStatusWindow::wm_event(GUI::WMEvent& event)
 {
     if (event.type() == GUI::WMEvent::WM_KeymapChanged) {
@@ -46,7 +43,7 @@ void KeymapStatusWindow::wm_event(GUI::WMEvent& event)
 void KeymapStatusWindow::set_keymap_text(const String& keymap)
 {
     GUI::Painter painter(*m_status_widget);
-    painter.clear_rect(m_status_widget->rect(), Color::from_rgba(0));
+    painter.clear_rect(m_status_widget->rect(), Color::from_argb(0));
 
     m_status_widget->set_tooltip(keymap);
     m_status_widget->set_text(keymap.substring(0, 2));

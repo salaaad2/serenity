@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,6 +20,15 @@ using SelectorList = NonnullRefPtrVector<class Selector>;
 // This is a <complex-selector> in the spec. https://www.w3.org/TR/selectors-4/#complex
 class Selector : public RefCounted<Selector> {
 public:
+    enum class PseudoElement {
+        None,
+        Before,
+        After,
+        FirstLine,
+        FirstLetter,
+        Marker,
+    };
+
     struct SimpleSelector {
         enum class Type {
             Invalid,
@@ -53,12 +62,15 @@ public:
                 FirstChild,
                 LastChild,
                 OnlyChild,
+                NthChild,
+                NthLastChild,
                 Empty,
                 Root,
                 FirstOfType,
                 LastOfType,
-                NthChild,
-                NthLastChild,
+                OnlyOfType,
+                NthOfType,
+                NthLastOfType,
                 Disabled,
                 Enabled,
                 Checked,
@@ -74,14 +86,6 @@ public:
             SelectorList not_selector {};
         };
         PseudoClass pseudo_class {};
-
-        enum class PseudoElement {
-            None,
-            Before,
-            After,
-            FirstLine,
-            FirstLetter,
-        };
         PseudoElement pseudo_element { PseudoElement::None };
 
         FlyString value {};
@@ -130,7 +134,7 @@ public:
     ~Selector();
 
     Vector<CompoundSelector> const& compound_selectors() const { return m_compound_selectors; }
-
+    Optional<PseudoElement> pseudo_element() const;
     u32 specificity() const;
     String serialize() const;
 
@@ -141,7 +145,7 @@ private:
     mutable Optional<u32> m_specificity;
 };
 
-constexpr StringView pseudo_element_name(Selector::SimpleSelector::PseudoElement);
+constexpr StringView pseudo_element_name(Selector::PseudoElement);
 constexpr StringView pseudo_class_name(Selector::SimpleSelector::PseudoClass::Type);
 
 String serialize_a_group_of_selectors(NonnullRefPtrVector<Selector> const& selectors);

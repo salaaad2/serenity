@@ -165,7 +165,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
         if (interactive)
             builder.appendff("@{:p} ", &layout_node);
 
-        builder.appendff("at ({},{}) size {}x{}",
+        builder.appendff("at ({},{}) content-size {}x{}",
             box.absolute_x(),
             box.absolute_y(),
             box.content_width(),
@@ -229,11 +229,13 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
             auto& line_box = block.line_boxes()[line_box_index];
             for (size_t i = 0; i < indent; ++i)
                 builder.append("  ");
-            builder.appendff("  {}line {}{} width: {}\n",
+            builder.appendff("  {}line {}{} width: {}, bottom: {}, baseline: {}\n",
                 line_box_color_on,
                 line_box_index,
                 color_off,
-                (int)line_box.width());
+                line_box.width(),
+                line_box.bottom(),
+                line_box.baseline());
             for (size_t fragment_index = 0; fragment_index < line_box.fragments().size(); ++fragment_index) {
                 auto& fragment = line_box.fragments()[fragment_index];
                 for (size_t i = 0; i < indent; ++i)
@@ -382,6 +384,15 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
                 case CSS::Selector::SimpleSelector::PseudoClass::Type::LastOfType:
                     pseudo_class_description = "LastOfType";
                     break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::OnlyOfType:
+                    pseudo_class_description = "OnlyOfType";
+                    break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::NthOfType:
+                    pseudo_class_description = "NthOfType";
+                    break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::NthLastOfType:
+                    pseudo_class_description = "NthLastOfType";
+                    break;
                 case CSS::Selector::SimpleSelector::PseudoClass::Type::NthChild:
                     pseudo_class_description = "NthChild";
                     break;
@@ -435,20 +446,23 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
             if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoElement) {
                 char const* pseudo_element_description = "";
                 switch (simple_selector.pseudo_element) {
-                case CSS::Selector::SimpleSelector::PseudoElement::None:
+                case CSS::Selector::PseudoElement::None:
                     pseudo_element_description = "NONE";
                     break;
-                case CSS::Selector::SimpleSelector::PseudoElement::Before:
+                case CSS::Selector::PseudoElement::Before:
                     pseudo_element_description = "before";
                     break;
-                case CSS::Selector::SimpleSelector::PseudoElement::After:
+                case CSS::Selector::PseudoElement::After:
                     pseudo_element_description = "after";
                     break;
-                case CSS::Selector::SimpleSelector::PseudoElement::FirstLine:
+                case CSS::Selector::PseudoElement::FirstLine:
                     pseudo_element_description = "first-line";
                     break;
-                case CSS::Selector::SimpleSelector::PseudoElement::FirstLetter:
+                case CSS::Selector::PseudoElement::FirstLetter:
                     pseudo_element_description = "first-letter";
+                    break;
+                case CSS::Selector::PseudoElement::Marker:
+                    pseudo_element_description = "marker";
                     break;
                 }
 
@@ -562,14 +576,14 @@ void dump_style_rule(StringBuilder& builder, CSS::CSSStyleRule const& rule, int 
     for (auto& property : style_declaration.properties()) {
         indent(builder, indent_levels);
         builder.appendff("    {}: '{}'", CSS::string_from_property_id(property.property_id), property.value->to_string());
-        if (property.important)
+        if (property.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m");
         builder.append('\n');
     }
     for (auto& property : style_declaration.custom_properties()) {
         indent(builder, indent_levels);
         builder.appendff("    {}: '{}'", property.key, property.value.value->to_string());
-        if (property.value.important)
+        if (property.value.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m");
         builder.append('\n');
     }

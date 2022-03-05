@@ -11,6 +11,7 @@
 #include <LibGemini/Document.h>
 #include <LibGfx/ImageDecoder.h>
 #include <LibMarkdown/Document.h>
+#include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
@@ -45,28 +46,28 @@ static bool build_markdown_document(DOM::Document& document, const ByteBuffer& d
     if (!markdown_document)
         return false;
 
-    HTML::HTMLParser parser(document, markdown_document->render_to_html(), "utf-8");
-    parser.run(document.url());
+    auto parser = HTML::HTMLParser::create(document, markdown_document->render_to_html(), "utf-8");
+    parser->run(document.url());
     return true;
 }
 
 static bool build_text_document(DOM::Document& document, const ByteBuffer& data)
 {
-    auto html_element = document.create_element("html");
+    auto html_element = document.create_element("html").release_value();
     document.append_child(html_element);
 
-    auto head_element = document.create_element("head");
+    auto head_element = document.create_element("head").release_value();
     html_element->append_child(head_element);
-    auto title_element = document.create_element("title");
+    auto title_element = document.create_element("title").release_value();
     head_element->append_child(title_element);
 
     auto title_text = document.create_text_node(document.url().basename());
     title_element->append_child(title_text);
 
-    auto body_element = document.create_element("body");
+    auto body_element = document.create_element("body").release_value();
     html_element->append_child(body_element);
 
-    auto pre_element = document.create_element("pre");
+    auto pre_element = document.create_element("pre").release_value();
     body_element->append_child(pre_element);
 
     pre_element->append_child(document.create_text_node(String::copy(data)));
@@ -84,22 +85,22 @@ static bool build_image_document(DOM::Document& document, ByteBuffer const& data
     if (!bitmap)
         return false;
 
-    auto html_element = document.create_element("html");
+    auto html_element = document.create_element("html").release_value();
     document.append_child(html_element);
 
-    auto head_element = document.create_element("head");
+    auto head_element = document.create_element("head").release_value();
     html_element->append_child(head_element);
-    auto title_element = document.create_element("title");
+    auto title_element = document.create_element("title").release_value();
     head_element->append_child(title_element);
 
     auto basename = LexicalPath::basename(document.url().path());
     auto title_text = adopt_ref(*new DOM::Text(document, String::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height())));
     title_element->append_child(title_text);
 
-    auto body_element = document.create_element("body");
+    auto body_element = document.create_element("body").release_value();
     html_element->append_child(body_element);
 
-    auto image_element = document.create_element("img");
+    auto image_element = document.create_element("img").release_value();
     image_element->set_attribute(HTML::AttributeNames::src, document.url().to_string());
     body_element->append_child(image_element);
 
@@ -115,8 +116,8 @@ static bool build_gemini_document(DOM::Document& document, const ByteBuffer& dat
     dbgln_if(GEMINI_DEBUG, "Gemini data:\n\"\"\"{}\"\"\"", gemini_data);
     dbgln_if(GEMINI_DEBUG, "Converted to HTML:\n\"\"\"{}\"\"\"", html_data);
 
-    HTML::HTMLParser parser(document, html_data, "utf-8");
-    parser.run(document.url());
+    auto parser = HTML::HTMLParser::create(document, html_data, "utf-8");
+    parser->run(document.url());
     return true;
 }
 
@@ -158,6 +159,18 @@ bool FrameLoader::load(LoadRequest& request, Type type)
         if (auto* page = browsing_context().page())
             page->client().page_did_start_loading(url);
     }
+
+    // https://fetch.spec.whatwg.org/#concept-fetch
+    // Step 12: If request’s header list does not contain `Accept`, then:
+    //          1. Let value be `*/*`. (NOTE: Not necessary as we're about to override it)
+    //          2. A user agent should set value to the first matching statement, if any, switching on request’s destination:
+    //              -> "document"
+    //              -> "frame"
+    //              -> "iframe"
+    //                   `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`
+    // FIXME: This should be case-insensitive.
+    if (!request.headers().contains("Accept"))
+        request.set_header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 
     set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
 
@@ -213,9 +226,9 @@ bool FrameLoader::load(const AK::URL& url, Type type)
 void FrameLoader::load_html(StringView html, const AK::URL& url)
 {
     auto document = DOM::Document::create(url);
-    HTML::HTMLParser parser(document, html, "utf-8");
-    parser.run(url);
-    browsing_context().set_active_document(&parser.document());
+    auto parser = HTML::HTMLParser::create(document, html, "utf-8");
+    parser->run(url);
+    browsing_context().set_active_document(&parser->document());
 }
 
 // FIXME: Use an actual templating engine (our own one when it's built, preferably
@@ -253,21 +266,47 @@ void FrameLoader::load_favicon(RefPtr<Gfx::Bitmap> bitmap)
     }
 }
 
+void FrameLoader::store_response_cookies(AK::URL const& url, String const& cookies)
+{
+    auto* page = browsing_context().page();
+    if (!page)
+        return;
+
+    auto set_cookie_json_value = MUST(JsonValue::from_string(cookies));
+    VERIFY(set_cookie_json_value.type() == JsonValue::Type::Array);
+
+    for (const auto& set_cookie_entry : set_cookie_json_value.as_array().values()) {
+        VERIFY(set_cookie_entry.type() == JsonValue::Type::String);
+
+        auto cookie = Cookie::parse_cookie(set_cookie_entry.as_string());
+        if (!cookie.has_value())
+            continue;
+
+        page->client().page_did_set_cookie(url, cookie.value(), Cookie::Source::Http); // FIXME: Determine cookie source correctly
+    }
+}
+
 void FrameLoader::resource_did_load()
 {
     auto url = resource()->url();
 
-    // FIXME: Also check HTTP status code before redirecting
-    auto location = resource()->response_headers().get("Location");
-    if (location.has_value()) {
-        if (m_redirects_count > maximum_redirects_allowed) {
-            m_redirects_count = 0;
-            load_error_page(url, "Too many redirects");
+    if (auto set_cookie = resource()->response_headers().get("Set-Cookie"); set_cookie.has_value())
+        store_response_cookies(url, *set_cookie);
+
+    // For 3xx (Redirection) responses, the Location value refers to the preferred target resource for automatically redirecting the request.
+    auto status_code = resource()->status_code();
+    if (status_code.has_value() && *status_code >= 300 && *status_code <= 399) {
+        auto location = resource()->response_headers().get("Location");
+        if (location.has_value()) {
+            if (m_redirects_count > maximum_redirects_allowed) {
+                m_redirects_count = 0;
+                load_error_page(url, "Too many redirects");
+                return;
+            }
+            m_redirects_count++;
+            load(url.complete_url(location.value()), FrameLoader::Type::Navigation);
             return;
         }
-        m_redirects_count++;
-        load(url.complete_url(location.value()), FrameLoader::Type::Navigation);
-        return;
     }
     m_redirects_count = 0;
 
@@ -292,16 +331,6 @@ void FrameLoader::resource_did_load()
     if (!parse_document(*document, resource()->encoded_data())) {
         load_error_page(url, "Failed to parse content.");
         return;
-    }
-
-    auto set_cookie = resource()->response_headers().get("Set-Cookie");
-    if (set_cookie.has_value()) {
-        auto set_cookie_json_value = MUST(JsonValue::from_string(set_cookie.value()));
-        VERIFY(set_cookie_json_value.type() == JsonValue::Type::Array);
-        for (const auto& set_cookie_entry : set_cookie_json_value.as_array().values()) {
-            VERIFY(set_cookie_entry.type() == JsonValue::Type::String);
-            document->set_cookie(set_cookie_entry.as_string(), Cookie::Source::Http);
-        }
     }
 
     if (!url.fragment().is_empty())

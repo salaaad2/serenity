@@ -27,6 +27,12 @@ StyleValue::~StyleValue()
 {
 }
 
+AngleStyleValue const& StyleValue::as_angle() const
+{
+    VERIFY(is_angle());
+    return static_cast<AngleStyleValue const&>(*this);
+}
+
 BackgroundStyleValue const& StyleValue::as_background() const
 {
     VERIFY(is_background());
@@ -75,6 +81,12 @@ ColorStyleValue const& StyleValue::as_color() const
     return static_cast<ColorStyleValue const&>(*this);
 }
 
+ContentStyleValue const& StyleValue::as_content() const
+{
+    VERIFY(is_content());
+    return static_cast<ContentStyleValue const&>(*this);
+}
+
 FlexStyleValue const& StyleValue::as_flex() const
 {
     VERIFY(is_flex());
@@ -91,6 +103,12 @@ FontStyleValue const& StyleValue::as_font() const
 {
     VERIFY(is_font());
     return static_cast<FontStyleValue const&>(*this);
+}
+
+FrequencyStyleValue const& StyleValue::as_frequency() const
+{
+    VERIFY(is_frequency());
+    return static_cast<FrequencyStyleValue const&>(*this);
 }
 
 IdentifierStyleValue const& StyleValue::as_identifier() const
@@ -153,6 +171,12 @@ PositionStyleValue const& StyleValue::as_position() const
     return static_cast<PositionStyleValue const&>(*this);
 }
 
+ResolutionStyleValue const& StyleValue::as_resolution() const
+{
+    VERIFY(is_resolution());
+    return static_cast<ResolutionStyleValue const&>(*this);
+}
+
 StringStyleValue const& StyleValue::as_string() const
 {
     VERIFY(is_string());
@@ -163,6 +187,12 @@ TextDecorationStyleValue const& StyleValue::as_text_decoration() const
 {
     VERIFY(is_text_decoration());
     return static_cast<TextDecorationStyleValue const&>(*this);
+}
+
+TimeStyleValue const& StyleValue::as_time() const
+{
+    VERIFY(is_time());
+    return static_cast<TimeStyleValue const&>(*this);
 }
 
 TransformationStyleValue const& StyleValue::as_transformation() const
@@ -271,20 +301,24 @@ String BorderRadiusStyleValue::to_string() const
 
 String BoxShadowStyleValue::to_string() const
 {
-    return String::formatted("{} {} {} {}", m_offset_x.to_string(), m_offset_y.to_string(), m_blur_radius.to_string(), m_color.to_string());
+    StringBuilder builder;
+    builder.appendff("{} {} {} {} {}", m_color.to_string(), m_offset_x.to_string(), m_offset_y.to_string(), m_blur_radius.to_string(), m_spread_distance.to_string());
+    if (m_placement == BoxShadowPlacement::Inner)
+        builder.append(" inset");
+    return builder.to_string();
 }
 
-void CalculatedStyleValue::CalculationResult::add(CalculationResult const& other, Layout::Node const* layout_node, Length const& percentage_basis)
+void CalculatedStyleValue::CalculationResult::add(CalculationResult const& other, Layout::Node const* layout_node, PercentageBasis const& percentage_basis)
 {
     add_or_subtract_internal(SumOperation::Add, other, layout_node, percentage_basis);
 }
 
-void CalculatedStyleValue::CalculationResult::subtract(CalculationResult const& other, Layout::Node const* layout_node, Length const& percentage_basis)
+void CalculatedStyleValue::CalculationResult::subtract(CalculationResult const& other, Layout::Node const* layout_node, PercentageBasis const& percentage_basis)
 {
     add_or_subtract_internal(SumOperation::Subtract, other, layout_node, percentage_basis);
 }
 
-void CalculatedStyleValue::CalculationResult::add_or_subtract_internal(SumOperation op, CalculationResult const& other, Layout::Node const* layout_node, Length const& percentage_basis)
+void CalculatedStyleValue::CalculationResult::add_or_subtract_internal(SumOperation op, CalculationResult const& other, Layout::Node const* layout_node, PercentageBasis const& percentage_basis)
 {
     // We know from validation when resolving the type, that "both sides have the same type, or that one side is a <number> and the other is an <integer>".
     // Though, having the same type may mean that one side is a <dimension> and the other a <percentage>.
@@ -305,6 +339,42 @@ void CalculatedStyleValue::CalculationResult::add_or_subtract_internal(SumOperat
                 };
             }
         },
+        [&](Angle const& angle) {
+            auto this_degrees = angle.to_degrees();
+            if (other.m_value.has<Angle>()) {
+                auto other_degrees = other.m_value.get<Angle>().to_degrees();
+                if (op == SumOperation::Add)
+                    m_value = Angle::make_degrees(this_degrees + other_degrees);
+                else
+                    m_value = Angle::make_degrees(this_degrees - other_degrees);
+            } else {
+                VERIFY(percentage_basis.has<Angle>());
+
+                auto other_degrees = percentage_basis.get<Angle>().percentage_of(other.m_value.get<Percentage>()).to_degrees();
+                if (op == SumOperation::Add)
+                    m_value = Angle::make_degrees(this_degrees + other_degrees);
+                else
+                    m_value = Angle::make_degrees(this_degrees - other_degrees);
+            }
+        },
+        [&](Frequency const& frequency) {
+            auto this_hertz = frequency.to_hertz();
+            if (other.m_value.has<Frequency>()) {
+                auto other_hertz = other.m_value.get<Frequency>().to_hertz();
+                if (op == SumOperation::Add)
+                    m_value = Frequency::make_hertz(this_hertz + other_hertz);
+                else
+                    m_value = Frequency::make_hertz(this_hertz - other_hertz);
+            } else {
+                VERIFY(percentage_basis.has<Frequency>());
+
+                auto other_hertz = percentage_basis.get<Frequency>().percentage_of(other.m_value.get<Percentage>()).to_hertz();
+                if (op == SumOperation::Add)
+                    m_value = Frequency::make_hertz(this_hertz + other_hertz);
+                else
+                    m_value = Frequency::make_hertz(this_hertz - other_hertz);
+            }
+        },
         [&](Length const& length) {
             auto this_px = length.to_px(*layout_node);
             if (other.m_value.has<Length>()) {
@@ -314,13 +384,31 @@ void CalculatedStyleValue::CalculationResult::add_or_subtract_internal(SumOperat
                 else
                     m_value = Length::make_px(this_px - other_px);
             } else {
-                VERIFY(!percentage_basis.is_undefined());
+                VERIFY(percentage_basis.has<Length>());
 
-                auto other_px = percentage_basis.percentage_of(other.m_value.get<Percentage>()).to_px(*layout_node);
+                auto other_px = percentage_basis.get<Length>().percentage_of(other.m_value.get<Percentage>()).to_px(*layout_node);
                 if (op == SumOperation::Add)
                     m_value = Length::make_px(this_px + other_px);
                 else
                     m_value = Length::make_px(this_px - other_px);
+            }
+        },
+        [&](Time const& time) {
+            auto this_seconds = time.to_seconds();
+            if (other.m_value.has<Time>()) {
+                auto other_seconds = other.m_value.get<Time>().to_seconds();
+                if (op == SumOperation::Add)
+                    m_value = Time::make_seconds(this_seconds + other_seconds);
+                else
+                    m_value = Time::make_seconds(this_seconds - other_seconds);
+            } else {
+                VERIFY(percentage_basis.has<Time>());
+
+                auto other_seconds = percentage_basis.get<Time>().percentage_of(other.m_value.get<Percentage>()).to_seconds();
+                if (op == SumOperation::Add)
+                    m_value = Time::make_seconds(this_seconds + other_seconds);
+                else
+                    m_value = Time::make_seconds(this_seconds - other_seconds);
             }
         },
         [&](Percentage const& percentage) {
@@ -365,9 +453,18 @@ void CalculatedStyleValue::CalculationResult::multiply_by(CalculationResult cons
                 *this = new_value;
             }
         },
+        [&](Angle const& angle) {
+            m_value = Angle::make_degrees(angle.to_degrees() * other.m_value.get<Number>().value);
+        },
+        [&](Frequency const& frequency) {
+            m_value = Frequency::make_hertz(frequency.to_hertz() * other.m_value.get<Number>().value);
+        },
         [&](Length const& length) {
             VERIFY(layout_node);
             m_value = Length::make_px(length.to_px(*layout_node) * other.m_value.get<Number>().value);
+        },
+        [&](Time const& time) {
+            m_value = Time::make_seconds(time.to_seconds() * other.m_value.get<Number>().value);
         },
         [&](Percentage const& percentage) {
             m_value = Percentage { percentage.value() * other.m_value.get<Number>().value };
@@ -389,9 +486,18 @@ void CalculatedStyleValue::CalculationResult::divide_by(CalculationResult const&
                 .value = number.value / denominator
             };
         },
+        [&](Angle const& angle) {
+            m_value = Angle::make_degrees(angle.to_degrees() / denominator);
+        },
+        [&](Frequency const& frequency) {
+            m_value = Frequency::make_hertz(frequency.to_hertz() / denominator);
+        },
         [&](Length const& length) {
             VERIFY(layout_node);
             m_value = Length::make_px(length.to_px(*layout_node) / denominator);
+        },
+        [&](Time const& time) {
+            m_value = Time::make_seconds(time.to_seconds() / denominator);
         },
         [&](Percentage const& percentage) {
             m_value = Percentage { percentage.value() / denominator };
@@ -414,9 +520,8 @@ String CalculatedStyleValue::CalcValue::to_string() const
 {
     return value.visit(
         [](Number const& number) { return String::number(number.value); },
-        [](Length const& length) { return length.to_string(); },
-        [](Percentage const& percentage) { return percentage.to_string(); },
-        [](NonnullOwnPtr<CalcSum> const& sum) { return String::formatted("({})", sum->to_string()); });
+        [](NonnullOwnPtr<CalcSum> const& sum) { return String::formatted("({})", sum->to_string()); },
+        [](auto const& v) { return v.to_string(); });
 }
 
 String CalculatedStyleValue::CalcSum::to_string() const
@@ -478,36 +583,78 @@ String CalculatedStyleValue::CalcNumberSumPartWithOperator::to_string() const
     return String::formatted(" {} {}", op == SumOperation::Add ? "+"sv : "-"sv, value->to_string());
 }
 
-Optional<Length> CalculatedStyleValue::resolve_length(Layout::Node const& layout_node) const
+Optional<Angle> CalculatedStyleValue::resolve_angle() const
 {
-    auto result = m_expression->resolve(&layout_node, {});
+    auto result = m_expression->resolve(nullptr, {});
+
+    if (result.value().has<Angle>())
+        return result.value().get<Angle>();
+    return {};
+}
+
+Optional<AnglePercentage> CalculatedStyleValue::resolve_angle_percentage(Angle const& percentage_basis) const
+{
+    auto result = m_expression->resolve(nullptr, percentage_basis);
 
     return result.value().visit(
-        [&](Number) -> Optional<Length> {
-            return {};
+        [&](Angle const& angle) -> Optional<AnglePercentage> {
+            return angle;
         },
-        [&](Length const& length) -> Optional<Length> {
-            return length;
+        [&](Percentage const& percentage) -> Optional<AnglePercentage> {
+            return percentage;
         },
-        [&](Percentage const&) -> Optional<Length> {
+        [&](auto const&) -> Optional<AnglePercentage> {
             return {};
         });
 }
 
+Optional<Frequency> CalculatedStyleValue::resolve_frequency() const
+{
+    auto result = m_expression->resolve(nullptr, {});
+
+    if (result.value().has<Frequency>())
+        return result.value().get<Frequency>();
+    return {};
+}
+
+Optional<FrequencyPercentage> CalculatedStyleValue::resolve_frequency_percentage(Frequency const& percentage_basis) const
+{
+    auto result = m_expression->resolve(nullptr, percentage_basis);
+
+    return result.value().visit(
+        [&](Frequency const& frequency) -> Optional<FrequencyPercentage> {
+            return frequency;
+        },
+        [&](Percentage const& percentage) -> Optional<FrequencyPercentage> {
+            return percentage;
+        },
+        [&](auto const&) -> Optional<FrequencyPercentage> {
+            return {};
+        });
+}
+
+Optional<Length> CalculatedStyleValue::resolve_length(Layout::Node const& layout_node) const
+{
+    auto result = m_expression->resolve(&layout_node, {});
+
+    if (result.value().has<Length>())
+        return result.value().get<Length>();
+    return {};
+}
+
 Optional<LengthPercentage> CalculatedStyleValue::resolve_length_percentage(Layout::Node const& layout_node, Length const& percentage_basis) const
 {
-    VERIFY(!percentage_basis.is_undefined());
     auto result = m_expression->resolve(&layout_node, percentage_basis);
 
     return result.value().visit(
-        [&](Number) -> Optional<LengthPercentage> {
-            return {};
-        },
         [&](Length const& length) -> Optional<LengthPercentage> {
             return length;
         },
         [&](Percentage const& percentage) -> Optional<LengthPercentage> {
             return percentage;
+        },
+        [&](auto const&) -> Optional<LengthPercentage> {
+            return {};
         });
 }
 
@@ -517,6 +664,31 @@ Optional<Percentage> CalculatedStyleValue::resolve_percentage() const
     if (result.value().has<Percentage>())
         return result.value().get<Percentage>();
     return {};
+}
+
+Optional<Time> CalculatedStyleValue::resolve_time() const
+{
+    auto result = m_expression->resolve(nullptr, {});
+
+    if (result.value().has<Time>())
+        return result.value().get<Time>();
+    return {};
+}
+
+Optional<TimePercentage> CalculatedStyleValue::resolve_time_percentage(Time const& percentage_basis) const
+{
+    auto result = m_expression->resolve(nullptr, percentage_basis);
+
+    return result.value().visit(
+        [&](Time const& time) -> Optional<TimePercentage> {
+            return time;
+        },
+        [&](Percentage const& percentage) -> Optional<TimePercentage> {
+            return percentage;
+        },
+        [&](auto const&) -> Optional<TimePercentage> {
+            return {};
+        });
 }
 
 Optional<float> CalculatedStyleValue::resolve_number()
@@ -694,8 +866,11 @@ Optional<CalculatedStyleValue::ResolvedType> CalculatedStyleValue::CalcValue::re
         [](Number const& number) -> Optional<CalculatedStyleValue::ResolvedType> {
             return { number.is_integer ? ResolvedType::Integer : ResolvedType::Number };
         },
+        [](Angle const&) -> Optional<CalculatedStyleValue::ResolvedType> { return { ResolvedType::Angle }; },
+        [](Frequency const&) -> Optional<CalculatedStyleValue::ResolvedType> { return { ResolvedType::Frequency }; },
         [](Length const&) -> Optional<CalculatedStyleValue::ResolvedType> { return { ResolvedType::Length }; },
         [](Percentage const&) -> Optional<CalculatedStyleValue::ResolvedType> { return { ResolvedType::Percentage }; },
+        [](Time const&) -> Optional<CalculatedStyleValue::ResolvedType> { return { ResolvedType::Time }; },
         [](NonnullOwnPtr<CalcSum> const& sum) { return sum->resolved_type(); });
 }
 
@@ -708,7 +883,7 @@ Optional<CalculatedStyleValue::ResolvedType> CalculatedStyleValue::CalcNumberVal
         [](NonnullOwnPtr<CalcNumberSum> const& sum) { return sum->resolved_type(); });
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberValue::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberValue::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value.visit(
         [&](Number const& number) -> CalculatedStyleValue::CalculationResult {
@@ -719,24 +894,18 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberValue::r
         });
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcValue::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcValue::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value.visit(
-        [&](Number const& number) -> CalculatedStyleValue::CalculationResult {
-            return CalculatedStyleValue::CalculationResult { number };
-        },
-        [&](Length const& length) -> CalculatedStyleValue::CalculationResult {
-            return CalculatedStyleValue::CalculationResult { length };
-        },
-        [&](Percentage const& percentage) -> CalculatedStyleValue::CalculationResult {
-            return CalculatedStyleValue::CalculationResult { percentage };
-        },
         [&](NonnullOwnPtr<CalcSum> const& sum) -> CalculatedStyleValue::CalculationResult {
             return sum->resolve(layout_node, percentage_basis);
+        },
+        [&](auto const& v) -> CalculatedStyleValue::CalculationResult {
+            return CalculatedStyleValue::CalculationResult { v };
         });
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcSum::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcSum::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     auto value = first_calc_product->resolve(layout_node, percentage_basis);
 
@@ -754,7 +923,7 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcSum::resolve(L
     return value;
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberSum::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberSum::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     auto value = first_calc_number_product->resolve(layout_node, percentage_basis);
 
@@ -772,7 +941,7 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberSum::res
     return value;
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProduct::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProduct::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     auto value = first_calc_value.resolve(layout_node, percentage_basis);
 
@@ -795,7 +964,7 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProduct::resol
     return value;
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberProduct::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberProduct::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     auto value = first_calc_number_value.resolve(layout_node, percentage_basis);
 
@@ -813,7 +982,7 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberProduct:
     return value;
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProductPartWithOperator::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProductPartWithOperator::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value.visit(
         [&](CalcValue const& calc_value) {
@@ -824,17 +993,17 @@ CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcProductPartWit
         });
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcSumPartWithOperator::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcSumPartWithOperator::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value->resolve(layout_node, percentage_basis);
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberProductPartWithOperator::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberProductPartWithOperator::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value.resolve(layout_node, percentage_basis);
 }
 
-CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberSumPartWithOperator::resolve(Layout::Node const* layout_node, Length const& percentage_basis) const
+CalculatedStyleValue::CalculationResult CalculatedStyleValue::CalcNumberSumPartWithOperator::resolve(Layout::Node const* layout_node, PercentageBasis const& percentage_basis) const
 {
     return value->resolve(layout_node, percentage_basis);
 }
@@ -850,6 +1019,13 @@ String ColorStyleValue::to_string() const
 String CombinedBorderRadiusStyleValue::to_string() const
 {
     return String::formatted("{} {} {} {} / {} {} {} {}", m_top_left->horizontal_radius().to_string(), m_top_right->horizontal_radius().to_string(), m_bottom_right->horizontal_radius().to_string(), m_bottom_left->horizontal_radius().to_string(), m_top_left->vertical_radius().to_string(), m_top_right->vertical_radius().to_string(), m_bottom_right->vertical_radius().to_string(), m_bottom_left->vertical_radius().to_string());
+}
+
+String ContentStyleValue::to_string() const
+{
+    if (has_alt_text())
+        return String::formatted("{} / {}", m_content->to_string(), m_alt_text->to_string());
+    return m_content->to_string();
 }
 
 String FlexStyleValue::to_string() const
@@ -1188,6 +1364,90 @@ String StyleValueList::to_string() const
     }
 
     return String::join(separator, m_values);
+}
+
+NonnullRefPtr<ColorStyleValue> ColorStyleValue::create(Color color)
+{
+    if (color.value() == 0) {
+        static auto transparent = adopt_ref(*new ColorStyleValue(color));
+        return transparent;
+    }
+
+    if (color == Color::from_rgb(0x000000)) {
+        static auto black = adopt_ref(*new ColorStyleValue(color));
+        return black;
+    }
+
+    if (color == Color::from_rgb(0xffffff)) {
+        static auto white = adopt_ref(*new ColorStyleValue(color));
+        return white;
+    }
+
+    return adopt_ref(*new ColorStyleValue(color));
+}
+
+NonnullRefPtr<LengthStyleValue> LengthStyleValue::create(Length const& length)
+{
+    if (length.is_auto()) {
+        static auto value = adopt_ref(*new LengthStyleValue(CSS::Length::make_auto()));
+        return value;
+    }
+    if (length.is_px()) {
+        if (length.raw_value() == 0) {
+            static auto value = adopt_ref(*new LengthStyleValue(CSS::Length::make_px(0)));
+            return value;
+        }
+        if (length.raw_value() == 1) {
+            static auto value = adopt_ref(*new LengthStyleValue(CSS::Length::make_px(1)));
+            return value;
+        }
+    }
+    return adopt_ref(*new LengthStyleValue(length));
+}
+
+static Optional<CSS::Length> absolutized_length(CSS::Length const& length, Gfx::IntRect const& viewport_rect, Gfx::FontMetrics const& font_metrics, float font_size, float root_font_size)
+{
+    if (length.is_px())
+        return {};
+    if (length.is_absolute() || length.is_relative()) {
+        auto px = length.to_px(viewport_rect, font_metrics, font_size, root_font_size);
+        return CSS::Length::make_px(px);
+    }
+    return {};
+}
+
+NonnullRefPtr<StyleValue> StyleValue::absolutized(Gfx::IntRect const&, Gfx::FontMetrics const&, float, float) const
+{
+    return *this;
+}
+
+NonnullRefPtr<StyleValue> LengthStyleValue::absolutized(Gfx::IntRect const& viewport_rect, Gfx::FontMetrics const& font_metrics, float font_size, float root_font_size) const
+{
+    if (auto length = absolutized_length(m_length, viewport_rect, font_metrics, font_size, root_font_size); length.has_value())
+        return LengthStyleValue::create(length.release_value());
+    return *this;
+}
+
+NonnullRefPtr<StyleValue> BoxShadowStyleValue::absolutized(Gfx::IntRect const& viewport_rect, Gfx::FontMetrics const& font_metrics, float font_size, float root_font_size) const
+{
+    auto absolutized_offset_x = absolutized_length(m_offset_x, viewport_rect, font_metrics, font_size, root_font_size).value_or(m_offset_x);
+    auto absolutized_offset_y = absolutized_length(m_offset_y, viewport_rect, font_metrics, font_size, root_font_size).value_or(m_offset_y);
+    auto absolutized_blur_radius = absolutized_length(m_blur_radius, viewport_rect, font_metrics, font_size, root_font_size).value_or(m_blur_radius);
+    auto absolutized_spread_distance = absolutized_length(m_spread_distance, viewport_rect, font_metrics, font_size, root_font_size).value_or(m_spread_distance);
+    return BoxShadowStyleValue::create(m_color, absolutized_offset_x, absolutized_offset_y, absolutized_blur_radius, absolutized_spread_distance, m_placement);
+}
+
+NonnullRefPtr<StyleValue> BorderRadiusStyleValue::absolutized(Gfx::IntRect const& viewport_rect, Gfx::FontMetrics const& font_metrics, float font_size, float root_font_size) const
+{
+    if (m_horizontal_radius.is_percentage() && m_vertical_radius.is_percentage())
+        return *this;
+    auto absolutized_horizontal_radius = m_horizontal_radius;
+    auto absolutized_vertical_radius = m_vertical_radius;
+    if (!m_horizontal_radius.is_percentage())
+        absolutized_horizontal_radius = absolutized_length(m_horizontal_radius.length(), viewport_rect, font_metrics, font_size, root_font_size).value_or(m_horizontal_radius.length());
+    if (!m_vertical_radius.is_percentage())
+        absolutized_vertical_radius = absolutized_length(m_vertical_radius.length(), viewport_rect, font_metrics, font_size, root_font_size).value_or(m_vertical_radius.length());
+    return BorderRadiusStyleValue::create(absolutized_horizontal_radius, absolutized_vertical_radius);
 }
 
 }

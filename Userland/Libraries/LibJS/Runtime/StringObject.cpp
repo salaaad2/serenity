@@ -44,28 +44,25 @@ void StringObject::visit_edges(Cell::Visitor& visitor)
 }
 
 // 10.4.3.5 StringGetOwnProperty ( S, P ), https://tc39.es/ecma262/#sec-stringgetownproperty
-static Optional<PropertyDescriptor> string_get_own_property(GlobalObject& global_object, StringObject const& string, PropertyKey const& property_name)
+static Optional<PropertyDescriptor> string_get_own_property(StringObject const& string, PropertyKey const& property_key)
 {
     // 1. Assert: S is an Object that has a [[StringData]] internal slot.
     // 2. Assert: IsPropertyKey(P) is true.
-    VERIFY(property_name.is_valid());
+    VERIFY(property_key.is_valid());
 
     // 3. If Type(P) is not String, return undefined.
     // NOTE: The spec only uses string and symbol keys, and later coerces to numbers -
-    // this is not the case for PropertyKey, so '!property_name.is_string()' would be wrong.
-    if (property_name.is_symbol())
+    // this is not the case for PropertyKey, so '!property_key.is_string()' would be wrong.
+    if (property_key.is_symbol())
         return {};
 
     // 4. Let index be ! CanonicalNumericIndexString(P).
-    auto index = canonical_numeric_index_string(global_object, property_name);
+    auto index = canonical_numeric_index_string(property_key, CanonicalIndexMode::IgnoreNumericRoundtrip);
+
     // 5. If index is undefined, return undefined.
-    if (index.is_undefined())
-        return {};
     // 6. If IsIntegralNumber(index) is false, return undefined.
-    if (!index.is_integral_number())
-        return {};
     // 7. If index is -0𝔽, return undefined.
-    if (index.is_negative_zero())
+    if (!index.is_index())
         return {};
 
     // 8. Let str be S.[[StringData]].
@@ -76,11 +73,11 @@ static Optional<PropertyDescriptor> string_get_own_property(GlobalObject& global
     auto length = str.length_in_code_units();
 
     // 11. If ℝ(index) < 0 or len ≤ ℝ(index), return undefined.
-    if (index.as_double() < 0 || length <= index.as_double())
+    if (length <= index.as_index())
         return {};
 
     // 12. Let resultStr be the String value of length 1, containing one code unit from str, specifically the code unit at index ℝ(index).
-    auto result_str = js_string(string.vm(), str.substring_view(index.as_double(), 1));
+    auto result_str = js_string(string.vm(), str.substring_view(index.as_index(), 1));
 
     // 13. Return the PropertyDescriptor { [[Value]]: resultStr, [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }.
     return PropertyDescriptor {
@@ -92,29 +89,29 @@ static Optional<PropertyDescriptor> string_get_own_property(GlobalObject& global
 }
 
 // 10.4.3.1 [[GetOwnProperty]] ( P ), https://tc39.es/ecma262/#sec-string-exotic-objects-getownproperty-p
-ThrowCompletionOr<Optional<PropertyDescriptor>> StringObject::internal_get_own_property(PropertyKey const& property_name) const
+ThrowCompletionOr<Optional<PropertyDescriptor>> StringObject::internal_get_own_property(PropertyKey const& property_key) const
 {
     // Assert: IsPropertyKey(P) is true.
 
     // 2. Let desc be OrdinaryGetOwnProperty(S, P).
-    auto descriptor = MUST(Object::internal_get_own_property(property_name));
+    auto descriptor = MUST(Object::internal_get_own_property(property_key));
 
     // 3. If desc is not undefined, return desc.
     if (descriptor.has_value())
         return descriptor;
 
     // 4. Return ! StringGetOwnProperty(S, P).
-    return string_get_own_property(global_object(), *this, property_name);
+    return string_get_own_property(*this, property_key);
 }
 
 // 10.4.3.2 [[DefineOwnProperty]] ( P, Desc ), https://tc39.es/ecma262/#sec-string-exotic-objects-defineownproperty-p-desc
-ThrowCompletionOr<bool> StringObject::internal_define_own_property(PropertyKey const& property_name, PropertyDescriptor const& property_descriptor)
+ThrowCompletionOr<bool> StringObject::internal_define_own_property(PropertyKey const& property_key, PropertyDescriptor const& property_descriptor)
 {
     // 1. Assert: IsPropertyKey(P) is true.
-    VERIFY(property_name.is_valid());
+    VERIFY(property_key.is_valid());
 
     // 2. Let stringDesc be ! StringGetOwnProperty(S, P).
-    auto string_descriptor = string_get_own_property(global_object(), *this, property_name);
+    auto string_descriptor = string_get_own_property(*this, property_key);
 
     // 3. If stringDesc is not undefined, then
     if (string_descriptor.has_value()) {
@@ -126,16 +123,16 @@ ThrowCompletionOr<bool> StringObject::internal_define_own_property(PropertyKey c
     }
 
     // 4. Return ! OrdinaryDefineOwnProperty(S, P, Desc).
-    return Object::internal_define_own_property(property_name, property_descriptor);
+    return Object::internal_define_own_property(property_key, property_descriptor);
 }
 
 // 10.4.3.3 [[OwnPropertyKeys]] ( ), https://tc39.es/ecma262/#sec-string-exotic-objects-ownpropertykeys
-ThrowCompletionOr<MarkedValueList> StringObject::internal_own_property_keys() const
+ThrowCompletionOr<MarkedVector<Value>> StringObject::internal_own_property_keys() const
 {
     auto& vm = this->vm();
 
     // 1. Let keys be a new empty List.
-    auto keys = MarkedValueList { heap() };
+    auto keys = MarkedVector<Value> { heap() };
 
     // 2. Let str be O.[[StringData]].
     auto str = m_string.utf16_string_view();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2021-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,7 @@
 #include <AK/LexicalPath.h>
 #include <AK/Queue.h>
 #include <AK/QuickSort.h>
+#include <AK/StringView.h>
 #include <AK/URL.h>
 #include <Applications/SpaceAnalyzer/SpaceAnalyzerGML.h>
 #include <LibCore/DirIterator.h>
@@ -24,11 +25,12 @@
 #include <LibGUI/Menubar.h>
 #include <LibGUI/MessageBox.h>
 #include <LibGUI/Statusbar.h>
+#include <LibMain/Main.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-static const char* APP_NAME = "Space Analyzer";
+static constexpr StringView APP_NAME = "Space Analyzer";
 static constexpr size_t FILES_ENCOUNTERED_UPDATE_STEP_SIZE = 25;
 
 struct TreeNode : public SpaceAnalyzer::TreeMapNode {
@@ -298,9 +300,9 @@ static String get_absolute_path_to_selected_node(const SpaceAnalyzer::TreeMapWid
     return path_builder.build();
 }
 
-int main(int argc, char* argv[])
+ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    auto app = GUI::Application::construct(argc, argv);
+    auto app = GUI::Application::construct(arguments);
 
     RefPtr<Tree> tree = adopt_ref(*new Tree(""));
 

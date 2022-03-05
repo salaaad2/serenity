@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -8,16 +8,21 @@
 #pragma once
 
 #include <AK/TypeCasts.h>
+#include <AK/Variant.h>
 #include <AK/Weakable.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/GlobalObject.h>
+#include <LibWeb/Bindings/CallbackType.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
 
 namespace Web {
 namespace Bindings {
 
-class WindowObject final
+// https://html.spec.whatwg.org/#timerhandler
+using TimerHandler = Variant<CallbackType, String>;
+
+class WindowObject
     : public JS::GlobalObject
     , public Weakable<WindowObject> {
     JS_OBJECT(WindowObject, JS::GlobalObject);
@@ -93,6 +98,11 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(screen_y_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_left_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_top_getter);
+
+    JS_DECLARE_NATIVE_FUNCTION(post_message);
+
+    JS_DECLARE_NATIVE_FUNCTION(local_storage_getter);
+    JS_DECLARE_NATIVE_FUNCTION(origin_getter);
 
     JS_DECLARE_NATIVE_FUNCTION(alert);
     JS_DECLARE_NATIVE_FUNCTION(confirm);

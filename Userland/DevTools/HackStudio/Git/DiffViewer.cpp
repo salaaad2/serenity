@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Itamar S. <itamar8910@gmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,10 +16,6 @@
 #include <LibGfx/Palette.h>
 
 namespace HackStudio {
-
-DiffViewer::~DiffViewer()
-{
-}
 
 void DiffViewer::paint_event(GUI::PaintEvent& event)
 {
@@ -182,19 +179,19 @@ Vector<String> DiffViewer::split_to_lines(const String& text)
 
 Gfx::Color DiffViewer::red_background()
 {
-    static Gfx::Color color = Gfx::Color::from_rgba(0x88ff0000);
+    static Gfx::Color color = Gfx::Color::from_argb(0x88ff0000);
     return color;
 }
 
 Gfx::Color DiffViewer::green_background()
 {
-    static Gfx::Color color = Gfx::Color::from_rgba(0x8800ff00);
+    static Gfx::Color color = Gfx::Color::from_argb(0x8800ff00);
     return color;
 }
 
 Gfx::Color DiffViewer::gray_background()
 {
-    static Gfx::Color color = Gfx::Color::from_rgba(0x88888888);
+    static Gfx::Color color = Gfx::Color::from_argb(0x88888888);
     return color;
 }
 

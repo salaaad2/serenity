@@ -1,22 +1,15 @@
 /*
  * Copyright (c) 2019-2020, Sergey Bugaev <bugaevc@serenityos.org>
  * Copyright (c) 2021, Max Wipfli <mail@maxwipfli.ch>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "Keypad.h"
 #include "KeypadValue.h"
-#include <AK/Math.h>
+#include <AK/IntegralMath.h>
 #include <AK/StringBuilder.h>
-
-Keypad::Keypad()
-{
-}
-
-Keypad::~Keypad()
-{
-}
 
 void Keypad::type_digit(int digit)
 {
@@ -119,8 +112,8 @@ void Keypad::set_value(KeypadValue value)
     } else
         m_negative = false;
 
-    m_int_value = value.m_value / (u64)AK::pow(10.0, (double)value.m_decimal_places);
-    m_frac_value = value.m_value % (u64)AK::pow(10.0, (double)value.m_decimal_places);
+    m_int_value = value.m_value / AK::pow<u64>(10, value.m_decimal_places);
+    m_frac_value = value.m_value % AK::pow<u64>(10, value.m_decimal_places);
     m_frac_length = value.m_decimal_places;
 }
 

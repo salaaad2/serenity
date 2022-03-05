@@ -1,8 +1,6 @@
 @GUI::Widget {
     fill_with_background_color: true
-
-    layout: @GUI::VerticalBoxLayout {
-    }
+    layout: @GUI::VerticalBoxLayout {}
 
     @Solitaire::Game {
         name: "game"
@@ -12,6 +10,6 @@
 
     @GUI::Statusbar {
         name: "statusbar"
-        label_count: 3
+        segment_count: 3
     }
 }

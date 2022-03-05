@@ -14,8 +14,10 @@ class HTMLTableRowElement final : public HTMLElement {
 public:
     using WrapperType = Bindings::HTMLTableRowElementWrapper;
 
-    HTMLTableRowElement(DOM::Document&, QualifiedName);
+    HTMLTableRowElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLTableRowElement() override;
+
+    NonnullRefPtr<DOM::HTMLCollection> cells() const;
 };
 
 }

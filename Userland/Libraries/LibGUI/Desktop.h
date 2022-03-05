@@ -29,8 +29,9 @@ public:
 
     void set_wallpaper_mode(StringView mode);
 
-    String wallpaper() const;
-    bool set_wallpaper(StringView path, bool save_config = true);
+    String wallpaper_path() const;
+    RefPtr<Gfx::Bitmap> wallpaper_bitmap() const;
+    bool set_wallpaper(RefPtr<Gfx::Bitmap> wallpaper_bitmap, Optional<String> path);
 
     Gfx::IntRect rect() const { return m_bounding_rect; }
     const Vector<Gfx::IntRect, 4>& rects() const { return m_rects; }
@@ -41,7 +42,7 @@ public:
 
     int taskbar_height() const { return TaskbarWindow::taskbar_height(); }
 
-    void did_receive_screen_rects(Badge<WindowServerConnection>, const Vector<Gfx::IntRect, 4>&, size_t, unsigned, unsigned);
+    void did_receive_screen_rects(Badge<ConnectionToWindowServer>, const Vector<Gfx::IntRect, 4>&, size_t, unsigned, unsigned);
 
     template<typename F>
     void on_receive_screen_rects(F&& callback)
@@ -56,6 +57,7 @@ private:
     unsigned m_workspace_rows { 1 };
     unsigned m_workspace_columns { 1 };
     Vector<Function<void(Desktop&)>> m_receive_rects_callbacks;
+    bool m_is_setting_desktop_wallpaper { false };
 };
 
 }

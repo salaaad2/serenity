@@ -22,7 +22,9 @@ public:
     ~StringBuilder() = default;
 
     ErrorOr<void> try_append(StringView);
+#ifndef KERNEL
     ErrorOr<void> try_append(Utf16View const&);
+#endif
     ErrorOr<void> try_append(Utf32View const&);
     ErrorOr<void> try_append_code_point(u32);
     ErrorOr<void> try_append(char);
@@ -33,9 +35,12 @@ public:
         return vformat(*this, fmtstr.view(), variadic_format_params);
     }
     ErrorOr<void> try_append(char const*, size_t);
+    ErrorOr<void> try_append_escaped_for_json(StringView);
 
     void append(StringView);
+#ifndef KERNEL
     void append(Utf16View const&);
+#endif
     void append(Utf32View const&);
     void append(char);
     void append_code_point(u32);
@@ -52,8 +57,10 @@ public:
         MUST(vformat(*this, fmtstr.view(), variadic_format_params));
     }
 
+#ifndef KERNEL
     [[nodiscard]] String build() const;
     [[nodiscard]] String to_string() const;
+#endif
     [[nodiscard]] ByteBuffer to_byte_buffer() const;
 
     [[nodiscard]] StringView string_view() const;
@@ -64,7 +71,7 @@ public:
     void trim(size_t count) { m_buffer.resize(m_buffer.size() - count); }
 
     template<class SeparatorType, class CollectionType>
-    void join(SeparatorType const& separator, CollectionType const& collection)
+    void join(SeparatorType const& separator, CollectionType const& collection, StringView fmtstr = "{}"sv)
     {
         bool first = true;
         for (auto& item : collection) {
@@ -72,7 +79,7 @@ public:
                 first = false;
             else
                 append(separator);
-            appendff("{}", item);
+            appendff(fmtstr, item);
         }
     }
 

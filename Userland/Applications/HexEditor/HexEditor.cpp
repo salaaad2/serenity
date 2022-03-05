@@ -1,11 +1,13 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Mustafa Quraish <mustafa@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "HexEditor.h"
+#include "AK/Format.h"
 #include "SearchResultsModel.h"
 #include <AK/Debug.h>
 #include <AK/ScopeGuard.h>
@@ -44,10 +46,6 @@ HexEditor::HexEditor()
         update();
     };
     m_blink_timer->start();
-}
-
-HexEditor::~HexEditor()
-{
 }
 
 void HexEditor::set_readonly(bool readonly)
@@ -157,7 +155,7 @@ bool HexEditor::copy_selected_hex_to_clipboard()
         return false;
 
     StringBuilder output_string_builder;
-    for (size_t i = m_selection_start; i <= m_selection_end; i++)
+    for (size_t i = m_selection_start; i < m_selection_end; i++)
         output_string_builder.appendff("{:02X} ", m_document->get(i).value);
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
@@ -170,7 +168,7 @@ bool HexEditor::copy_selected_text_to_clipboard()
         return false;
 
     StringBuilder output_string_builder;
-    for (size_t i = m_selection_start; i <= m_selection_end; i++)
+    for (size_t i = m_selection_start; i < m_selection_end; i++)
         output_string_builder.append(isprint(m_document->get(i).value) ? m_document->get(i).value : '.');
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
@@ -183,9 +181,9 @@ bool HexEditor::copy_selected_hex_to_clipboard_as_c_code()
         return false;
 
     StringBuilder output_string_builder;
-    output_string_builder.appendff("unsigned char raw_data[{}] = {{\n", (m_selection_end - m_selection_start) + 1);
+    output_string_builder.appendff("unsigned char raw_data[{}] = {{\n", m_selection_end - m_selection_start);
     output_string_builder.append("    ");
-    for (size_t i = m_selection_start, j = 1; i <= m_selection_end; i++, j++) {
+    for (size_t i = m_selection_start, j = 1; i < m_selection_end; i++, j++) {
         output_string_builder.appendff("{:#02X}", m_document->get(i).value);
         if (i != m_selection_end)
             output_string_builder.append(", ");
@@ -380,67 +378,72 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
 {
     dbgln_if(HEX_DEBUG, "HexEditor::keydown_event key={}", static_cast<u8>(event.key()));
 
+    auto update_cursor_on_change = [&]() {
+        m_selection_start = m_selection_end = m_position;
+        m_cursor_at_low_nibble = false;
+        reset_cursor_blink_state();
+        scroll_position_into_view(m_position);
+        update();
+        update_status();
+    };
+
+    auto advance_cursor_backwards = [this, update_cursor_on_change](size_t cursor_location_change) -> void {
+        m_position -= cursor_location_change;
+        update_cursor_on_change();
+    };
+
+    auto advance_cursor_forward = [this, update_cursor_on_change](size_t cursor_location_change) -> void {
+        m_position += cursor_location_change;
+        update_cursor_on_change();
+    };
+
     if (event.key() == KeyCode::Key_Up) {
         if (m_position >= bytes_per_row()) {
-            m_position -= bytes_per_row();
-            m_selection_start = m_selection_end = m_position;
-            m_cursor_at_low_nibble = false;
-            reset_cursor_blink_state();
-            scroll_position_into_view(m_position);
-            update();
-            update_status();
+            advance_cursor_backwards(bytes_per_row());
         }
         return;
     }
 
     if (event.key() == KeyCode::Key_Down) {
         if (m_position + bytes_per_row() < m_document->size()) {
-            m_position += bytes_per_row();
-            m_selection_start = m_selection_end = m_position;
-            m_cursor_at_low_nibble = false;
-            reset_cursor_blink_state();
-            scroll_position_into_view(m_position);
-            update();
-            update_status();
+            advance_cursor_forward(bytes_per_row());
         }
         return;
     }
 
     if (event.key() == KeyCode::Key_Left) {
         if (m_position >= 1) {
-            m_position--;
-            m_selection_start = m_selection_end = m_position;
-            m_cursor_at_low_nibble = false;
-            reset_cursor_blink_state();
-            scroll_position_into_view(m_position);
-            update();
-            update_status();
+            advance_cursor_backwards(1);
         }
         return;
     }
 
     if (event.key() == KeyCode::Key_Right) {
         if (m_position + 1 < m_document->size()) {
-            m_position++;
-            m_selection_start = m_selection_end = m_position;
-            m_cursor_at_low_nibble = false;
-            reset_cursor_blink_state();
-            scroll_position_into_view(m_position);
-            update();
-            update_status();
+            advance_cursor_forward(1);
         }
         return;
     }
 
     if (event.key() == KeyCode::Key_Backspace) {
         if (m_position > 0) {
-            m_position--;
-            m_selection_start = m_selection_end = m_position;
-            m_cursor_at_low_nibble = false;
-            reset_cursor_blink_state();
-            scroll_position_into_view(m_position);
-            update();
-            update_status();
+            advance_cursor_backwards(1);
+        }
+        return;
+    }
+
+    if (event.key() == KeyCode::Key_PageUp) {
+        auto cursor_location_change = min(bytes_per_row() * visible_content_rect().height(), m_position);
+        if (cursor_location_change > 0) {
+            advance_cursor_backwards(cursor_location_change);
+        }
+        return;
+    }
+
+    if (event.key() == KeyCode::Key_PageDown) {
+        auto cursor_location_change = min(bytes_per_row() * visible_content_rect().height(), m_document->size() - m_position);
+        if (cursor_location_change > 0) {
+            advance_cursor_forward(cursor_location_change);
         }
         return;
     }

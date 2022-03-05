@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Cesar Torres <shortanemoia@protonmail.com>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -46,7 +47,7 @@ void BarsVisualizationWidget::paint_event(GUI::PaintEvent& event)
         groups[i / bins_per_group] += AK::fabs(m_sample_buffer.data()[i].real());
     }
     for (int i = 0; i < group_count; i++)
-        groups[i] /= max * freq_bin / (m_adjust_frequencies ? (clamp(AK::pow(AK::E<double>, (double)i / group_count * 3.) - 1.75, 1., 15.)) : 1.);
+        groups[i] /= max * freq_bin / (m_adjust_frequencies ? (clamp(AK::exp((double)i / group_count * 3.) - 1.75, 1., 15.)) : 1.);
 
     const int horizontal_margin = 30;
     const int top_vertical_margin = 15;
@@ -63,10 +64,6 @@ void BarsVisualizationWidget::paint_event(GUI::PaintEvent& event)
     }
 
     m_is_using_last = false;
-}
-
-BarsVisualizationWidget::~BarsVisualizationWidget()
-{
 }
 
 BarsVisualizationWidget::BarsVisualizationWidget()
@@ -98,8 +95,10 @@ void BarsVisualizationWidget::set_buffer(RefPtr<Audio::Buffer> buffer, int sampl
     m_is_using_last = true;
     // FIXME: We should dynamically adapt to the sample count and e.g. perform the fft over multiple buffers.
     // For now, the visualizer doesn't work with extremely low global sample rates.
-    if (buffer->sample_count() < 256)
+    if (buffer->sample_count() < 256) {
+        m_is_using_last = false;
         return;
+    }
     m_sample_count = round_previous_power_of_2(samples_to_use);
     m_sample_buffer.resize(m_sample_count);
     for (int i = 0; i < m_sample_count; i++) {

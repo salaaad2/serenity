@@ -12,6 +12,7 @@
 #include "Layer.h"
 #include "Tools/MoveTool.h"
 #include "Tools/Tool.h"
+#include <AK/IntegralMath.h>
 #include <AK/LexicalPath.h>
 #include <LibConfig/Client.h>
 #include <LibFileSystemAccessClient/Client.h>
@@ -218,14 +219,15 @@ int ImageEditor::calculate_ruler_step_size() const
     const auto step_target = 80 / scale();
     const auto max_factor = 5;
     for (int factor = 0; factor < max_factor; ++factor) {
-        if (step_target <= 1 * (float)pow(10, factor))
-            return 1 * pow(10, factor);
-        if (step_target <= 2 * (float)pow(10, factor))
-            return 2 * pow(10, factor);
-        if (step_target <= 5 * (float)pow(10, factor))
-            return 5 * pow(10, factor);
+        int ten_to_factor = AK::pow<int>(10, factor);
+        if (step_target <= 1 * ten_to_factor)
+            return 1 * ten_to_factor;
+        if (step_target <= 2 * ten_to_factor)
+            return 2 * ten_to_factor;
+        if (step_target <= 5 * ten_to_factor)
+            return 5 * ten_to_factor;
     }
-    return 1 * pow(10, max_factor);
+    return AK::pow<int>(10, max_factor);
 }
 
 Gfx::IntRect ImageEditor::mouse_indicator_rect_x() const
@@ -527,28 +529,7 @@ void ImageEditor::fit_image_to_view(FitType type)
         };
     }
 
-    const float border_ratio = 0.95f;
-    auto image_size = image().size();
-    auto height_ratio = floorf(border_ratio * viewport_rect.height()) / (float)image_size.height();
-    auto width_ratio = floorf(border_ratio * viewport_rect.width()) / (float)image_size.width();
-
-    float new_scale = 1.0f;
-    switch (type) {
-    case FitType::Width:
-        new_scale = width_ratio;
-        break;
-    case FitType::Height:
-        new_scale = height_ratio;
-        break;
-    case FitType::Image:
-        new_scale = min(height_ratio, width_ratio);
-        break;
-    }
-
-    float offset = m_show_rulers ? -m_ruler_thickness / (scale() * 2.0f) : 0.0f;
-
-    set_origin(Gfx::FloatPoint(offset, offset));
-    set_scale(new_scale);
+    fit_content_to_rect(viewport_rect, type);
 }
 
 void ImageEditor::image_did_change(Gfx::IntRect const& modified_image_rect)
@@ -621,20 +602,20 @@ void ImageEditor::save_project_as()
 Result<void, String> ImageEditor::save_project_to_file(Core::File& file) const
 {
     StringBuilder builder;
-    JsonObjectSerializer json(builder);
+    auto json = MUST(JsonObjectSerializer<>::try_create(builder));
     m_image->serialize_as_json(json);
-    auto json_guides = json.add_array("guides");
+    auto json_guides = MUST(json.add_array("guides"));
     for (const auto& guide : m_guides) {
-        auto json_guide = json_guides.add_object();
-        json_guide.add("offset"sv, (double)guide.offset());
+        auto json_guide = MUST(json_guides.add_object());
+        MUST(json_guide.add("offset"sv, (double)guide.offset()));
         if (guide.orientation() == Guide::Orientation::Vertical)
-            json_guide.add("orientation", "vertical");
+            MUST(json_guide.add("orientation", "vertical"));
         else if (guide.orientation() == Guide::Orientation::Horizontal)
-            json_guide.add("orientation", "horizontal");
-        json_guide.finish();
+            MUST(json_guide.add("orientation", "horizontal"));
+        MUST(json_guide.finish());
     }
-    json_guides.finish();
-    json.finish();
+    MUST(json_guides.finish());
+    MUST(json.finish());
 
     if (!file.write(builder.string_view()))
         return String { file.error_string() };

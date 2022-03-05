@@ -7,12 +7,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/StdLibExtras.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/System.h>
 #include <LibSystem/syscall.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
@@ -22,6 +24,20 @@
 
 #ifdef __serenity__
 #    include <serenity.h>
+#endif
+
+#if defined(__linux__) && !defined(MFD_CLOEXEC)
+#    include <linux/memfd.h>
+#    include <sys/syscall.h>
+
+static int memfd_create(const char* name, unsigned int flags)
+{
+    return syscall(SYS_memfd_create, name, flags);
+}
+#endif
+
+#if defined(__APPLE__)
+#    include <sys/mman.h>
 #endif
 
 #define HANDLE_SYSCALL_RETURN_VALUE(syscall_name, rc, success_value) \
@@ -144,6 +160,24 @@ ErrorOr<void> disown(pid_t pid)
     int rc = ::disown(pid);
     HANDLE_SYSCALL_RETURN_VALUE("disown", rc, {});
 }
+
+ErrorOr<void> profiling_enable(pid_t pid, u64 event_mask)
+{
+    int rc = ::profiling_enable(pid, event_mask);
+    HANDLE_SYSCALL_RETURN_VALUE("profiling_enable", rc, {});
+}
+
+ErrorOr<void> profiling_disable(pid_t pid)
+{
+    int rc = ::profiling_disable(pid);
+    HANDLE_SYSCALL_RETURN_VALUE("profiling_disable", rc, {});
+}
+
+ErrorOr<void> profiling_free_buffer(pid_t pid)
+{
+    int rc = ::profiling_free_buffer(pid);
+    HANDLE_SYSCALL_RETURN_VALUE("profiling_free_buffer", rc, {});
+}
 #endif
 
 #ifndef AK_OS_BSD_GENERIC
@@ -188,7 +222,7 @@ ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigac
     return {};
 }
 
-#if defined(__APPLE__) || defined(__OpenBSD__)
+#if defined(__APPLE__) || defined(__OpenBSD__) || defined(__FreeBSD__)
 ErrorOr<sig_t> signal(int signal, sig_t handler)
 #else
 ErrorOr<sighandler_t> signal(int signal, sighandler_t handler)
@@ -243,6 +277,55 @@ ErrorOr<void> munmap(void* address, size_t size)
     if (::munmap(address, size) < 0)
         return Error::from_syscall("munmap"sv, -errno);
     return {};
+}
+
+ErrorOr<int> anon_create([[maybe_unused]] size_t size, [[maybe_unused]] int options)
+{
+    int fd = -1;
+#if defined(__serenity__)
+    fd = ::anon_create(round_up_to_power_of_two(size, PAGE_SIZE), options);
+#elif defined(__linux__)
+    // FIXME: Support more options on Linux.
+    auto linux_options = ((options & O_CLOEXEC) > 0) ? MFD_CLOEXEC : 0;
+    fd = memfd_create("", linux_options);
+    if (fd < 0)
+        return Error::from_errno(errno);
+    if (::ftruncate(fd, size) < 0) {
+        auto saved_errno = errno;
+        TRY(close(fd));
+        return Error::from_errno(saved_errno);
+    }
+#elif defined(__APPLE__)
+    struct timespec time;
+    clock_gettime(CLOCK_REALTIME, &time);
+    auto name = String::formatted("/shm-{}{}", (unsigned long)time.tv_sec, (unsigned long)time.tv_nsec);
+    fd = shm_open(name.characters(), O_RDWR | O_CREAT | options, 0600);
+
+    if (shm_unlink(name.characters()) == -1) {
+        auto saved_errno = errno;
+        TRY(close(fd));
+        return Error::from_errno(saved_errno);
+    }
+
+    if (fd < 0)
+        return Error::from_errno(errno);
+
+    if (::ftruncate(fd, size) < 0) {
+        auto saved_errno = errno;
+        TRY(close(fd));
+        return Error::from_errno(saved_errno);
+    }
+
+    void* addr = ::mmap(NULL, size, PROT_WRITE, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED) {
+        auto saved_errno = errno;
+        TRY(close(fd));
+        return Error::from_errno(saved_errno);
+    }
+#endif
+    if (fd < 0)
+        return Error::from_errno(errno);
+    return fd;
 }
 
 ErrorOr<int> open(StringView path, int options, ...)
@@ -340,6 +423,13 @@ ErrorOr<void> kill(pid_t pid, int signal)
     return {};
 }
 
+ErrorOr<void> killpg(int pgrp, int signal)
+{
+    if (::killpg(pgrp, signal) < 0)
+        return Error::from_syscall("killpg"sv, -errno);
+    return {};
+}
+
 ErrorOr<int> dup(int source_fd)
 {
     int fd = ::dup(source_fd);
@@ -418,6 +508,14 @@ ErrorOr<void> tcsetattr(int fd, int optional_actions, struct termios const& ios)
     return {};
 }
 
+ErrorOr<int> tcsetpgrp(int fd, pid_t pgrp)
+{
+    int rc = ::tcsetpgrp(fd, pgrp);
+    if (rc < 0)
+        return Error::from_syscall("tcsetpgrp"sv, -errno);
+    return { rc };
+}
+
 ErrorOr<void> chmod(StringView pathname, mode_t mode)
 {
     if (!pathname.characters_without_null_termination())
@@ -444,6 +542,13 @@ ErrorOr<void> fchmod(int fd, mode_t mode)
 {
     if (::fchmod(fd, mode) < 0)
         return Error::from_syscall("fchmod"sv, -errno);
+    return {};
+}
+
+ErrorOr<void> fchown(int fd, uid_t uid, gid_t gid)
+{
+    if (::fchown(fd, uid, gid) < 0)
+        return Error::from_syscall("fchown"sv, -errno);
     return {};
 }
 
@@ -673,6 +778,21 @@ ErrorOr<void> chdir(StringView path)
     String path_string = path;
     if (::chdir(path_string.characters()) < 0)
         return Error::from_syscall("chdir"sv, -errno);
+    return {};
+#endif
+}
+
+ErrorOr<void> rmdir(StringView path)
+{
+    if (path.is_null())
+        return Error::from_errno(EFAULT);
+#ifdef __serenity__
+    int rc = syscall(SC_rmdir, path.characters_without_null_termination(), path.length());
+    HANDLE_SYSCALL_RETURN_VALUE("rmdir"sv, rc, {});
+#else
+    String path_string = path;
+    if (::rmdir(path_string.characters()) < 0)
+        return Error::from_syscall("rmdir"sv, -errno);
     return {};
 #endif
 }
@@ -948,6 +1068,44 @@ ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev)
 ErrorOr<void> mkfifo(StringView pathname, mode_t mode)
 {
     return mknod(pathname, mode | S_IFIFO, 0);
+}
+
+ErrorOr<void> setenv(StringView name, StringView value, bool overwrite)
+{
+#ifdef __serenity__
+    auto const rc = ::serenity_setenv(name.characters_without_null_termination(), name.length(), value.characters_without_null_termination(), value.length(), overwrite);
+#else
+    String name_string = name;
+    String value_string = value;
+    auto const rc = ::setenv(name_string.characters(), value_string.characters(), overwrite);
+#endif
+    if (rc < 0)
+        return Error::from_syscall("setenv", -errno);
+    return {};
+}
+
+ErrorOr<int> posix_openpt(int flags)
+{
+    int const rc = ::posix_openpt(flags);
+    if (rc < 0)
+        return Error::from_syscall("posix_openpt", -errno);
+    return rc;
+}
+
+ErrorOr<void> grantpt(int fildes)
+{
+    auto const rc = ::grantpt(fildes);
+    if (rc < 0)
+        return Error::from_syscall("grantpt", -errno);
+    return {};
+}
+
+ErrorOr<void> unlockpt(int fildes)
+{
+    auto const rc = ::unlockpt(fildes);
+    if (rc < 0)
+        return Error::from_syscall("unlockpt", -errno);
+    return {};
 }
 
 }

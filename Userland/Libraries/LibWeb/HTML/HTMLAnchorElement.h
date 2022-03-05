@@ -17,12 +17,14 @@ class HTMLAnchorElement final
 public:
     using WrapperType = Bindings::HTMLAnchorElementWrapper;
 
-    HTMLAnchorElement(DOM::Document&, QualifiedName);
+    HTMLAnchorElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLAnchorElement() override;
 
     String target() const { return attribute(HTML::AttributeNames::target); }
 
     virtual bool is_focusable() const override { return has_attribute(HTML::AttributeNames::href); }
+
+    virtual bool is_html_anchor_element() const override { return true; }
 
 private:
     // ^DOM::Element
@@ -34,4 +36,9 @@ private:
     virtual void set_hyperlink_element_utils_href(String) override;
 };
 
+}
+
+namespace Web::DOM {
+template<>
+inline bool Node::fast_is<HTML::HTMLAnchorElement>() const { return is_html_anchor_element(); }
 }

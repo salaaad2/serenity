@@ -15,6 +15,7 @@
     M(BigIntFromNonIntegral, "Cannot convert non-integral number to BigInt")                                                            \
     M(BigIntInvalidValue, "Invalid value for BigInt: {}")                                                                               \
     M(BindingNotInitialized, "Binding {} is not initialized")                                                                           \
+    M(ByteLengthBeyondRequestedMax, "Byte length exceeds maxByteLength option")                                                         \
     M(CallStackSizeExceeded, "Call stack size limit exceeded")                                                                          \
     M(CannotDeclareGlobalFunction, "Cannot declare global function of name '{}'")                                                       \
     M(CannotDeclareGlobalVariable, "Cannot declare global variable of name '{}'")                                                       \
@@ -74,6 +75,7 @@
     M(ModuleNotFound, "Cannot find/open module: '{}'")                                                                                  \
     M(ModuleNotFoundNoReferencingScript, "Cannot resolve module {} without any active script or module")                                \
     M(NegativeExponent, "Exponent must be positive")                                                                                    \
+    M(NewByteLengthOutOfRange, "New byte length outside range supported by ArrayBuffer instance")                                       \
     M(NonExtensibleDefine, "Cannot define property {} on non-extensible object")                                                        \
     M(NotAConstructor, "{} is not a constructor")                                                                                       \
     M(NotAFunction, "{} is not a function")                                                                                             \
@@ -82,6 +84,7 @@
     M(NotAnObjectOfType, "Not an object of type {}")                                                                                    \
     M(NotAnObjectOrNull, "{} is neither an object nor null")                                                                            \
     M(NotAnObjectOrString, "{} is neither an object nor a string")                                                                      \
+    M(NotAResizableArrayBuffer, "ArrayBuffer instance not resizable")                                                                   \
     M(NotAString, "{} is not a string")                                                                                                 \
     M(NotASymbol, "{} is not a symbol")                                                                                                 \
     M(NotImplemented, "TODO({} is not implemented in LibJS)")                                                                           \
@@ -287,7 +290,8 @@
     M(BadArgCountOne, "{}() needs one argument")                                                                                        \
     M(BadArgCountAtLeastOne, "{}() needs at least one argument")                                                                        \
     M(BadArgCountMany, "{}() needs {} arguments")                                                                                       \
-    M(NotEnoughMemoryToAllocate, "Not enough memory to allocate {} bytes")
+    M(NotEnoughMemoryToAllocate, "Not enough memory to allocate {} bytes")                                                              \
+    M(InvalidEnumerationValue, "Invalid value '{}' for enumeration type '{}'")
 
 namespace JS {
 

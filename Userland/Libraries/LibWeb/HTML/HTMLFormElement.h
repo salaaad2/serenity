@@ -15,10 +15,10 @@ class HTMLFormElement final : public HTMLElement {
 public:
     using WrapperType = Bindings::HTMLFormElementWrapper;
 
-    HTMLFormElement(DOM::Document&, QualifiedName);
+    HTMLFormElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLFormElement() override;
 
-    String action() const { return attribute(HTML::AttributeNames::action); }
+    String action() const;
     String method() const { return attribute(HTML::AttributeNames::method); }
 
     void submit_form(RefPtr<HTMLElement> submitter, bool from_submit_binding = false);
@@ -28,6 +28,9 @@ public:
 
     void add_associated_element(Badge<FormAssociatedElement>, HTMLElement&);
     void remove_associated_element(Badge<FormAssociatedElement>, HTMLElement&);
+
+    NonnullRefPtr<DOM::HTMLCollection> elements() const;
+    unsigned length() const;
 
 private:
     bool m_firing_submission_events { false };

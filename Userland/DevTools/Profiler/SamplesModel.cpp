@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,10 +16,6 @@ SamplesModel::SamplesModel(Profile& profile)
 {
     m_user_frame_icon.set_bitmap_for_size(16, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/inspector-object.png").release_value_but_fixme_should_propagate_errors());
     m_kernel_frame_icon.set_bitmap_for_size(16, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/inspector-object-red.png").release_value_but_fixme_should_propagate_errors());
-}
-
-SamplesModel::~SamplesModel()
-{
 }
 
 int SamplesModel::row_count(GUI::ModelIndex const&) const
@@ -48,6 +45,8 @@ String SamplesModel::column_name(int column) const
         return "Lost Samples";
     case Column::InnermostStackFrame:
         return "Innermost Frame";
+    case Column::Path:
+        return "Path";
     default:
         VERIFY_NOT_REACHED();
     }
@@ -89,6 +88,13 @@ GUI::Variant SamplesModel::data(GUI::ModelIndex const& index, GUI::ModelRole rol
         if (index.column() == Column::InnermostStackFrame) {
             return event.frames.last().symbol;
         }
+
+        if (index.column() == Column::Path) {
+            if (!event.data.has<Profile::Event::ReadData>())
+                return "";
+            return event.data.get<Profile::Event::ReadData>().path;
+        }
+
         return {};
     }
     return {};

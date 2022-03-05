@@ -2,6 +2,7 @@
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Jakob-Niklas See <git@nwex.de>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,6 +16,7 @@
 #include "Tab.h"
 #include <Applications/Browser/BrowserWindowGML.h>
 #include <LibConfig/Client.h>
+#include <LibCore/Process.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/Stream.h>
 #include <LibGUI/AboutDialog.h>
@@ -101,7 +103,7 @@ BrowserWindow::BrowserWindow(CookieJar& cookie_jar, URL url)
     };
 
     m_window_actions.on_create_new_tab = [this] {
-        create_new_tab(Browser::g_home_url, true);
+        create_new_tab(Browser::url_from_user_input(Browser::g_home_url), true);
     };
 
     m_window_actions.on_next_tab = [this] {
@@ -129,10 +131,6 @@ BrowserWindow::BrowserWindow(CookieJar& cookie_jar, URL url)
     build_menus();
 
     create_new_tab(move(url), true);
-}
-
-BrowserWindow::~BrowserWindow()
-{
 }
 
 void BrowserWindow::build_menus()
@@ -174,7 +172,7 @@ void BrowserWindow::build_menus()
 
     m_go_back_action = GUI::CommonActions::make_go_back_action([this](auto&) { active_tab().go_back(); }, this);
     m_go_forward_action = GUI::CommonActions::make_go_forward_action([this](auto&) { active_tab().go_forward(); }, this);
-    m_go_home_action = GUI::CommonActions::make_go_home_action([this](auto&) { active_tab().load(g_home_url); }, this);
+    m_go_home_action = GUI::CommonActions::make_go_home_action([this](auto&) { active_tab().load(Browser::url_from_user_input(g_home_url)); }, this);
     m_go_home_action->set_status_tip("Go to home page");
     m_reload_action = GUI::CommonActions::make_reload_action([this](auto&) { active_tab().reload(); }, this);
     m_reload_action->set_status_tip("Reload current page");
@@ -205,7 +203,7 @@ void BrowserWindow::build_menus()
     m_view_source_action->set_status_tip("View source code of the current page");
 
     m_inspect_dom_tree_action = GUI::Action::create(
-        "Inspect &DOM Tree", { Mod_None, Key_F12 }, g_icon_bag.tree, [this](auto&) {
+        "Inspect &DOM Tree", { Mod_None, Key_F12 }, g_icon_bag.dom_tree, [this](auto&) {
             active_tab().show_inspector_window(Tab::InspectorTarget::Document);
         },
         this);
@@ -230,10 +228,18 @@ void BrowserWindow::build_menus()
     js_console_action->set_status_tip("Open JavaScript console for this page");
     inspect_menu.add_action(js_console_action);
 
+    auto storage_window_action = GUI::Action::create(
+        "Open S&torage Inspector", g_icon_bag.cookie, [this](auto&) {
+            active_tab().show_storage_inspector();
+        },
+        this);
+    storage_window_action->set_status_tip("Show Storage inspector for this page");
+    inspect_menu.add_action(storage_window_action);
+
     auto& settings_menu = add_menu("&Settings");
 
     m_change_homepage_action = GUI::Action::create(
-        "Set Homepage URL...", [this](auto&) {
+        "Set Homepage URL...", g_icon_bag.go_home, [this](auto&) {
             auto homepage_url = Config::read_string("Browser", "Preferences", "Home", "about:blank");
             if (GUI::InputBox::show(this, homepage_url, "Enter URL", "Change homepage URL") == GUI::InputBox::ExecOK) {
                 if (URL(homepage_url).is_valid()) {
@@ -277,34 +283,44 @@ void BrowserWindow::build_menus()
         add_color_scheme_action("Dark", Web::CSS::PreferredColorScheme::Dark);
     }
 
+    settings_menu.add_separator();
+    auto open_settings_action = GUI::Action::create("&Settings...", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/settings.png").release_value_but_fixme_should_propagate_errors(),
+        [](auto&) {
+            Core::Process::spawn("/bin/BrowserSettings");
+        });
+    settings_menu.add_action(move(open_settings_action));
+
     auto& debug_menu = add_menu("&Debug");
     debug_menu.add_action(GUI::Action::create(
-        "Dump &DOM Tree", g_icon_bag.tree, [this](auto&) {
+        "Dump &DOM Tree", g_icon_bag.dom_tree, [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-dom-tree");
         },
         this));
     debug_menu.add_action(GUI::Action::create(
-        "Dump &Layout Tree", [this](auto&) {
+        "Dump &Layout Tree", g_icon_bag.layout, [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-layout-tree");
         },
         this));
     debug_menu.add_action(GUI::Action::create(
-        "Dump &Stacking Context Tree", [this](auto&) {
+        "Dump S&tacking Context Tree", g_icon_bag.layers, [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-stacking-context-tree");
         },
         this));
     debug_menu.add_action(GUI::Action::create(
-        "Dump &Style Sheets", [this](auto&) {
+        "Dump &Style Sheets", g_icon_bag.filetype_css, [this](auto&) {
             active_tab().m_web_content_view->debug_request("dump-style-sheets");
         },
         this));
-    debug_menu.add_action(GUI::Action::create("Dump &History", { Mod_Ctrl, Key_H }, [this](auto&) {
+    debug_menu.add_action(GUI::Action::create("Dump &History", { Mod_Ctrl, Key_H }, g_icon_bag.history, [this](auto&) {
         active_tab().m_history.dump();
     }));
     debug_menu.add_action(GUI::Action::create("Dump C&ookies", g_icon_bag.cookie, [this](auto&) {
         auto& tab = active_tab();
         if (tab.on_dump_cookies)
             tab.on_dump_cookies();
+    }));
+    debug_menu.add_action(GUI::Action::create("Dump Loc&al Storage", g_icon_bag.local_storage, [this](auto&) {
+        active_tab().m_web_content_view->debug_request("dump-local-storage");
     }));
     debug_menu.add_separator();
     auto line_box_borders_action = GUI::Action::create_checkable(
@@ -316,10 +332,10 @@ void BrowserWindow::build_menus()
     debug_menu.add_action(line_box_borders_action);
 
     debug_menu.add_separator();
-    debug_menu.add_action(GUI::Action::create("Collect &Garbage", { Mod_Ctrl | Mod_Shift, Key_G }, [this](auto&) {
+    debug_menu.add_action(GUI::Action::create("Collect &Garbage", { Mod_Ctrl | Mod_Shift, Key_G }, g_icon_bag.trash_can, [this](auto&) {
         active_tab().m_web_content_view->debug_request("collect-garbage");
     }));
-    debug_menu.add_action(GUI::Action::create("Clear &Cache", { Mod_Ctrl | Mod_Shift, Key_C }, [this](auto&) {
+    debug_menu.add_action(GUI::Action::create("Clear &Cache", { Mod_Ctrl | Mod_Shift, Key_C }, g_icon_bag.clear_cache, [this](auto&) {
         active_tab().m_web_content_view->debug_request("clear-cache");
     }));
 
@@ -330,6 +346,7 @@ void BrowserWindow::build_menus()
     });
     m_disable_user_agent_spoofing->set_status_tip(Web::default_user_agent);
     spoof_user_agent_menu.add_action(*m_disable_user_agent_spoofing);
+    spoof_user_agent_menu.set_icon(g_icon_bag.spoof);
     m_user_agent_spoof_actions.add_action(*m_disable_user_agent_spoofing);
     m_disable_user_agent_spoofing->set_checked(true);
 
@@ -362,7 +379,7 @@ void BrowserWindow::build_menus()
 
     debug_menu.add_separator();
     auto same_origin_policy_action = GUI::Action::create_checkable(
-        "Enable Same &Origin Policy", [this](auto& action) {
+        "Enable Same Origin &Policy", [this](auto& action) {
             active_tab().m_web_content_view->debug_request("same-origin-policy", action.is_checked() ? "on" : "off");
         },
         this);
@@ -517,12 +534,54 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         m_cookie_jar.dump_cookies();
     };
 
+    new_tab.on_want_cookies = [this]() {
+        return m_cookie_jar.get_all_cookies();
+    };
+
     new_tab.load(url);
 
     dbgln_if(SPAM_DEBUG, "Added new tab {:p}, loading {}", &new_tab, url);
 
     if (activate)
         m_tab_widget->set_active_widget(&new_tab);
+}
+
+void BrowserWindow::content_filters_changed()
+{
+    tab_widget().for_each_child_of_type<Browser::Tab>([](auto& tab) {
+        tab.content_filters_changed();
+        return IterationDecision::Continue;
+    });
+}
+
+void BrowserWindow::config_string_did_change(String const& domain, String const& group, String const& key, String const& value)
+{
+    if (domain != "Browser" || group != "Preferences")
+        return;
+
+    if (key == "SearchEngine")
+        Browser::g_search_engine = value;
+    else if (key == "Home")
+        Browser::g_home_url = value;
+
+    // TODO: ColorScheme
+}
+
+void BrowserWindow::config_bool_did_change(String const& domain, String const& group, String const& key, bool value)
+{
+    dbgln("{} {} {} {}", domain, group, key, value);
+    if (domain != "Browser" || group != "Preferences")
+        return;
+
+    if (key == "ShowBookmarksBar") {
+        m_window_actions.show_bookmarks_bar_action().set_checked(value);
+        Browser::BookmarksBarWidget::the().set_visible(value);
+    } else if (key == "EnableContentFilters") {
+        Browser::g_content_filters_enabled = value;
+        content_filters_changed();
+    }
+
+    // NOTE: CloseDownloadWidgetOnFinish is read each time in DownloadWindow
 }
 
 }

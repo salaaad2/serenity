@@ -3,7 +3,7 @@
 ### Fedora
 
 ```console
-sudo dnf install binutils-devel curl cmake mpfr-devel libmpc-devel gmp-devel e2fsprogs ninja-build patch ccache rsync @"C Development Tools and Libraries" @Virtualization
+sudo dnf install texinfo binutils-devel curl cmake mpfr-devel libmpc-devel gmp-devel e2fsprogs ninja-build patch ccache rsync @"C Development Tools and Libraries" @Virtualization
 ```
 
 ## openSUSE
@@ -75,6 +75,9 @@ First, make sure you have enabled the `community` repository in `/etc/apk/reposi
 # the basics, if you have not already done so
 apk add bash curl git util-linux sudo
 
+# GNU coreutils for GNU's version of `du`
+apk add coreutils
+
 # rough equivalent of build-essential
 apk add build-base
 
@@ -82,7 +85,7 @@ apk add build-base
 apk add qemu qemu-system-i386 qemu-img qemu-ui-gtk
 
 # build tools (samurai is a drop-in replacement for ninja)
-apk add cmake e2fsprogs grub-bios samurai mpc1-dev mpfr-dev gmp-dev ccache rsync
+apk add cmake e2fsprogs grub-bios samurai mpc1-dev mpfr-dev gmp-dev ccache rsync texinfo
 ```
 
 ## OpenBSD prerequisites
@@ -94,6 +97,6 @@ doas pkg_add bash cmake g++ gcc git gmake gmp ninja ccache rsync coreutils qemu 
 ## FreeBSD prerequisites
 
 ```console
-pkg install bash cmake coreutils e2fsprogs fusefs-ext2 gcc git gmake ninja sudo gmp mpc mpfr ccache rsync
+pkg install qemu bash cmake coreutils e2fsprogs fusefs-ext2 gcc11 git gmake ninja sudo gmp mpc mpfr ccache rsync
 ```
 

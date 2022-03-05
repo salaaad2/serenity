@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,8 +10,10 @@
 #include <AK/SourceLocation.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/HTML/Parser/Entities.h>
+#include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Parser/HTMLToken.h>
 #include <LibWeb/HTML/Parser/HTMLTokenizer.h>
+#include <LibWeb/Namespace.h>
 #include <string.h>
 
 namespace Web::HTML {
@@ -184,9 +187,25 @@ Optional<u32> HTMLTokenizer::next_code_point()
 {
     if (m_utf8_iterator == m_utf8_view.end())
         return {};
-    skip(1);
-    dbgln_if(TOKENIZER_TRACE_DEBUG, "(Tokenizer) Next code_point: {}", (char)*m_prev_utf8_iterator);
-    return *m_prev_utf8_iterator;
+
+    u32 code_point;
+    // https://html.spec.whatwg.org/multipage/parsing.html#preprocessing-the-input-stream:tokenization
+    // https://infra.spec.whatwg.org/#normalize-newlines
+    if (peek_code_point(0).value_or(0) == '\r' && peek_code_point(1).value_or(0) == '\n') {
+        // replace every U+000D CR U+000A LF code point pair with a single U+000A LF code point,
+        skip(2);
+        code_point = '\n';
+    } else if (peek_code_point(0).value_or(0) == '\r') {
+        // replace every remaining U+000D CR code point with a U+000A LF code point.
+        skip(1);
+        code_point = '\n';
+    } else {
+        skip(1);
+        code_point = *m_prev_utf8_iterator;
+    }
+
+    dbgln_if(TOKENIZER_TRACE_DEBUG, "(Tokenizer) Next code_point: {}", code_point);
+    return code_point;
 }
 
 void HTMLTokenizer::skip(size_t count)
@@ -228,7 +247,7 @@ Optional<HTMLToken> HTMLTokenizer::next_token()
 {
     {
         auto last_position = m_source_positions.last();
-        m_source_positions.clear();
+        m_source_positions.clear_with_capacity();
         m_source_positions.append(move(last_position));
     }
 _StartOfFunction:
@@ -238,6 +257,7 @@ _StartOfFunction:
     for (;;) {
         auto current_input_character = next_code_point();
         switch (m_state) {
+            // 13.2.5.1 Data state, https://html.spec.whatwg.org/multipage/parsing.html#data-state
             BEGIN_STATE(Data)
             {
                 ON('&')
@@ -265,6 +285,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.6 Tag open state, https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
             BEGIN_STATE(TagOpen)
             {
                 ON('!')
@@ -301,6 +322,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.8 Tag name state, https://html.spec.whatwg.org/multipage/parsing.html#tag-name-state
             BEGIN_STATE(TagName)
             {
                 ON_WHITESPACE
@@ -349,6 +371,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.7 End tag open state, https://html.spec.whatwg.org/multipage/parsing.html#end-tag-open-state
             BEGIN_STATE(EndTagOpen)
             {
                 ON_ASCII_ALPHA
@@ -377,19 +400,28 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.42 Markup declaration open state, https://html.spec.whatwg.org/multipage/parsing.html#markup-declaration-open-state
             BEGIN_STATE(MarkupDeclarationOpen)
             {
                 DONT_CONSUME_NEXT_INPUT_CHARACTER;
                 if (consume_next_if_match("--")) {
                     create_new_token(HTMLToken::Type::Comment);
-                    m_current_token.set_start_position({}, nth_last_position(4));
+                    m_current_token.set_start_position({}, nth_last_position(3));
                     SWITCH_TO(CommentStart);
                 }
                 if (consume_next_if_match("DOCTYPE", CaseSensitivity::CaseInsensitive)) {
                     SWITCH_TO(DOCTYPE);
                 }
                 if (consume_next_if_match("[CDATA[")) {
-                    TODO();
+                    // We keep the parser optional so that syntax highlighting can be lexer-only.
+                    // The parser registers itself with the lexer it creates.
+                    if (m_parser != nullptr && m_parser->adjusted_current_node().namespace_() != Namespace::HTML) {
+                        SWITCH_TO(CDATASection);
+                    } else {
+                        create_new_token(HTMLToken::Type::Comment);
+                        m_current_builder.append("[CDATA[");
+                        SWITCH_TO_WITH_UNCLEAN_BUILDER(BogusComment);
+                    }
                 }
                 ANYTHING_ELSE
                 {
@@ -400,6 +432,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.41 Bogus comment state, https://html.spec.whatwg.org/multipage/parsing.html#bogus-comment-state
             BEGIN_STATE(BogusComment)
             {
                 ON('>')
@@ -426,6 +459,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.53 DOCTYPE state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-state
             BEGIN_STATE(DOCTYPE)
             {
                 ON_WHITESPACE
@@ -452,6 +486,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.54 Before DOCTYPE name state, https://html.spec.whatwg.org/multipage/parsing.html#before-doctype-name-state
             BEGIN_STATE(BeforeDOCTYPEName)
             {
                 ON_WHITESPACE
@@ -498,6 +533,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.55 DOCTYPE name state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-name-state
             BEGIN_STATE(DOCTYPEName)
             {
                 ON_WHITESPACE
@@ -536,6 +572,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.56 After DOCTYPE name state, https://html.spec.whatwg.org/multipage/parsing.html#after-doctype-name-state
             BEGIN_STATE(AfterDOCTYPEName)
             {
                 ON_WHITESPACE
@@ -568,6 +605,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.57 After DOCTYPE public keyword state, https://html.spec.whatwg.org/multipage/parsing.html#after-doctype-public-keyword-state
             BEGIN_STATE(AfterDOCTYPEPublicKeyword)
             {
                 ON_WHITESPACE
@@ -608,6 +646,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.63 After DOCTYPE system keyword state, https://html.spec.whatwg.org/multipage/parsing.html#after-doctype-system-keyword-state
             BEGIN_STATE(AfterDOCTYPESystemKeyword)
             {
                 ON_WHITESPACE
@@ -650,6 +689,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.58 Before DOCTYPE public identifier state, https://html.spec.whatwg.org/multipage/parsing.html#before-doctype-public-identifier-state
             BEGIN_STATE(BeforeDOCTYPEPublicIdentifier)
             {
                 ON_WHITESPACE
@@ -688,6 +728,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.64 Before DOCTYPE system identifier state, https://html.spec.whatwg.org/multipage/parsing.html#before-doctype-system-identifier-state
             BEGIN_STATE(BeforeDOCTYPESystemIdentifier)
             {
                 ON_WHITESPACE
@@ -726,6 +767,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.59 DOCTYPE public identifier (double-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-public-identifier-(double-quoted)-state
             BEGIN_STATE(DOCTYPEPublicIdentifierDoubleQuoted)
             {
                 ON('"')
@@ -761,6 +803,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.60 DOCTYPE public identifier (single-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-public-identifier-(single-quoted)-state
             BEGIN_STATE(DOCTYPEPublicIdentifierSingleQuoted)
             {
                 ON('\'')
@@ -796,11 +839,12 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.65 DOCTYPE system identifier (double-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-system-identifier-(double-quoted)-state
             BEGIN_STATE(DOCTYPESystemIdentifierDoubleQuoted)
             {
                 ON('"')
                 {
-                    m_current_token.ensure_doctype_data().public_identifier = consume_current_builder();
+                    m_current_token.ensure_doctype_data().system_identifier = consume_current_builder();
                     SWITCH_TO(AfterDOCTYPESystemIdentifier);
                 }
                 ON(0)
@@ -812,7 +856,7 @@ _StartOfFunction:
                 ON('>')
                 {
                     log_parse_error();
-                    m_current_token.ensure_doctype_data().public_identifier = consume_current_builder();
+                    m_current_token.ensure_doctype_data().system_identifier = consume_current_builder();
                     m_current_token.ensure_doctype_data().force_quirks = true;
                     SWITCH_TO_AND_EMIT_CURRENT_TOKEN(Data);
                 }
@@ -831,6 +875,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.66 DOCTYPE system identifier (single-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#doctype-system-identifier-(single-quoted)-state
             BEGIN_STATE(DOCTYPESystemIdentifierSingleQuoted)
             {
                 ON('\'')
@@ -866,6 +911,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.61 After DOCTYPE public identifier state, https://html.spec.whatwg.org/multipage/parsing.html#after-doctype-public-identifier-state
             BEGIN_STATE(AfterDOCTYPEPublicIdentifier)
             {
                 ON_WHITESPACE
@@ -904,6 +950,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.62 Between DOCTYPE public and system identifiers state, https://html.spec.whatwg.org/multipage/parsing.html#between-doctype-public-and-system-identifiers-state
             BEGIN_STATE(BetweenDOCTYPEPublicAndSystemIdentifiers)
             {
                 ON_WHITESPACE
@@ -940,6 +987,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.67 After DOCTYPE system identifier state, https://html.spec.whatwg.org/multipage/parsing.html#after-doctype-system-identifier-state
             BEGIN_STATE(AfterDOCTYPESystemIdentifier)
             {
                 ON_WHITESPACE
@@ -965,6 +1013,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.68 Bogus DOCTYPE state, https://html.spec.whatwg.org/multipage/parsing.html#bogus-doctype-state
             BEGIN_STATE(BogusDOCTYPE)
             {
                 ON('>')
@@ -988,6 +1037,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.32 Before attribute name state, https://html.spec.whatwg.org/multipage/parsing.html#before-attribute-name-state
             BEGIN_STATE(BeforeAttributeName)
             {
                 ON_WHITESPACE
@@ -1027,6 +1077,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.40 Self-closing start tag state, https://html.spec.whatwg.org/multipage/parsing.html#self-closing-start-tag-state
             BEGIN_STATE(SelfClosingStartTag)
             {
                 ON('>')
@@ -1047,6 +1098,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.33 Attribute name state, https://html.spec.whatwg.org/multipage/parsing.html#attribute-name-state
             BEGIN_STATE(AttributeName)
             {
                 ON_WHITESPACE
@@ -1110,6 +1162,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.34 After attribute name state, https://html.spec.whatwg.org/multipage/parsing.html#after-attribute-name-state
             BEGIN_STATE(AfterAttributeName)
             {
                 ON_WHITESPACE
@@ -1143,6 +1196,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.35 Before attribute value state, https://html.spec.whatwg.org/multipage/parsing.html#before-attribute-value-state
             BEGIN_STATE(BeforeAttributeValue)
             {
                 m_current_token.last_attribute().value_start_position = nth_last_position(1);
@@ -1170,6 +1224,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.36 Attribute value (double-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#attribute-value-(double-quoted)-state
             BEGIN_STATE(AttributeValueDoubleQuoted)
             {
                 ON('"')
@@ -1201,6 +1256,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.37 Attribute value (single-quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#attribute-value-(single-quoted)-state
             BEGIN_STATE(AttributeValueSingleQuoted)
             {
                 ON('\'')
@@ -1232,6 +1288,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.38 Attribute value (unquoted) state, https://html.spec.whatwg.org/multipage/parsing.html#attribute-value-(single-quoted)-state
             BEGIN_STATE(AttributeValueUnquoted)
             {
                 ON_WHITESPACE
@@ -1296,6 +1353,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.39 After attribute value (quoted) state, https://html.spec.whatwg.org/multipage/parsing.html#after-attribute-value-(quoted)-state
             BEGIN_STATE(AfterAttributeValueQuoted)
             {
                 m_current_token.last_attribute().value_end_position = nth_last_position(1);
@@ -1324,6 +1382,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.43 Comment start state, https://html.spec.whatwg.org/multipage/parsing.html#comment-start-state
             BEGIN_STATE(CommentStart)
             {
                 ON('-')
@@ -1342,6 +1401,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.44 Comment start dash state, https://html.spec.whatwg.org/multipage/parsing.html#comment-start-dash-state
             BEGIN_STATE(CommentStartDash)
             {
                 ON('-')
@@ -1356,7 +1416,6 @@ _StartOfFunction:
                 ON_EOF
                 {
                     log_parse_error();
-                    EMIT_CURRENT_TOKEN;
                     EMIT_EOF;
                 }
                 ANYTHING_ELSE
@@ -1367,6 +1426,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.45 Comment state, https://html.spec.whatwg.org/multipage/parsing.html#comment-state
             BEGIN_STATE(Comment)
             {
                 ON('<')
@@ -1388,7 +1448,6 @@ _StartOfFunction:
                 {
                     log_parse_error();
                     m_current_token.set_comment(consume_current_builder());
-                    EMIT_CURRENT_TOKEN;
                     EMIT_EOF;
                 }
                 ANYTHING_ELSE
@@ -1399,6 +1458,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.51 Comment end state, https://html.spec.whatwg.org/multipage/parsing.html#comment-end-state
             BEGIN_STATE(CommentEnd)
             {
                 ON('>')
@@ -1419,17 +1479,17 @@ _StartOfFunction:
                 {
                     log_parse_error();
                     m_current_token.set_comment(consume_current_builder());
-                    EMIT_CURRENT_TOKEN;
                     EMIT_EOF;
                 }
                 ANYTHING_ELSE
                 {
-                    m_current_builder.append('-');
+                    m_current_builder.append("--");
                     RECONSUME_IN(Comment);
                 }
             }
             END_STATE
 
+            // 13.2.5.52 Comment end bang state, https://html.spec.whatwg.org/multipage/parsing.html#comment-end-bang-state
             BEGIN_STATE(CommentEndBang)
             {
                 ON('-')
@@ -1447,7 +1507,6 @@ _StartOfFunction:
                 {
                     log_parse_error();
                     m_current_token.set_comment(consume_current_builder());
-                    EMIT_CURRENT_TOKEN;
                     EMIT_EOF;
                 }
                 ANYTHING_ELSE
@@ -1458,6 +1517,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.50 Comment end dash state, https://html.spec.whatwg.org/multipage/parsing.html#comment-end-dash-state
             BEGIN_STATE(CommentEndDash)
             {
                 ON('-')
@@ -1468,7 +1528,6 @@ _StartOfFunction:
                 {
                     log_parse_error();
                     m_current_token.set_comment(consume_current_builder());
-                    EMIT_CURRENT_TOKEN;
                     EMIT_EOF;
                 }
                 ANYTHING_ELSE
@@ -1479,6 +1538,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.46 Comment less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#comment-less-than-sign-state
             BEGIN_STATE(CommentLessThanSign)
             {
                 ON('!')
@@ -1498,6 +1558,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.47 Comment less-than sign bang state, https://html.spec.whatwg.org/multipage/parsing.html#comment-less-than-sign-bang-state
             BEGIN_STATE(CommentLessThanSignBang)
             {
                 ON('-')
@@ -1511,6 +1572,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.48 Comment less-than sign bang dash state, https://html.spec.whatwg.org/multipage/parsing.html#comment-less-than-sign-bang-dash-state
             BEGIN_STATE(CommentLessThanSignBangDash)
             {
                 ON('-')
@@ -1524,6 +1586,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.49 Comment less-than sign bang dash dash state, https://html.spec.whatwg.org/multipage/parsing.html#comment-less-than-sign-bang-dash-dash-state
             BEGIN_STATE(CommentLessThanSignBangDashDash)
             {
                 ON('>')
@@ -1542,6 +1605,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.72 Character reference state, https://html.spec.whatwg.org/multipage/parsing.html#character-reference-state
             BEGIN_STATE(CharacterReference)
             {
                 m_temporary_buffer.clear();
@@ -1564,11 +1628,12 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.73 Named character reference state, https://html.spec.whatwg.org/multipage/parsing.html#named-character-reference-state
             BEGIN_STATE(NamedCharacterReference)
             {
                 size_t byte_offset = m_utf8_view.byte_offset_of(m_prev_utf8_iterator);
 
-                auto match = HTML::code_points_from_entity(m_decoded_input.substring_view(byte_offset, m_decoded_input.length() - byte_offset - 1));
+                auto match = HTML::code_points_from_entity(m_decoded_input.substring_view(byte_offset, m_decoded_input.length() - byte_offset));
 
                 if (match.has_value()) {
                     skip(match->entity.length() - 1);
@@ -1600,6 +1665,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.74 Ambiguous ampersand state, https://html.spec.whatwg.org/multipage/parsing.html#ambiguous-ampersand-state
             BEGIN_STATE(AmbiguousAmpersand)
             {
                 ON_ASCII_ALPHANUMERIC
@@ -1623,6 +1689,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.75 Numeric character reference state, https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-state
             BEGIN_STATE(NumericCharacterReference)
             {
                 m_character_reference_code = 0;
@@ -1644,6 +1711,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.76 Hexadecimal character reference start state, https://html.spec.whatwg.org/multipage/parsing.html#hexadecimal-character-reference-start-state
             BEGIN_STATE(HexadecimalCharacterReferenceStart)
             {
                 ON_ASCII_HEX_DIGIT
@@ -1659,6 +1727,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.77 Decimal character reference start state, https://html.spec.whatwg.org/multipage/parsing.html#decimal-character-reference-start-state
             BEGIN_STATE(DecimalCharacterReferenceStart)
             {
                 ON_ASCII_DIGIT
@@ -1674,6 +1743,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.78 Hexadecimal character reference state, https://html.spec.whatwg.org/multipage/parsing.html#decimal-character-reference-start-state
             BEGIN_STATE(HexadecimalCharacterReference)
             {
                 ON_ASCII_DIGIT
@@ -1706,6 +1776,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.79 Decimal character reference state, https://html.spec.whatwg.org/multipage/parsing.html#decimal-character-reference-state
             BEGIN_STATE(DecimalCharacterReference)
             {
                 ON_ASCII_DIGIT
@@ -1726,6 +1797,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.80 Numeric character reference end state, https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state
             BEGIN_STATE(NumericCharacterReferenceEnd)
             {
                 DONT_CONSUME_NEXT_INPUT_CHARACTER;
@@ -1794,6 +1866,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.2 RCDATA state, https://html.spec.whatwg.org/multipage/parsing.html#rcdata-state
             BEGIN_STATE(RCDATA)
             {
                 ON('&')
@@ -1821,6 +1894,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.9 RCDATA less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#rcdata-less-than-sign-state
             BEGIN_STATE(RCDATALessThanSign)
             {
                 ON('/')
@@ -1835,6 +1909,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.10 RCDATA end tag open state, https://html.spec.whatwg.org/multipage/parsing.html#rcdata-end-tag-open-state
             BEGIN_STATE(RCDATAEndTagOpen)
             {
                 ON_ASCII_ALPHA
@@ -1851,6 +1926,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.11 RCDATA end tag name state, https://html.spec.whatwg.org/multipage/parsing.html#rcdata-end-tag-name-state
             BEGIN_STATE(RCDATAEndTagName)
             {
                 ON_WHITESPACE
@@ -1914,6 +1990,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.3 RAWTEXT state, https://html.spec.whatwg.org/multipage/parsing.html#rawtext-state
             BEGIN_STATE(RAWTEXT)
             {
                 ON('<')
@@ -1936,6 +2013,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.12 RAWTEXT less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#rawtext-less-than-sign-state
             BEGIN_STATE(RAWTEXTLessThanSign)
             {
                 ON('/')
@@ -1950,6 +2028,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.13 RAWTEXT end tag open state, https://html.spec.whatwg.org/multipage/parsing.html#rawtext-end-tag-open-state
             BEGIN_STATE(RAWTEXTEndTagOpen)
             {
                 ON_ASCII_ALPHA
@@ -1966,6 +2045,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.14 RAWTEXT end tag name state, https://html.spec.whatwg.org/multipage/parsing.html#rawtext-end-tag-name-state
             BEGIN_STATE(RAWTEXTEndTagName)
             {
                 ON_WHITESPACE
@@ -2029,6 +2109,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.4 Script data state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-state
             BEGIN_STATE(ScriptData)
             {
                 ON('<')
@@ -2051,6 +2132,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.5 PLAINTEXT state, https://html.spec.whatwg.org/multipage/parsing.html#plaintext-state
             BEGIN_STATE(PLAINTEXT)
             {
                 ON(0)
@@ -2069,6 +2151,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.15 Script data less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-less-than-sign-state
             BEGIN_STATE(ScriptDataLessThanSign)
             {
                 ON('/')
@@ -2089,6 +2172,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.18 Script data escape start state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escape-start-state
             BEGIN_STATE(ScriptDataEscapeStart)
             {
                 ON('-')
@@ -2102,6 +2186,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.19 Script data escape start dash state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escape-start-dash-state
             BEGIN_STATE(ScriptDataEscapeStartDash)
             {
                 ON('-')
@@ -2115,6 +2200,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.22 Script data escaped dash dash state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-dash-dash-state
             BEGIN_STATE(ScriptDataEscapedDashDash)
             {
                 ON('-')
@@ -2146,6 +2232,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.23 Script data escaped less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-less-than-sign-state
             BEGIN_STATE(ScriptDataEscapedLessThanSign)
             {
                 ON('/')
@@ -2165,6 +2252,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.24 Script data escaped end tag open state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-end-tag-open-state
             BEGIN_STATE(ScriptDataEscapedEndTagOpen)
             {
                 ON_ASCII_ALPHA
@@ -2181,6 +2269,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.25 Script data escaped end tag name state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-end-tag-name-state
             BEGIN_STATE(ScriptDataEscapedEndTagName)
             {
                 ON_WHITESPACE
@@ -2254,6 +2343,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.26 Script data double escape start state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escape-start-state
             BEGIN_STATE(ScriptDataDoubleEscapeStart)
             {
                 auto temporary_buffer_equal_to_script = [this]() -> bool {
@@ -2301,6 +2391,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.27 Script data double escaped state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-state
             BEGIN_STATE(ScriptDataDoubleEscaped)
             {
                 ON('-')
@@ -2328,6 +2419,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.28 Script data double escaped dash state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-dash-state
             BEGIN_STATE(ScriptDataDoubleEscapedDash)
             {
                 ON('-')
@@ -2355,6 +2447,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.29 Script data double escaped dash dash state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-dash-dash-state
             BEGIN_STATE(ScriptDataDoubleEscapedDashDash)
             {
                 ON('-')
@@ -2386,6 +2479,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.30 Script data double escaped less-than sign state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escaped-less-than-sign-state
             BEGIN_STATE(ScriptDataDoubleEscapedLessThanSign)
             {
                 ON('/')
@@ -2400,6 +2494,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.31 Script data double escape end state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-double-escape-end-state
             BEGIN_STATE(ScriptDataDoubleEscapeEnd)
             {
                 auto temporary_buffer_equal_to_script = [this]() -> bool {
@@ -2447,6 +2542,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.21 Script data escaped dash state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-dash-state
             BEGIN_STATE(ScriptDataEscapedDash)
             {
                 ON('-')
@@ -2474,6 +2570,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.20 Script data escaped state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-state
             BEGIN_STATE(ScriptDataEscaped)
             {
                 ON('-')
@@ -2501,6 +2598,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.16 Script data end tag open state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-end-tag-open-state
             BEGIN_STATE(ScriptDataEndTagOpen)
             {
                 ON_ASCII_ALPHA
@@ -2517,6 +2615,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.17 Script data end tag name state, https://html.spec.whatwg.org/multipage/parsing.html#script-data-end-tag-name-state
             BEGIN_STATE(ScriptDataEndTagName)
             {
                 ON_WHITESPACE
@@ -2583,6 +2682,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.69 CDATA section state, https://html.spec.whatwg.org/multipage/parsing.html#cdata-section-state
             BEGIN_STATE(CDATASection)
             {
                 ON(']')
@@ -2601,6 +2701,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.70 CDATA section bracket state, https://html.spec.whatwg.org/multipage/parsing.html#cdata-section-bracket-state
             BEGIN_STATE(CDATASectionBracket)
             {
                 ON(']')
@@ -2614,6 +2715,7 @@ _StartOfFunction:
             }
             END_STATE
 
+            // 13.2.5.71 CDATA section end state, https://html.spec.whatwg.org/multipage/parsing.html#cdata-section-end-state
             BEGIN_STATE(CDATASectionEnd)
             {
                 ON(']')
@@ -2678,6 +2780,15 @@ void HTMLTokenizer::create_new_token(HTMLToken::Type type)
     m_current_token.set_start_position({}, nth_last_position(offset));
 }
 
+HTMLTokenizer::HTMLTokenizer()
+{
+    m_decoded_input = "";
+    m_utf8_view = Utf8View(m_decoded_input);
+    m_utf8_iterator = m_utf8_view.begin();
+    m_prev_utf8_iterator = m_utf8_view.begin();
+    m_source_positions.empend(0u, 0u);
+}
+
 HTMLTokenizer::HTMLTokenizer(StringView input, String const& encoding)
 {
     auto* decoder = TextCodec::decoder_for(encoding);
@@ -2685,7 +2796,35 @@ HTMLTokenizer::HTMLTokenizer(StringView input, String const& encoding)
     m_decoded_input = decoder->to_utf8(input);
     m_utf8_view = Utf8View(m_decoded_input);
     m_utf8_iterator = m_utf8_view.begin();
+    m_prev_utf8_iterator = m_utf8_view.begin();
     m_source_positions.empend(0u, 0u);
+}
+
+void HTMLTokenizer::insert_input_at_insertion_point(String const& input)
+{
+    auto utf8_iterator_byte_offset = m_utf8_view.byte_offset_of(m_utf8_iterator);
+
+    // FIXME: Implement a InputStream to handle insertion_point and iterators.
+    StringBuilder builder {};
+    builder.append(m_decoded_input.substring(0, m_insertion_point.position));
+    builder.append(input);
+    builder.append(m_decoded_input.substring(m_insertion_point.position));
+    m_decoded_input = builder.build();
+
+    m_utf8_view = Utf8View(m_decoded_input);
+    m_utf8_iterator = m_utf8_view.iterator_at_byte_offset(utf8_iterator_byte_offset);
+
+    m_insertion_point.position += input.length();
+}
+
+void HTMLTokenizer::insert_eof()
+{
+    m_explicit_eof_inserted = true;
+}
+
+bool HTMLTokenizer::is_eof_inserted()
+{
+    return m_explicit_eof_inserted;
 }
 
 void HTMLTokenizer::will_switch_to([[maybe_unused]] State new_state)
@@ -2726,15 +2865,13 @@ bool HTMLTokenizer::consumed_as_part_of_an_attribute() const
 
 void HTMLTokenizer::restore_to(Utf8CodePointIterator const& new_iterator)
 {
-    if (new_iterator != m_prev_utf8_iterator) {
-        auto diff = m_prev_utf8_iterator - new_iterator;
-        if (diff > 0) {
-            for (ssize_t i = 0; i < diff; ++i)
-                m_source_positions.take_last();
-        } else {
-            // Going forwards...?
-            TODO();
-        }
+    auto diff = m_utf8_iterator - new_iterator;
+    if (diff > 0) {
+        for (ssize_t i = 0; i < diff; ++i)
+            m_source_positions.take_last();
+    } else {
+        // Going forwards...?
+        TODO();
     }
     m_utf8_iterator = new_iterator;
 }

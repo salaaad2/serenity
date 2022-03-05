@@ -12,11 +12,11 @@
 #include <AK/IntrusiveListRelaxedConst.h>
 #include <AK/NonnullRefPtrVector.h>
 #include <AK/OwnPtr.h>
-#include <AK/String.h>
 #include <AK/Userspace.h>
 #include <AK/Variant.h>
 #include <AK/WeakPtr.h>
 #include <AK/Weakable.h>
+#include <Kernel/API/POSIX/sys/resource.h>
 #include <Kernel/API/Syscall.h>
 #include <Kernel/Assertions.h>
 #include <Kernel/AtomicEdgeAction.h>
@@ -238,6 +238,7 @@ public:
     IterationDecision for_each_thread(Callback);
     template<IteratorFunction<Thread&> Callback>
     IterationDecision for_each_thread(Callback callback) const;
+    ErrorOr<void> try_for_each_thread(Function<ErrorOr<void>(Thread const&)>) const;
 
     // Non-breakable iteration functions
     template<VoidFunction<Process&> Callback>
@@ -286,6 +287,7 @@ public:
     ErrorOr<FlatPtr> sys$getppid();
     ErrorOr<FlatPtr> sys$getresuid(Userspace<UserID*>, Userspace<UserID*>, Userspace<UserID*>);
     ErrorOr<FlatPtr> sys$getresgid(Userspace<GroupID*>, Userspace<GroupID*>, Userspace<GroupID*>);
+    ErrorOr<FlatPtr> sys$getrusage(int, Userspace<rusage*>);
     ErrorOr<FlatPtr> sys$umask(mode_t);
     ErrorOr<FlatPtr> sys$open(Userspace<const Syscall::SC_open_params*>);
     ErrorOr<FlatPtr> sys$close(int fd);
@@ -391,7 +393,7 @@ public:
     ErrorOr<FlatPtr> sys$getrandom(Userspace<void*>, size_t, unsigned int);
     ErrorOr<FlatPtr> sys$getkeymap(Userspace<const Syscall::SC_getkeymap_params*>);
     ErrorOr<FlatPtr> sys$setkeymap(Userspace<const Syscall::SC_setkeymap_params*>);
-    ErrorOr<FlatPtr> sys$profiling_enable(pid_t, u64);
+    ErrorOr<FlatPtr> sys$profiling_enable(pid_t, Userspace<u64 const*>);
     ErrorOr<FlatPtr> sys$profiling_disable(pid_t);
     ErrorOr<FlatPtr> sys$profiling_free_buffer(pid_t);
     ErrorOr<FlatPtr> sys$futex(Userspace<const Syscall::SC_futex_params*>);
@@ -434,6 +436,8 @@ public:
     Custody* executable() { return m_executable.ptr(); }
     const Custody* executable() const { return m_executable.ptr(); }
 
+    static constexpr size_t max_arguments_size = Thread::default_userspace_stack_size / 8;
+    static constexpr size_t max_environment_size = Thread::default_userspace_stack_size / 8;
     NonnullOwnPtrVector<KString> const& arguments() const { return m_arguments; };
     NonnullOwnPtrVector<KString> const& environment() const { return m_environment; };
 
@@ -447,6 +451,7 @@ public:
     ErrorOr<void> send_signal(u8 signal, Process* sender);
 
     u8 termination_signal() const { return m_protected_values.termination_signal; }
+    u8 termination_status() const { return m_protected_values.termination_status; }
 
     u16 thread_count() const
     {
@@ -486,12 +491,13 @@ public:
     Thread::WaitBlockerSet& wait_blocker_set() { return m_wait_blocker_set; }
 
     template<typename Callback>
-    void for_each_coredump_property(Callback callback) const
+    ErrorOr<void> for_each_coredump_property(Callback callback) const
     {
         for (auto const& property : m_coredump_properties) {
             if (property.key && property.value)
-                callback(*property.key, *property.value);
+                TRY(callback(*property.key, *property.value));
         }
+        return {};
     }
 
     ErrorOr<void> set_coredump_property(NonnullOwnPtr<KString> key, NonnullOwnPtr<KString> value);
@@ -519,7 +525,7 @@ private:
     bool add_thread(Thread&);
     bool remove_thread(Thread&);
 
-    Process(NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> cwd, RefPtr<Custody> executable, TTY* tty);
+    Process(NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> cwd, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree);
     static ErrorOr<NonnullRefPtr<Process>> try_create(RefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> cwd = nullptr, RefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
     ErrorOr<void> attach_resources(NonnullOwnPtr<Memory::AddressSpace>&&, RefPtr<Thread>& first_thread, Process* fork_parent);
     static ProcessID allocate_pid();
@@ -553,6 +559,8 @@ private:
     void clear_futex_queues_on_exec();
 
     ErrorOr<void> remap_range_as_stack(FlatPtr address, size_t size);
+
+    ErrorOr<FlatPtr> read_impl(int fd, Userspace<u8*> buffer, size_t size);
 
 public:
     NonnullRefPtr<ProcessProcFSTraits> procfs_traits() const { return *m_procfs_traits; }
@@ -656,6 +664,7 @@ public:
         OpenFileDescriptionAndFlags* get_if_valid(size_t i);
 
         void enumerate(Function<void(const OpenFileDescriptionAndFlags&)>) const;
+        ErrorOr<void> try_enumerate(Function<ErrorOr<void>(const OpenFileDescriptionAndFlags&)>) const;
         void change_each(Function<void(OpenFileDescriptionAndFlags&)>);
 
         ErrorOr<ScopedDescriptionAllocation> allocate(int first_candidate_fd = 0);
@@ -722,9 +731,9 @@ public:
 
     class ProcessProcFSTraits : public ProcFSExposedComponent {
     public:
-        static ErrorOr<NonnullRefPtr<ProcessProcFSTraits>> try_create(Badge<Process>, Process& process)
+        static ErrorOr<NonnullRefPtr<ProcessProcFSTraits>> try_create(Badge<Process>, WeakPtr<Process> process)
         {
-            return adopt_nonnull_ref_or_enomem(new (nothrow) ProcessProcFSTraits(process));
+            return adopt_nonnull_ref_or_enomem(new (nothrow) ProcessProcFSTraits(move(process)));
         }
 
         virtual InodeIndex component_index() const override;
@@ -736,8 +745,8 @@ public:
         virtual GroupID owner_group() const override;
 
     private:
-        explicit ProcessProcFSTraits(Process& process)
-            : m_process(process.make_weak_ptr())
+        explicit ProcessProcFSTraits(WeakPtr<Process> process)
+            : m_process(move(process))
         {
         }
 
@@ -796,7 +805,7 @@ private:
     RefPtr<Timer> m_alarm_timer;
 
     VeilState m_veil_state { VeilState::None };
-    UnveilNode m_unveiled_paths { "/", { .full_path = "/" } };
+    UnveilNode m_unveiled_paths;
 
     OwnPtr<PerformanceEventBuffer> m_perf_event_buffer;
 
@@ -819,6 +828,12 @@ private:
     NonnullRefPtrVector<Thread> m_threads_for_coredump;
 
     mutable RefPtr<ProcessProcFSTraits> m_procfs_traits;
+    struct SignalActionData {
+        VirtualAddress handler_or_sigaction;
+        int flags { 0 };
+        u32 mask { 0 };
+    };
+    Array<SignalActionData, NSIG> m_signal_action_data;
 
     static_assert(sizeof(ProtectedValues) < (PAGE_SIZE));
     alignas(4096) ProtectedValues m_protected_values;
@@ -934,6 +949,15 @@ inline IterationDecision Process::for_each_thread(Callback callback) const
             callback(thread);
     });
     return IterationDecision::Continue;
+}
+
+inline ErrorOr<void> Process::try_for_each_thread(Function<ErrorOr<void>(Thread const&)> callback) const
+{
+    return thread_list().with([&](auto& thread_list) -> ErrorOr<void> {
+        for (auto& thread : thread_list)
+            TRY(callback(thread));
+        return {};
+    });
 }
 
 template<VoidFunction<Thread&> Callback>

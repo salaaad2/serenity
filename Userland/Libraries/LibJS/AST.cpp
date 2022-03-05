@@ -15,6 +15,7 @@
 #include <AK/TemporaryChange.h>
 #include <LibCrypto/BigInt/SignedBigInteger.h>
 #include <LibJS/AST.h>
+#include <LibJS/Heap/MarkedVector.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
@@ -25,7 +26,6 @@
 #include <LibJS/Runtime/FunctionEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/IteratorOperations.h>
-#include <LibJS/Runtime/MarkedValueList.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/ObjectEnvironment.h>
 #include <LibJS/Runtime/PrimitiveString.h>
@@ -81,13 +81,11 @@ static void update_function_name(Value value, FlyString const& name)
         static_cast<ECMAScriptFunctionObject&>(function).set_name(name);
 }
 
-static ThrowCompletionOr<String> get_function_name(GlobalObject& global_object, Value value)
+static ThrowCompletionOr<String> get_function_property_name(PropertyKey key)
 {
-    if (value.is_symbol())
-        return String::formatted("[{}]", value.as_symbol().description());
-    if (value.is_string())
-        return value.as_string().string();
-    return value.to_string(global_object);
+    if (key.is_symbol())
+        return String::formatted("[{}]", key.as_symbol()->description());
+    return key.to_string();
 }
 
 // 14.2.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-block-runtime-semantics-evaluation
@@ -256,10 +254,21 @@ Completion FunctionDeclaration::execute(Interpreter& interpreter, GlobalObject& 
 
     if (m_is_hoisted) {
         // Perform special annexB steps see step 3 of: https://tc39.es/ecma262/#sec-web-compat-functiondeclarationinstantiation
+
+        // i. Let genv be the running execution context's VariableEnvironment.
         auto* variable_environment = interpreter.vm().running_execution_context().variable_environment;
+
+        // ii. Let benv be the running execution context's LexicalEnvironment.
         auto* lexical_environment = interpreter.vm().running_execution_context().lexical_environment;
+
+        // iii. Let fobj be ! benv.GetBindingValue(F, false).
         auto function_object = MUST(lexical_environment->get_binding_value(global_object, name(), false));
-        MUST(variable_environment->set_mutable_binding(global_object, name(), function_object, false));
+
+        // iv. Perform ? genv.SetMutableBinding(F, fobj, false).
+        TRY(variable_environment->set_mutable_binding(global_object, name(), function_object, false));
+
+        // v. Return NormalCompletion(empty).
+        return normal_completion({});
     }
 
     // 1. Return NormalCompletion(empty).
@@ -340,7 +349,7 @@ ThrowCompletionOr<CallExpression::ThisAndCallee> CallExpression::compute_this_an
 }
 
 // 13.3.8.1 Runtime Semantics: ArgumentListEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-argumentlistevaluation
-static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<CallExpression::Argument> const& arguments, MarkedValueList& list)
+static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<CallExpression::Argument> const& arguments, MarkedVector<Value>& list)
 {
     list.ensure_capacity(arguments.size());
 
@@ -372,7 +381,7 @@ Completion NewExpression::execute(Interpreter& interpreter, GlobalObject& global
     // 3. If arguments is empty, let argList be a new empty List.
     // 4. Else,
     //    a. Let argList be ? ArgumentListEvaluation of arguments.
-    MarkedValueList arg_list(vm.heap());
+    MarkedVector<Value> arg_list(vm.heap());
     TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
 
     // 5. If IsConstructor(constructor) is false, throw a TypeError exception.
@@ -410,7 +419,7 @@ Completion CallExpression::execute(Interpreter& interpreter, GlobalObject& globa
 
     VERIFY(!callee.is_empty());
 
-    MarkedValueList arg_list(vm.heap());
+    MarkedVector<Value> arg_list(vm.heap());
     TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
 
     if (!callee.is_function())
@@ -445,10 +454,9 @@ Completion SuperCall::execute(Interpreter& interpreter, GlobalObject& global_obj
 
     // 3. Let func be ! GetSuperConstructor().
     auto* func = get_super_constructor(interpreter.vm());
-    VERIFY(!vm.exception());
 
     // 4. Let argList be ? ArgumentListEvaluation of Arguments.
-    MarkedValueList arg_list(vm.heap());
+    MarkedVector<Value> arg_list(vm.heap());
     TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
 
     // 5. If IsConstructor(func) is false, throw a TypeError exception.
@@ -855,7 +863,7 @@ struct ForInOfHeadState {
                     VERIFY(declaration.declarations().first().target().has<NonnullRefPtr<Identifier>>());
                     lhs_reference = TRY(declaration.declarations().first().target().get<NonnullRefPtr<Identifier>>()->to_reference(interpreter, global_object));
                 } else {
-                    VERIFY(is<Identifier>(*expression_lhs) || is<MemberExpression>(*expression_lhs));
+                    VERIFY(is<Identifier>(*expression_lhs) || is<MemberExpression>(*expression_lhs) || is<CallExpression>(*expression_lhs));
                     auto& expression = static_cast<Expression const&>(*expression_lhs);
                     lhs_reference = TRY(expression.to_reference(interpreter, global_object));
                 }
@@ -1397,7 +1405,7 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
 
     // From here on equivalent to
     // 13.3.4 EvaluatePropertyAccessWithIdentifierKey ( baseValue, identifierName, strict ), https://tc39.es/ecma262/#sec-evaluate-property-access-with-identifier-key
-    PropertyKey property_name;
+    PropertyKey property_key;
     if (is_computed()) {
         // Weird order which I can't quite find from the specs.
         auto value = TRY(m_property->execute(interpreter, global_object)).release_value();
@@ -1405,19 +1413,19 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
 
         TRY(require_object_coercible(global_object, base_value));
 
-        property_name = TRY(PropertyKey::from_value(global_object, value));
+        property_key = TRY(PropertyKey::from_value(global_object, value));
     } else if (is<PrivateIdentifier>(*m_property)) {
         auto& private_identifier = static_cast<PrivateIdentifier const&>(*m_property);
         return make_private_reference(interpreter.vm(), base_value, private_identifier.string());
     } else {
-        property_name = verify_cast<Identifier>(*m_property).string();
+        property_key = verify_cast<Identifier>(*m_property).string();
         TRY(require_object_coercible(global_object, base_value));
     }
-    if (!property_name.is_valid())
+    if (!property_key.is_valid())
         return Reference {};
 
     auto strict = interpreter.vm().in_strict_mode();
-    return Reference { base_value, move(property_name), {}, strict };
+    return Reference { base_value, move(property_key), {}, strict };
 }
 
 // 13.5.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation
@@ -1504,7 +1512,7 @@ static ThrowCompletionOr<ClassElement::ClassElementName> class_key_to_property_n
 // 15.4.5 Runtime Semantics: MethodDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-methoddefinitionevaluation
 ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& target) const
 {
-    auto property_key = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
+    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
 
     auto method_value = TRY(m_function->execute(interpreter, global_object)).release_value();
 
@@ -1514,38 +1522,38 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
     method_function.make_method(target);
 
     auto set_function_name = [&](String prefix = "") {
-        auto property_name = property_key.visit(
-            [&](PropertyKey const& property_name) -> String {
-                if (property_name.is_symbol()) {
-                    auto description = property_name.as_symbol()->description();
+        auto name = property_key_or_private_name.visit(
+            [&](PropertyKey const& property_key) -> String {
+                if (property_key.is_symbol()) {
+                    auto description = property_key.as_symbol()->description();
                     if (description.is_empty())
                         return "";
                     return String::formatted("[{}]", description);
                 } else {
-                    return property_name.to_string();
+                    return property_key.to_string();
                 }
             },
             [&](PrivateName const& private_name) -> String {
                 return private_name.description;
             });
 
-        update_function_name(method_value, String::formatted("{}{}{}", prefix, prefix.is_empty() ? "" : " ", property_name));
+        update_function_name(method_value, String::formatted("{}{}{}", prefix, prefix.is_empty() ? "" : " ", name));
     };
 
-    if (property_key.has<PropertyKey>()) {
-        auto& property_name = property_key.get<PropertyKey>();
+    if (property_key_or_private_name.has<PropertyKey>()) {
+        auto& property_key = property_key_or_private_name.get<PropertyKey>();
         switch (kind()) {
         case ClassMethod::Kind::Method:
             set_function_name();
-            TRY(target.define_property_or_throw(property_name, { .value = method_value, .writable = true, .enumerable = false, .configurable = true }));
+            TRY(target.define_property_or_throw(property_key, { .value = method_value, .writable = true, .enumerable = false, .configurable = true }));
             break;
         case ClassMethod::Kind::Getter:
             set_function_name("get");
-            TRY(target.define_property_or_throw(property_name, { .get = &method_function, .enumerable = true, .configurable = true }));
+            TRY(target.define_property_or_throw(property_key, { .get = &method_function, .enumerable = true, .configurable = true }));
             break;
         case ClassMethod::Kind::Setter:
             set_function_name("set");
-            TRY(target.define_property_or_throw(property_name, { .set = &method_function, .enumerable = true, .configurable = true }));
+            TRY(target.define_property_or_throw(property_key, { .set = &method_function, .enumerable = true, .configurable = true }));
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -1553,7 +1561,7 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
 
         return ClassValue { normal_completion({}) };
     } else {
-        auto& private_name = property_key.get<PrivateName>();
+        auto& private_name = property_key_or_private_name.get<PrivateName>();
         switch (kind()) {
         case Kind::Method:
             set_function_name();
@@ -1614,13 +1622,13 @@ private:
 // 15.7.10 Runtime Semantics: ClassFieldDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-classfielddefinitionevaluation
 ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& target) const
 {
-    auto property_key = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
+    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
     Handle<ECMAScriptFunctionObject> initializer {};
     if (m_initializer) {
         auto copy_initializer = m_initializer;
-        auto name = property_key.visit(
-            [&](PropertyKey const& property_name) -> String {
-                return property_name.is_number() ? property_name.to_string() : property_name.to_string_or_symbol().to_display_string();
+        auto name = property_key_or_private_name.visit(
+            [&](PropertyKey const& property_key) -> String {
+                return property_key.is_number() ? property_key.to_string() : property_key.to_string_or_symbol().to_display_string();
             },
             [&](PrivateName const& private_name) -> String {
                 return private_name.description;
@@ -1634,7 +1642,7 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
 
     return ClassValue {
         ClassFieldDefinition {
-            move(property_key),
+            move(property_key_or_private_name),
             move(initializer),
         }
     };
@@ -2113,10 +2121,12 @@ void ClassDeclaration::dump(int indent) const
     m_class_expression->dump(indent + 1);
 }
 
-void ClassDeclaration::for_each_bound_name(IteratorOrVoidFunction<FlyString const&> callback) const
+ThrowCompletionOr<void> ClassDeclaration::for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const
 {
-    if (!m_class_expression->name().is_empty())
-        callback(m_class_expression->name());
+    if (m_class_expression->name().is_empty())
+        return {};
+
+    return callback(m_class_expression->name());
 }
 
 void ClassExpression::dump(int indent) const
@@ -2241,6 +2251,23 @@ bool BindingPattern::contains_expression() const
     return false;
 }
 
+ThrowCompletionOr<void> BindingPattern::for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const
+{
+    for (auto const& entry : entries) {
+        auto const& alias = entry.alias;
+        if (alias.has<NonnullRefPtr<Identifier>>()) {
+            TRY(callback(alias.get<NonnullRefPtr<Identifier>>()->string()));
+        } else if (alias.has<NonnullRefPtr<BindingPattern>>()) {
+            TRY(alias.get<NonnullRefPtr<BindingPattern>>()->for_each_bound_name(forward<decltype(callback)>(callback)));
+        } else {
+            auto const& name = entry.name;
+            if (name.has<NonnullRefPtr<Identifier>>())
+                TRY(callback(name.get<NonnullRefPtr<Identifier>>()->string()));
+        }
+    }
+    return {};
+}
+
 void BindingPattern::dump(int indent) const
 {
     print_indent(indent);
@@ -2324,10 +2351,11 @@ void FunctionDeclaration::dump(int indent) const
     FunctionNode::dump(indent, class_name());
 }
 
-void FunctionDeclaration::for_each_bound_name(IteratorOrVoidFunction<FlyString const&> callback) const
+ThrowCompletionOr<void> FunctionDeclaration::for_each_bound_name(ThrowCompletionOrVoidCallback<const FlyString&>&& callback) const
 {
-    if (!name().is_empty())
-        callback(name());
+    if (name().is_empty())
+        return {};
+    return callback(name());
 }
 
 void FunctionExpression::dump(int indent) const
@@ -2861,19 +2889,21 @@ Completion VariableDeclarator::execute(Interpreter& interpreter, GlobalObject&) 
     VERIFY_NOT_REACHED();
 }
 
-void VariableDeclaration::for_each_bound_name(IteratorOrVoidFunction<FlyString const&> callback) const
+ThrowCompletionOr<void> VariableDeclaration::for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const
 {
-    for (auto& entry : declarations()) {
-        entry.target().template visit(
-            [&](const NonnullRefPtr<Identifier>& id) {
-                callback(id->string());
+    for (auto const& entry : declarations()) {
+        TRY(entry.target().visit(
+            [&](NonnullRefPtr<Identifier> const& id) {
+                return callback(id->string());
             },
-            [&](const NonnullRefPtr<BindingPattern>& binding) {
-                binding->for_each_bound_name([&](const auto& name) {
-                    callback(name);
+            [&](NonnullRefPtr<BindingPattern> const& binding) {
+                return binding->for_each_bound_name([&](auto const& name) {
+                    return callback(name);
                 });
-            });
+            }));
     }
+
+    return {};
 }
 
 void VariableDeclaration::dump(int indent) const
@@ -2955,28 +2985,10 @@ Completion ObjectExpression::execute(Interpreter& interpreter, GlobalObject& glo
     for (auto& property : m_properties) {
         auto key = TRY(property.key().execute(interpreter, global_object)).release_value();
 
+        // PropertyDefinition : ... AssignmentExpression
         if (property.type() == ObjectProperty::Type::Spread) {
-            if (key.is_object() && is<Array>(key.as_object())) {
-                auto& array_to_spread = static_cast<Array&>(key.as_object());
-                for (auto& entry : array_to_spread.indexed_properties()) {
-                    auto value = TRY(array_to_spread.get(entry.index()));
-                    object->indexed_properties().put(entry.index(), value);
-                }
-            } else if (key.is_object()) {
-                auto& obj_to_spread = key.as_object();
-
-                for (auto& it : obj_to_spread.shape().property_table_ordered()) {
-                    if (it.value.attributes.is_enumerable()) {
-                        auto value = TRY(obj_to_spread.get(it.key));
-                        object->define_direct_property(it.key, value, JS::default_attributes);
-                    }
-                }
-            } else if (key.is_string()) {
-                auto& str_to_spread = key.as_string().string();
-
-                for (size_t i = 0; i < str_to_spread.length(); i++)
-                    object->define_direct_property(i, js_string(interpreter.heap(), str_to_spread.substring(i, 1)), JS::default_attributes);
-            }
+            // 4. Return ? CopyDataProperties(object, fromValue, excludedNames).
+            TRY(object->copy_data_properties(key, {}, global_object));
             continue;
         }
 
@@ -2985,7 +2997,8 @@ Completion ObjectExpression::execute(Interpreter& interpreter, GlobalObject& glo
         if (value.is_function() && property.is_method())
             static_cast<ECMAScriptFunctionObject&>(value.as_function()).set_home_object(object);
 
-        auto name = TRY(get_function_name(global_object, key));
+        auto property_key = TRY(PropertyKey::from_value(global_object, key));
+        auto name = TRY(get_function_property_name(property_key));
         if (property.type() == ObjectProperty::Type::Getter) {
             name = String::formatted("get {}", name);
         } else if (property.type() == ObjectProperty::Type::Setter) {
@@ -2997,14 +3010,14 @@ Completion ObjectExpression::execute(Interpreter& interpreter, GlobalObject& glo
         switch (property.type()) {
         case ObjectProperty::Type::Getter:
             VERIFY(value.is_function());
-            object->define_direct_accessor(TRY(PropertyKey::from_value(global_object, key)), &value.as_function(), nullptr, Attribute::Configurable | Attribute::Enumerable);
+            object->define_direct_accessor(property_key, &value.as_function(), nullptr, Attribute::Configurable | Attribute::Enumerable);
             break;
         case ObjectProperty::Type::Setter:
             VERIFY(value.is_function());
-            object->define_direct_accessor(TRY(PropertyKey::from_value(global_object, key)), nullptr, &value.as_function(), Attribute::Configurable | Attribute::Enumerable);
+            object->define_direct_accessor(property_key, nullptr, &value.as_function(), Attribute::Configurable | Attribute::Enumerable);
             break;
         case ObjectProperty::Type::KeyValue:
-            object->define_direct_property(TRY(PropertyKey::from_value(global_object, key)), value, JS::default_attributes);
+            object->define_direct_property(property_key, value, JS::default_attributes);
             break;
         case ObjectProperty::Type::Spread:
         default:
@@ -3175,9 +3188,10 @@ Completion MetaProperty::execute(Interpreter& interpreter, GlobalObject& global_
         auto script_or_module = interpreter.vm().get_active_script_or_module();
 
         // 2. Assert: module is a Source Text Module Record.
-        VERIFY(script_or_module.has<Module*>());
-        VERIFY(is<SourceTextModule>(*script_or_module.get<Module*>()));
-        auto& module = static_cast<SourceTextModule&>(*script_or_module.get<Module*>());
+        VERIFY(script_or_module.has<WeakPtr<Module>>());
+        VERIFY(script_or_module.get<WeakPtr<Module>>());
+        VERIFY(is<SourceTextModule>(*script_or_module.get<WeakPtr<Module>>()));
+        auto& module = static_cast<SourceTextModule&>(*script_or_module.get<WeakPtr<Module>>());
 
         // 3. Let importMeta be module.[[ImportMeta]].
         auto* import_meta = module.import_meta();
@@ -3516,7 +3530,7 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter, GlobalObject
     auto tag = TRY(m_tag->execute(interpreter, global_object)).release_value();
     auto& expressions = m_template_literal->expressions();
     auto* strings = MUST(Array::create(global_object, 0));
-    MarkedValueList arguments(vm.heap());
+    MarkedVector<Value> arguments(vm.heap());
     arguments.append(strings);
     for (size_t i = 0; i < expressions.size(); ++i) {
         auto value = TRY(expressions[i].execute(interpreter, global_object)).release_value();
@@ -3652,7 +3666,6 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
     // TryStatement : try Block Catch
     // TryStatement : try Block Catch Finally
     if (m_handler) {
-        vm.clear_exception();
         // 2. If B.[[Type]] is throw, let C be CatchClauseEvaluation of Catch with argument B.[[Value]].
         if (block_result.type() == Completion::Type::Throw)
             result = catch_clause_evaluation(*block_result.value());
@@ -3668,24 +3681,12 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
     // TryStatement : try Block Finally
     // TryStatement : try Block Catch Finally
     if (m_finalizer) {
-        // NOTE: Temporary until VM::exception() is removed
-        // Keep, if any, and then clear the current exception so we can
-        // execute() the finalizer without an exception in our way.
-        auto* previous_exception = vm.exception();
-        vm.clear_exception();
-
         // 4. Let F be the result of evaluating Finally.
         auto finalizer_result = m_finalizer->execute(interpreter, global_object);
 
         // 5. If F.[[Type]] is normal, set F to C.
         if (finalizer_result.type() == Completion::Type::Normal)
             finalizer_result = move(result);
-
-        // NOTE: Temporary until VM::exception() is removed
-        // If we previously had an exception and we're carrying over
-        // the catch block completion, restore it.
-        if (finalizer_result.type() == Completion::Type::Normal && previous_exception)
-            vm.set_exception(*previous_exception);
 
         // 6. Return Completion(UpdateEmpty(F, undefined)).
         return finalizer_result.update_empty(js_undefined());
@@ -3714,8 +3715,6 @@ Completion ThrowStatement::execute(Interpreter& interpreter, GlobalObject& globa
     auto value = TRY(m_argument->execute(interpreter, global_object)).release_value();
 
     // 3. Return ThrowCompletion(exprValue).
-    // TODO: Remove this once we get rid of VM::exception()
-    interpreter.vm().throw_exception(global_object, value);
     return throw_completion(value);
 }
 
@@ -4096,76 +4095,62 @@ Completion DebuggerStatement::execute(Interpreter& interpreter, GlobalObject&) c
     // 3. Return result.
     return result;
 }
-
-void ScopeNode::for_each_lexically_scoped_declaration(IteratorOrVoidFunction<Declaration const&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_lexically_scoped_declaration(ThrowCompletionOrVoidCallback<Declaration const&>&& callback) const
 {
-    for (auto& declaration : m_lexical_declarations) {
-        if (callback(declaration) == IterationDecision::Break)
-            break;
-    }
+    for (auto& declaration : m_lexical_declarations)
+        TRY(callback(declaration));
+
+    return {};
 }
 
-void ScopeNode::for_each_lexically_declared_name(IteratorOrVoidFunction<FlyString const&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_lexically_declared_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const
 {
-    auto running = true;
-    for (auto& declaration : m_lexical_declarations) {
-        declaration.for_each_bound_name([&](auto const& name) {
-            if (callback(name) == IterationDecision::Break) {
-                running = false;
-                return IterationDecision::Break;
-            }
-            return IterationDecision::Continue;
-        });
-        if (!running)
-            break;
+    for (auto const& declaration : m_lexical_declarations) {
+        TRY(declaration.for_each_bound_name([&](auto const& name) {
+            return callback(name);
+        }));
     }
+    return {};
 }
 
-void ScopeNode::for_each_var_declared_name(IteratorOrVoidFunction<FlyString const&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_var_declared_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const
 {
-    auto running = true;
     for (auto& declaration : m_var_declarations) {
-        declaration.for_each_bound_name([&](auto const& name) {
-            if (callback(name) == IterationDecision::Break) {
-                running = false;
-                return IterationDecision::Break;
-            }
-            return IterationDecision::Continue;
-        });
-        if (!running)
-            break;
+        TRY(declaration.for_each_bound_name([&](auto const& name) {
+            return callback(name);
+        }));
     }
+    return {};
 }
 
-void ScopeNode::for_each_var_function_declaration_in_reverse_order(IteratorOrVoidFunction<FunctionDeclaration const&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_var_function_declaration_in_reverse_order(ThrowCompletionOrVoidCallback<FunctionDeclaration const&>&& callback) const
 {
     for (ssize_t i = m_var_declarations.size() - 1; i >= 0; i--) {
         auto& declaration = m_var_declarations[i];
-        if (is<FunctionDeclaration>(declaration)) {
-            if (callback(static_cast<FunctionDeclaration const&>(declaration)) == IterationDecision::Break)
-                break;
-        }
+        if (is<FunctionDeclaration>(declaration))
+            TRY(callback(static_cast<FunctionDeclaration const&>(declaration)));
     }
+    return {};
 }
 
-void ScopeNode::for_each_var_scoped_variable_declaration(IteratorOrVoidFunction<VariableDeclaration const&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_var_scoped_variable_declaration(ThrowCompletionOrVoidCallback<VariableDeclaration const&>&& callback) const
 {
     for (auto& declaration : m_var_declarations) {
         if (!is<FunctionDeclaration>(declaration)) {
             VERIFY(is<VariableDeclaration>(declaration));
-            if (callback(static_cast<VariableDeclaration const&>(declaration)) == IterationDecision::Break)
-                break;
+            TRY(callback(static_cast<VariableDeclaration const&>(declaration)));
         }
     }
+    return {};
 }
 
-void ScopeNode::for_each_function_hoistable_with_annexB_extension(IteratorOrVoidFunction<FunctionDeclaration&>&& callback) const
+ThrowCompletionOr<void> ScopeNode::for_each_function_hoistable_with_annexB_extension(ThrowCompletionOrVoidCallback<FunctionDeclaration&>&& callback) const
 {
     for (auto& function : m_functions_hoistable_with_annexB_extension) {
         // We need const_cast here since it might have to set a property on function declaration.
-        if (callback(const_cast<FunctionDeclaration&>(function)) == IterationDecision::Break)
-            break;
+        TRY(callback(const_cast<FunctionDeclaration&>(function)));
     }
+    return {};
 }
 
 void ScopeNode::add_lexical_declaration(NonnullRefPtr<Declaration> declaration)
@@ -4361,6 +4346,7 @@ void ScopeNode::block_declaration_instantiation(GlobalObject& global_object, Env
     // See also B.3.2.6 Changes to BlockDeclarationInstantiation, https://tc39.es/ecma262/#sec-web-compat-blockdeclarationinstantiation
     VERIFY(environment);
     auto* private_environment = global_object.vm().running_execution_context().private_environment;
+    // Note: All the calls here are ! and thus we do not need to TRY this callback.
     for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
         auto is_constant_declaration = declaration.is_constant_declaration();
         declaration.for_each_bound_name([&](auto const& name) {
@@ -4384,150 +4370,196 @@ void ScopeNode::block_declaration_instantiation(GlobalObject& global_object, Env
 // 16.1.7 GlobalDeclarationInstantiation ( script, env ), https://tc39.es/ecma262/#sec-globaldeclarationinstantiation
 ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& interpreter, GlobalObject& global_object, GlobalEnvironment& global_environment) const
 {
-    for_each_lexically_declared_name([&](FlyString const& name) {
-        if (global_environment.has_var_declaration(name) || global_environment.has_lexical_declaration(name)) {
-            interpreter.vm().throw_exception<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
-            return IterationDecision::Break;
-        }
+    // 1. Let lexNames be the LexicallyDeclaredNames of script.
+    // 2. Let varNames be the VarDeclaredNames of script.
+    // 3. For each element name of lexNames, do
+    TRY(for_each_lexically_declared_name([&](FlyString const& name) -> ThrowCompletionOr<void> {
+        // a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
+        if (global_environment.has_var_declaration(name))
+            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
 
-        auto restricted_global_or_error = global_environment.has_restricted_global_property(name);
-        if (restricted_global_or_error.is_error())
-            return IterationDecision::Break;
-        auto restricted_global = restricted_global_or_error.release_value();
+        // b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
+        if (global_environment.has_lexical_declaration(name))
+            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
 
-        if (restricted_global)
-            interpreter.vm().throw_exception<SyntaxError>(global_object, ErrorType::RestrictedGlobalProperty, name);
+        // c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
+        auto has_restricted_global = TRY(global_environment.has_restricted_global_property(name));
 
-        return IterationDecision::Continue;
-    });
+        // d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
+        if (has_restricted_global)
+            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::RestrictedGlobalProperty, name);
 
-    if (auto* exception = interpreter.exception())
-        return throw_completion(exception->value());
+        return {};
+    }));
 
-    for_each_var_declared_name([&](auto const& name) {
-        if (global_environment.has_lexical_declaration(name)) {
-            interpreter.vm().throw_exception<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
-            return IterationDecision::Break;
-        }
+    // 4. For each element name of varNames, do
+    TRY(for_each_var_declared_name([&](auto const& name) -> ThrowCompletionOr<void> {
+        // a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
+        if (global_environment.has_lexical_declaration(name))
+            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
 
-        return IterationDecision::Continue;
-    });
+        return {};
+    }));
 
-    if (auto* exception = interpreter.exception())
-        return throw_completion(exception->value());
-
-    HashTable<FlyString> declared_function_names;
+    // 5. Let varDeclarations be the VarScopedDeclarations of script.
+    // 6. Let functionsToInitialize be a new empty List.
     Vector<FunctionDeclaration const&> functions_to_initialize;
 
-    for_each_var_function_declaration_in_reverse_order([&](FunctionDeclaration const& function) {
+    // 7. Let declaredFunctionNames be a new empty List.
+    HashTable<FlyString> declared_function_names;
+
+    // 8. For each element d of varDeclarations, in reverse List order, do
+
+    TRY(for_each_var_function_declaration_in_reverse_order([&](FunctionDeclaration const& function) -> ThrowCompletionOr<void> {
+        // a. If d is neither a VariableDeclaration nor a ForBinding nor a BindingIdentifier, then
+        // i. Assert: d is either a FunctionDeclaration, a GeneratorDeclaration, an AsyncFunctionDeclaration, or an AsyncGeneratorDeclaration.
+        // Note: This is checked in for_each_var_function_declaration_in_reverse_order.
+
+        // ii. NOTE: If there are multiple function declarations for the same name, the last declaration is used.
+
+        // iii. Let fn be the sole element of the BoundNames of d.
+
+        // iv. If fn is not an element of declaredFunctionNames, then
         if (declared_function_names.set(function.name()) != AK::HashSetResult::InsertedNewEntry)
-            return IterationDecision::Continue;
+            return {};
 
-        auto function_definable_or_error = global_environment.can_declare_global_function(function.name());
-        if (function_definable_or_error.is_error())
-            return IterationDecision::Break;
-        auto function_definable = function_definable_or_error.release_value();
+        // 1. Let fnDefinable be ? env.CanDeclareGlobalFunction(fn).
+        auto function_definable = TRY(global_environment.can_declare_global_function(function.name()));
 
-        if (!function_definable) {
-            interpreter.vm().throw_exception<TypeError>(global_object, ErrorType::CannotDeclareGlobalFunction, function.name());
-            return IterationDecision::Break;
-        }
+        // 2. If fnDefinable is false, throw a TypeError exception.
+        if (!function_definable)
+            return interpreter.vm().throw_completion<TypeError>(global_object, ErrorType::CannotDeclareGlobalFunction, function.name());
 
+        // 3. Append fn to declaredFunctionNames.
+        // Note: Already done in step iv. above.
+
+        // 4. Insert d as the first element of functionsToInitialize.
         functions_to_initialize.append(function);
-        return IterationDecision::Continue;
-    });
+        return {};
+    }));
 
-    if (auto* exception = interpreter.exception())
-        return throw_completion(exception->value());
-
+    // 9. Let declaredVarNames be a new empty List.
     HashTable<FlyString> declared_var_names;
 
-    for_each_var_scoped_variable_declaration([&](Declaration const& declaration) {
-        declaration.for_each_bound_name([&](auto const& name) {
+    // 10. For each element d of varDeclarations, do
+    TRY(for_each_var_scoped_variable_declaration([&](Declaration const& declaration) {
+        // a. If d is a VariableDeclaration, a ForBinding, or a BindingIdentifier, then
+        // Note: This is done in for_each_var_scoped_variable_declaration.
+
+        // i. For each String vn of the BoundNames of d, do
+        return declaration.for_each_bound_name([&](auto const& name) -> ThrowCompletionOr<void> {
+            // 1. If vn is not an element of declaredFunctionNames, then
             if (declared_function_names.contains(name))
-                return IterationDecision::Continue;
+                return {};
 
-            auto var_definable_or_error = global_environment.can_declare_global_var(name);
-            if (var_definable_or_error.is_error())
-                return IterationDecision::Break;
-            auto var_definable = var_definable_or_error.release_value();
+            // a. Let vnDefinable be ? env.CanDeclareGlobalVar(vn).
+            auto var_definable = TRY(global_environment.can_declare_global_var(name));
 
-            if (!var_definable) {
-                interpreter.vm().throw_exception<TypeError>(global_object, ErrorType::CannotDeclareGlobalVariable, name);
-                return IterationDecision::Break;
-            }
+            // b. If vnDefinable is false, throw a TypeError exception.
+            if (!var_definable)
+                return interpreter.vm().throw_completion<TypeError>(global_object, ErrorType::CannotDeclareGlobalVariable, name);
 
+            // c. If vn is not an element of declaredVarNames, then
+            // i. Append vn to declaredVarNames.
             declared_var_names.set(name);
-            return IterationDecision::Continue;
+            return {};
         });
-        if (interpreter.exception())
-            return IterationDecision::Break;
-        return IterationDecision::Continue;
-    });
+    }));
 
-    if (auto* exception = interpreter.exception())
-        return throw_completion(exception->value());
+    // 11. NOTE: No abnormal terminations occur after this algorithm step if the global object is an ordinary object. However, if the global object is a Proxy exotic object it may exhibit behaviours that cause abnormal terminations in some of the following steps.
+    // 12. NOTE: Annex B.3.2.2 adds additional steps at this point.
 
+    // 12. Let strict be IsStrict of script.
+    // 13. If strict is false, then
     if (!m_is_strict_mode) {
-        for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) {
+        // a. Let declaredFunctionOrVarNames be the list-concatenation of declaredFunctionNames and declaredVarNames.
+        // b. For each FunctionDeclaration f that is directly contained in the StatementList of a Block, CaseClause, or DefaultClause Contained within script, do
+        TRY(for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) -> ThrowCompletionOr<void> {
+            // i. Let F be StringValue of the BindingIdentifier of f.
             auto& function_name = function_declaration.name();
+
+            // ii. If replacing the FunctionDeclaration f with a VariableStatement that has F as a BindingIdentifier would not produce any Early Errors for script, then
+            // Note: This step is already performed during parsing and for_each_function_hoistable_with_annexB_extension so this always passes here.
+
+            // 1. If env.HasLexicalDeclaration(F) is false, then
             if (global_environment.has_lexical_declaration(function_name))
-                return IterationDecision::Continue;
+                return {};
 
-            auto function_definable_or_error = global_environment.can_declare_global_function(function_name);
-            if (function_definable_or_error.is_error())
-                return IterationDecision::Break;
-            auto function_definable = function_definable_or_error.release_value();
+            // a. Let fnDefinable be ? env.CanDeclareGlobalVar(F).
+            auto function_definable = TRY(global_environment.can_declare_global_function(function_name));
+            // b. If fnDefinable is true, then
 
-            if (!function_definable) {
-                interpreter.vm().throw_exception<TypeError>(global_object, ErrorType::CannotDeclareGlobalFunction, function_name);
-                return IterationDecision::Break;
-            }
+            if (!function_definable)
+                return {};
+
+            // i. NOTE: A var binding for F is only instantiated here if it is neither a VarDeclaredName nor the name of another FunctionDeclaration.
+
+            // ii. If declaredFunctionOrVarNames does not contain F, then
 
             if (!declared_function_names.contains(function_name) && !declared_var_names.contains(function_name)) {
-                auto result = global_environment.create_global_var_binding(function_name, false);
-                if (result.is_error())
-                    return IterationDecision::Break;
+                // i. Perform ? env.CreateGlobalVarBinding(F, false).
+                TRY(global_environment.create_global_var_binding(function_name, false));
+
+                // ii. Append F to declaredFunctionOrVarNames.
                 declared_function_names.set(function_name);
             }
 
+            // iii. When the FunctionDeclaration f is evaluated, perform the following steps in place of the FunctionDeclaration Evaluation algorithm provided in 15.2.6:
+            //     i. Let genv be the running execution context's VariableEnvironment.
+            //     ii. Let benv be the running execution context's LexicalEnvironment.
+            //     iii. Let fobj be ! benv.GetBindingValue(F, false).
+            //     iv. Perform ? genv.SetMutableBinding(F, fobj, false).
+            //     v. Return NormalCompletion(empty).
             function_declaration.set_should_do_additional_annexB_steps();
 
-            return IterationDecision::Continue;
-        });
-
-        if (auto* exception = interpreter.exception())
-            return throw_completion(exception->value());
+            return {};
+        }));
 
         // We should not use declared function names below here anymore since these functions are not in there in the spec.
         declared_function_names.clear();
     }
 
+    // 13. Let lexDeclarations be the LexicallyScopedDeclarations of script.
+    // 14. Let privateEnv be null.
     PrivateEnvironment* private_environment = nullptr;
 
-    for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
-        declaration.for_each_bound_name([&](auto const& name) {
-            if (declaration.is_constant_declaration())
-                (void)global_environment.create_immutable_binding(global_object, name, true);
-            else
-                (void)global_environment.create_mutable_binding(global_object, name, false);
-            if (interpreter.exception())
-                return IterationDecision::Break;
-            return IterationDecision::Continue;
-        });
-        if (interpreter.exception())
-            return IterationDecision::Break;
-        return IterationDecision::Continue;
-    });
+    // 15. For each element d of lexDeclarations, do
+    TRY(for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
+        // a. NOTE: Lexically declared names are only instantiated here but not initialized.
+        // b. For each element dn of the BoundNames of d, do
+        return declaration.for_each_bound_name([&](auto const& name) -> ThrowCompletionOr<void> {
+            // i. If IsConstantDeclaration of d is true, then
+            if (declaration.is_constant_declaration()) {
+                // 1. Perform ? env.CreateImmutableBinding(dn, true).
+                TRY(global_environment.create_immutable_binding(global_object, name, true));
+            }
+            // ii. Else,
+            else {
+                // 1. Perform ? env.CreateMutableBinding(dn, false).
+                TRY(global_environment.create_mutable_binding(global_object, name, false));
+            }
 
+            return {};
+        });
+    }));
+
+    // 16. For each Parse Node f of functionsToInitialize, do
     for (auto& declaration : functions_to_initialize) {
+        // a. Let fn be the sole element of the BoundNames of f.
+        // b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
         auto* function = ECMAScriptFunctionObject::create(global_object, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
+
+        // c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
         TRY(global_environment.create_global_function_binding(declaration.name(), function, false));
     }
 
-    for (auto& var_name : declared_var_names)
+    // 17. For each String vn of declaredVarNames, do
+    for (auto& var_name : declared_var_names) {
+        // a. Perform ? env.CreateGlobalVarBinding(vn, false).
         TRY(global_environment.create_global_var_binding(var_name, false));
+    }
 
+    // 18. Return NormalCompletion(empty).
     return {};
 }
 

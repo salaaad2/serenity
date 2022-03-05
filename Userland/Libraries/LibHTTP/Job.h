@@ -8,9 +8,9 @@
 
 #include <AK/FileStream.h>
 #include <AK/HashMap.h>
+#include <AK/NonnullOwnPtrVector.h>
 #include <AK/Optional.h>
 #include <LibCore/NetworkJob.h>
-#include <LibCore/TCPSocket.h>
 #include <LibHTTP/HttpRequest.h>
 #include <LibHTTP/HttpResponse.h>
 
@@ -55,7 +55,23 @@ protected:
     int m_code { -1 };
     HashMap<String, String, CaseInsensitiveStringTraits> m_headers;
     Vector<String> m_set_cookie_headers;
-    Vector<ByteBuffer, 2> m_received_buffers;
+
+    struct ReceivedBuffer {
+        ReceivedBuffer(ByteBuffer d)
+            : data(move(d))
+            , pending_flush(data.bytes())
+        {
+        }
+
+        // The entire received buffer.
+        ByteBuffer data;
+
+        // The bytes we have yet to flush. (This is a slice of `data`)
+        ReadonlyBytes pending_flush;
+    };
+
+    NonnullOwnPtrVector<ReceivedBuffer> m_received_buffers;
+
     size_t m_buffered_size { 0 };
     size_t m_received_size { 0 };
     Optional<u32> m_content_length;

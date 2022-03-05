@@ -1,6 +1,5 @@
 @GUI::Widget {
     fill_with_background_color: true
-
     layout: @GUI::VerticalBoxLayout {
         margins: [8]
     }
@@ -9,13 +8,11 @@
         layout: @GUI::VerticalBoxLayout {
             margins: [14, 14, 4]
         }
-
         title: "Workspaces"
         shrink_to_fit: true
 
         @GUI::Widget {
             fixed_height: 32
-
             layout: @GUI::HorizontalBoxLayout {
                 margins: [6]
             }
@@ -47,9 +44,7 @@
 
         @GUI::Widget {
             fixed_height: 76
-
-            layout: @GUI::HorizontalBoxLayout {
-            }
+            layout: @GUI::HorizontalBoxLayout {}
 
             @GUI::Label {
                 fixed_height: 32

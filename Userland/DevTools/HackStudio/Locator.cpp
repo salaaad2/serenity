@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -97,7 +98,7 @@ LocatorSuggestionModel::Suggestion LocatorSuggestionModel::Suggestion::create_sy
 Locator::Locator(Core::Object* parent)
 {
     set_layout<GUI::VerticalBoxLayout>();
-    set_fixed_height(20);
+    set_fixed_height(22);
     m_textbox = add<GUI::TextBox>();
     m_textbox->on_change = [this] {
         update_suggestions();
@@ -155,10 +156,6 @@ Locator::Locator(Core::Object* parent)
     m_suggestion_view->on_activation = [this](auto& index) {
         open_suggestion(index);
     };
-}
-
-Locator::~Locator()
-{
 }
 
 void Locator::open_suggestion(const GUI::ModelIndex& index)

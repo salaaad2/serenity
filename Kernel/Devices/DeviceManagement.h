@@ -38,15 +38,13 @@ public:
     bool is_console_device_attached() const { return !m_console_device.is_null(); }
     void attach_console_device(ConsoleDevice const&);
 
-    // FIXME: Once we have a singleton for managing many sound cards, remove this from here
-    void attach_audio_device(CharacterDevice const&);
-
     Optional<DeviceEvent> dequeue_top_device_event(Badge<DeviceControlDevice>);
 
     void after_inserting_device(Badge<Device>, Device&);
     void before_device_removal(Badge<Device>, Device&);
 
     void for_each(Function<void(Device&)>);
+    ErrorOr<void> try_for_each(Function<ErrorOr<void>(Device&)>);
     Device* get_device(MajorNumber major, MinorNumber minor);
 
     NullDevice const& null_device() const;
@@ -76,7 +74,6 @@ private:
     RefPtr<ConsoleDevice> m_console_device;
     RefPtr<DeviceControlDevice> m_device_control_device;
     // FIXME: Once we have a singleton for managing many sound cards, remove this from here
-    NonnullRefPtrVector<CharacterDevice, 1> m_audio_devices;
     SpinlockProtected<HashMap<u64, Device*>> m_devices;
 
     mutable Spinlock m_event_queue_lock;

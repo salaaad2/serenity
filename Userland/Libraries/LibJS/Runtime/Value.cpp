@@ -6,6 +6,7 @@
  */
 
 #include <AK/AllOf.h>
+#include <AK/Assertions.h>
 #include <AK/CharacterTypes.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
@@ -30,6 +31,7 @@
 #include <LibJS/Runtime/ProxyObject.h>
 #include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/Runtime/StringObject.h>
+#include <LibJS/Runtime/StringPrototype.h>
 #include <LibJS/Runtime/SymbolObject.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/Value.h>
@@ -475,7 +477,7 @@ ThrowCompletionOr<Value> Value::to_number(GlobalObject& global_object) const
     case Type::Double:
         return *this;
     case Type::String: {
-        auto string = as_string().string().trim_whitespace();
+        String string = Utf8View(as_string().string()).trim(whitespace_characters, AK::TrimMode::Both).as_string();
         if (string.is_empty())
             return Value(0);
         if (string == "Infinity" || string == "+Infinity")
@@ -804,28 +806,28 @@ ThrowCompletionOr<double> Value::to_integer_or_infinity(GlobalObject& global_obj
 }
 
 // 7.3.3 GetV ( V, P ), https://tc39.es/ecma262/#sec-getv
-ThrowCompletionOr<Value> Value::get(GlobalObject& global_object, PropertyKey const& property_name) const
+ThrowCompletionOr<Value> Value::get(GlobalObject& global_object, PropertyKey const& property_key) const
 {
     // 1. Assert: IsPropertyKey(P) is true.
-    VERIFY(property_name.is_valid());
+    VERIFY(property_key.is_valid());
 
     // 2. Let O be ? ToObject(V).
     auto* object = TRY(to_object(global_object));
 
     // 3. Return ? O.[[Get]](P, V).
-    return TRY(object->internal_get(property_name, *this));
+    return TRY(object->internal_get(property_key, *this));
 }
 
 // 7.3.11 GetMethod ( V, P ), https://tc39.es/ecma262/#sec-getmethod
-ThrowCompletionOr<FunctionObject*> Value::get_method(GlobalObject& global_object, PropertyKey const& property_name) const
+ThrowCompletionOr<FunctionObject*> Value::get_method(GlobalObject& global_object, PropertyKey const& property_key) const
 {
     auto& vm = global_object.vm();
 
     // 1. Assert: IsPropertyKey(P) is true.
-    VERIFY(property_name.is_valid());
+    VERIFY(property_key.is_valid());
 
     // 2. Let func be ? GetV(V, P).
-    auto function = TRY(get(global_object, property_name));
+    auto function = TRY(get(global_object, property_key));
 
     // 3. If func is either undefined or null, return undefined.
     if (function.is_nullish())
@@ -1178,36 +1180,11 @@ ThrowCompletionOr<Value> mod(GlobalObject& global_object, Value lhs, Value rhs)
     auto rhs_numeric = TRY(rhs.to_numeric(global_object));
     if (both_number(lhs_numeric, rhs_numeric)) {
         // 6.1.6.1.6 Number::remainder ( n, d ), https://tc39.es/ecma262/#sec-numeric-types-number-remainder
-
-        // 1. If n is NaN or d is NaN, return NaN.
-        if (lhs_numeric.is_nan() || rhs_numeric.is_nan())
-            return js_nan();
-
-        // 2. If n is +∞𝔽 or n is -∞𝔽, return NaN.
-        if (lhs_numeric.is_positive_infinity() || lhs_numeric.is_negative_infinity())
-            return js_nan();
-
-        // 3. If d is +∞𝔽 or d is -∞𝔽, return n.
-        if (rhs_numeric.is_positive_infinity() || rhs_numeric.is_negative_infinity())
-            return lhs_numeric;
-
-        // 4. If d is +0𝔽 or d is -0𝔽, return NaN.
-        if (rhs_numeric.is_positive_zero() || rhs_numeric.is_negative_zero())
-            return js_nan();
-
-        // 5. If n is +0𝔽 or n is -0𝔽, return n.
-        if (lhs_numeric.is_positive_zero() || lhs_numeric.is_negative_zero())
-            return lhs_numeric;
-
-        // 6. Assert: n and d are finite and non-zero.
-
-        auto index = lhs_numeric.as_double();
-        auto period = rhs_numeric.as_double();
-        auto trunc = (double)(i32)(index / period);
-
-        // 7. Let r be ℝ(n) - (ℝ(d) × q) where q is an integer that is negative if and only if n and d have opposite sign, and whose magnitude is as large as possible without exceeding the magnitude of ℝ(n) / ℝ(d).
-        // 8. Return 𝔽(r).
-        return Value(index - trunc * period);
+        // The ECMA specification is describing the mathematical definition of modulus
+        // implemented by fmod.
+        auto n = lhs_numeric.as_double();
+        auto d = rhs_numeric.as_double();
+        return Value(fmod(n, d));
     }
     if (both_bigint(lhs_numeric, rhs_numeric)) {
         if (rhs_numeric.as_bigint().big_integer() == BIGINT_ZERO)
@@ -1217,6 +1194,58 @@ ThrowCompletionOr<Value> mod(GlobalObject& global_object, Value lhs, Value rhs)
     return vm.throw_completion<TypeError>(global_object, ErrorType::BigIntBadOperatorOtherType, "modulo");
 }
 
+static Value exp_double(Value base, Value exponent)
+{
+    VERIFY(both_number(base, exponent));
+    if (exponent.is_nan())
+        return js_nan();
+    if (exponent.is_positive_zero() || exponent.is_negative_zero())
+        return Value(1);
+    if (base.is_nan())
+        return js_nan();
+    if (base.is_positive_infinity())
+        return exponent.as_double() > 0 ? js_infinity() : Value(0);
+    if (base.is_negative_infinity()) {
+        auto is_odd_integral_number = exponent.is_integral_number() && (exponent.as_i32() % 2 != 0);
+        if (exponent.as_double() > 0)
+            return is_odd_integral_number ? js_negative_infinity() : js_infinity();
+        else
+            return is_odd_integral_number ? Value(-0.0) : Value(0);
+    }
+    if (base.is_positive_zero())
+        return exponent.as_double() > 0 ? Value(0) : js_infinity();
+    if (base.is_negative_zero()) {
+        auto is_odd_integral_number = exponent.is_integral_number() && (exponent.as_i32() % 2 != 0);
+        if (exponent.as_double() > 0)
+            return is_odd_integral_number ? Value(-0.0) : Value(0);
+        else
+            return is_odd_integral_number ? js_negative_infinity() : js_infinity();
+    }
+    VERIFY(base.is_finite_number() && !base.is_positive_zero() && !base.is_negative_zero());
+    if (exponent.is_positive_infinity()) {
+        auto absolute_base = fabs(base.as_double());
+        if (absolute_base > 1)
+            return js_infinity();
+        else if (absolute_base == 1)
+            return js_nan();
+        else if (absolute_base < 1)
+            return Value(0);
+    }
+    if (exponent.is_negative_infinity()) {
+        auto absolute_base = fabs(base.as_double());
+        if (absolute_base > 1)
+            return Value(0);
+        else if (absolute_base == 1)
+            return js_nan();
+        else if (absolute_base < 1)
+            return js_infinity();
+    }
+    VERIFY(exponent.is_finite_number() && !exponent.is_positive_zero() && !exponent.is_negative_zero());
+    if (base.as_double() < 0 && !exponent.is_integral_number())
+        return js_nan();
+    return Value(::pow(base.as_double(), exponent.as_double()));
+}
+
 // 13.6 Exponentiation Operator, https://tc39.es/ecma262/#sec-exp-operator
 ThrowCompletionOr<Value> exp(GlobalObject& global_object, Value lhs, Value rhs)
 {
@@ -1224,7 +1253,7 @@ ThrowCompletionOr<Value> exp(GlobalObject& global_object, Value lhs, Value rhs)
     auto lhs_numeric = TRY(lhs.to_numeric(global_object));
     auto rhs_numeric = TRY(rhs.to_numeric(global_object));
     if (both_number(lhs_numeric, rhs_numeric))
-        return Value(pow(lhs_numeric.as_double(), rhs_numeric.as_double()));
+        return exp_double(lhs_numeric, rhs_numeric);
     if (both_bigint(lhs_numeric, rhs_numeric)) {
         if (rhs_numeric.as_bigint().big_integer().is_negative())
             return vm.throw_completion<RangeError>(global_object, ErrorType::NegativeExponent);
@@ -1569,10 +1598,10 @@ ThrowCompletionOr<TriState> is_less_than(GlobalObject& global_object, bool left_
 }
 
 // 7.3.21 Invoke ( V, P [ , argumentsList ] ), https://tc39.es/ecma262/#sec-invoke
-ThrowCompletionOr<Value> Value::invoke_internal(GlobalObject& global_object, JS::PropertyKey const& property_name, Optional<MarkedValueList> arguments)
+ThrowCompletionOr<Value> Value::invoke_internal(GlobalObject& global_object, JS::PropertyKey const& property_key, Optional<MarkedVector<Value>> arguments)
 {
     auto& vm = global_object.vm();
-    auto property = TRY(get(global_object, property_name));
+    auto property = TRY(get(global_object, property_key));
     if (!property.is_function())
         return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, property.to_string_without_side_effects());
 

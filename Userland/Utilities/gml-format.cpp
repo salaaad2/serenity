@@ -7,7 +7,7 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
-#include <LibGUI/GMLFormatter.h>
+#include <LibGUI/GML/Formatter.h>
 #include <LibMain/Main.h>
 
 ErrorOr<bool> format_file(StringView, bool);
@@ -22,12 +22,16 @@ ErrorOr<bool> format_file(StringView path, bool inplace)
         auto open_mode = inplace ? Core::OpenMode::ReadWrite : Core::OpenMode::ReadOnly;
         file = TRY(Core::File::open(path, open_mode));
     }
-    auto formatted_gml = GUI::format_gml(file->read_all());
-    if (formatted_gml.is_null()) {
-        warnln("Failed to parse GML!");
+    auto contents = file->read_all();
+    auto formatted_gml_or_error = GUI::GML::format_gml(contents);
+    if (formatted_gml_or_error.is_error()) {
+        warnln("Failed to parse GML: {}", formatted_gml_or_error.error());
         return false;
     }
+    auto formatted_gml = formatted_gml_or_error.release_value();
     if (inplace && !read_from_stdin) {
+        if (formatted_gml == contents)
+            return true;
         if (!file->seek(0) || !file->truncate(0)) {
             warnln("Could not truncate {}: {}", path, file->error_string());
             return false;
@@ -39,7 +43,7 @@ ErrorOr<bool> format_file(StringView path, bool inplace)
     } else {
         out("{}", formatted_gml);
     }
-    return true;
+    return formatted_gml == contents;
 }
 
 ErrorOr<int> serenity_main(Main::Arguments args)
@@ -62,14 +66,19 @@ ErrorOr<int> serenity_main(Main::Arguments args)
         TRY(Core::System::pledge("stdio rpath", nullptr));
 #endif
 
-    unsigned exit_code = 0;
-
     if (files.is_empty())
         files.append("-");
+
+    auto formatting_changed = false;
     for (auto& file : files) {
         if (!TRY(format_file(file, inplace)))
-            exit_code = 1;
+            formatting_changed = true;
     }
 
-    return exit_code;
+    if (formatting_changed) {
+        dbgln("Some GML formatting issues were encountered.");
+        return 1;
+    }
+
+    return 0;
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,9 +12,9 @@
 #include <AK/String.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Heap/MarkedVector.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/IndexedProperties.h>
-#include <LibJS/Runtime/MarkedValueList.h>
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/PrivateEnvironment.h>
 #include <LibJS/Runtime/PropertyDescriptor.h>
@@ -45,6 +45,7 @@ class Object : public Cell {
 public:
     static Object* create(GlobalObject&, Object* prototype);
 
+    Object(GlobalObject&, Object* prototype);
     explicit Object(Object& prototype);
     explicit Object(Shape&);
     virtual void initialize(GlobalObject&) override;
@@ -100,7 +101,7 @@ public:
     ThrowCompletionOr<bool> has_own_property(PropertyKey const&) const;
     ThrowCompletionOr<bool> set_integrity_level(IntegrityLevel);
     ThrowCompletionOr<bool> test_integrity_level(IntegrityLevel) const;
-    ThrowCompletionOr<MarkedValueList> enumerable_own_property_names(PropertyKind kind) const;
+    ThrowCompletionOr<MarkedVector<Value>> enumerable_own_property_names(PropertyKind kind) const;
     ThrowCompletionOr<Object*> copy_data_properties(Value source, HashTable<PropertyKey> const& seen_names, GlobalObject& global_object);
 
     PrivateElement* private_element_find(PrivateName const& name);
@@ -122,7 +123,7 @@ public:
     virtual ThrowCompletionOr<Value> internal_get(PropertyKey const&, Value receiver) const;
     virtual ThrowCompletionOr<bool> internal_set(PropertyKey const&, Value value, Value receiver);
     virtual ThrowCompletionOr<bool> internal_delete(PropertyKey const&);
-    virtual ThrowCompletionOr<MarkedValueList> internal_own_property_keys() const;
+    virtual ThrowCompletionOr<MarkedVector<Value>> internal_own_property_keys() const;
 
     ThrowCompletionOr<bool> ordinary_set_with_own_descriptor(PropertyKey const&, Value, Value, Optional<PropertyDescriptor>);
 
@@ -145,7 +146,7 @@ public:
 
     Value get_without_side_effects(const PropertyKey&) const;
 
-    void define_direct_property(PropertyKey const& property_name, Value value, PropertyAttributes attributes) { storage_set(property_name, { value, attributes }); };
+    void define_direct_property(PropertyKey const& property_key, Value value, PropertyAttributes attributes) { storage_set(property_key, { value, attributes }); };
     void define_direct_accessor(PropertyKey const&, FunctionObject* getter, FunctionObject* setter, PropertyAttributes attributes);
 
     void define_native_function(PropertyKey const&, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)>, i32 length, PropertyAttributes attributes);

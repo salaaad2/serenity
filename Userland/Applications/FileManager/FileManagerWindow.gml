@@ -6,9 +6,11 @@
 
     @GUI::ToolbarContainer {
         name: "toolbar_container"
+
         @GUI::Toolbar {
             name: "main_toolbar"
         }
+
         @GUI::Toolbar {
             name: "location_toolbar"
             visible: false
@@ -23,6 +25,7 @@
                 fixed_height: 22
             }
         }
+
         @GUI::Toolbar {
             name: "breadcrumb_toolbar"
 
@@ -45,7 +48,6 @@
             name: "tree_view"
             fixed_width: 175
         }
-
     }
 
     @GUI::Statusbar {

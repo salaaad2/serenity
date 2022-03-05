@@ -21,7 +21,7 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     auto child_name = TRY(m_name->try_clone());
     auto child = TRY(Process::try_create(child_first_thread, move(child_name), uid(), gid(), pid(), m_is_kernel_process, m_cwd, m_executable, m_tty, this));
     child->m_veil_state = m_veil_state;
-    child->m_unveiled_paths = m_unveiled_paths.deep_copy();
+    child->m_unveiled_paths = TRY(m_unveiled_paths.deep_copy());
 
     TRY(child->m_fds.with_exclusive([&](auto& child_fds) {
         return m_fds.with_exclusive([&](auto& parent_fds) {
@@ -106,11 +106,11 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
         for (auto& region : address_space().regions()) {
             dbgln_if(FORK_DEBUG, "fork: cloning Region({}) '{}' @ {}", region, region->name(), region->vaddr());
             auto region_clone = TRY(region->try_clone());
+            TRY(region_clone->map(child->address_space().page_directory(), Memory::ShouldFlushTLB::No));
             auto* child_region = TRY(child->address_space().add_region(move(region_clone)));
-            TRY(child_region->map(child->address_space().page_directory(), Memory::ShouldFlushTLB::No));
 
             if (region == m_master_tls_region.unsafe_ptr())
-                child->m_master_tls_region = child_region;
+                child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
         }
     }
 

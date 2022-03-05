@@ -15,10 +15,11 @@ class HTMLStyleElement final : public HTMLElement {
 public:
     using WrapperType = Bindings::HTMLStyleElementWrapper;
 
-    HTMLStyleElement(DOM::Document&, QualifiedName);
+    HTMLStyleElement(DOM::Document&, DOM::QualifiedName);
     virtual ~HTMLStyleElement() override;
 
     virtual void children_changed() override;
+    virtual void inserted() override;
     virtual void removed_from(Node*) override;
 
     void update_a_style_block();

@@ -46,11 +46,10 @@ set(SOURCES
     GitCommitLexer.cpp
     GitCommitSyntaxHighlighter.cpp
     GlyphMapWidget.cpp
-    GMLAutocompleteProvider.cpp
-    GMLFormatter.cpp
-    GMLLexer.cpp
-    GMLParser.cpp
-    GMLSyntaxHighlighter.cpp
+    GML/AutocompleteProvider.cpp
+    GML/Lexer.cpp
+    GML/Parser.cpp
+    GML/SyntaxHighlighter.cpp
     GroupBox.cpp
     HeaderView.cpp
     INILexer.cpp
@@ -113,8 +112,8 @@ set(SOURCES
     VimEditingEngine.cpp
     Widget.cpp
     Window.cpp
-    WindowServerConnection.cpp
-    WindowManagerServerConnection.cpp
+        ConnectionToWindowServer.cpp
+        ConnectionToWindowMangerServer.cpp
     Wizards/WizardDialog.cpp
     Wizards/AbstractWizardPage.cpp
     Wizards/CoverWizardPage.cpp

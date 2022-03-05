@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -57,13 +58,10 @@ static bool validate_stack_size(NonnullOwnPtrVector<KString> const& arguments, N
     total_arguments_size += sizeof(char*) * (arguments.size() + 1);
     total_environment_size += sizeof(char*) * (environment.size() + 1);
 
-    static constexpr size_t max_arguments_size = Thread::default_userspace_stack_size / 8;
-    static constexpr size_t max_environment_size = Thread::default_userspace_stack_size / 8;
-
-    if (total_arguments_size > max_arguments_size)
+    if (total_arguments_size > Process::max_arguments_size)
         return false;
 
-    if (total_environment_size > max_environment_size)
+    if (total_environment_size > Process::max_environment_size)
         return false;
 
     // FIXME: This doesn't account for the size of the auxiliary vector
@@ -406,10 +404,10 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         load_base_address,
         elf_image.entry().offset(load_offset).get(),
         executable_size,
-        AK::try_make_weak_ptr(master_tls_region),
+        TRY(AK::try_make_weak_ptr_if_nonnull(master_tls_region)),
         master_tls_size,
         master_tls_alignment,
-        stack_region->make_weak_ptr()
+        TRY(stack_region->try_make_weak_ptr())
     };
 }
 
@@ -527,7 +525,7 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
 
     m_veil_state = VeilState::None;
     m_unveiled_paths.clear();
-    m_unveiled_paths.set_metadata({ "/", UnveilAccess::None, false });
+    m_unveiled_paths.set_metadata({ TRY(KString::try_create("/"sv)), UnveilAccess::None, false });
 
     for (auto& property : m_coredump_properties)
         property = {};
@@ -566,6 +564,9 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
     //       and we don't want to deal with faults after this point.
     auto new_userspace_sp = TRY(make_userspace_context_for_main_thread(new_main_thread->regs(), *load_result.stack_region.unsafe_ptr(), m_arguments, m_environment, move(auxv)));
 
+    m_name = move(new_process_name);
+    new_main_thread->set_name(move(new_main_thread_name));
+
     if (wait_for_tracer_at_next_execve()) {
         // Make sure we release the ptrace lock here or the tracer will block forever.
         ptrace_locker.unlock();
@@ -584,9 +585,6 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
     cli();
 
     // NOTE: Be careful to not trigger any page faults below!
-
-    m_name = move(new_process_name);
-    new_main_thread->set_name(move(new_main_thread_name));
 
     {
         ProtectedDataMutationScope scope { *this };
@@ -610,8 +608,8 @@ ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_d
     new_main_thread->reset_fpu_state();
 
     auto& regs = new_main_thread->m_regs;
-#if ARCH(I386)
     regs.cs = GDT_SELECTOR_CODE3 | 3;
+#if ARCH(I386)
     regs.ds = GDT_SELECTOR_DATA3 | 3;
     regs.es = GDT_SELECTOR_DATA3 | 3;
     regs.ss = GDT_SELECTOR_DATA3 | 3;

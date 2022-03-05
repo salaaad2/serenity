@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,7 +24,7 @@ class MainWidget final : public GUI::Widget {
     C_OBJECT(MainWidget);
 
 public:
-    virtual ~MainWidget() override;
+    virtual ~MainWidget() override = default;
     bool read_file(Core::File&);
     void open_nonexistent_file(String const& path);
     bool request_close();
@@ -40,6 +41,7 @@ public:
     void set_auto_detect_preview_mode(bool value) { m_auto_detect_preview_mode = value; }
 
     void update_title();
+    void update_statusbar();
     void initialize_menubar(GUI::Window&);
 
 private:
@@ -48,7 +50,6 @@ private:
     void update_preview();
     void update_markdown_preview();
     void update_html_preview();
-    void update_statusbar();
 
     Web::OutOfProcessWebView& ensure_web_view();
     void set_web_view_visible(bool);
@@ -83,6 +84,8 @@ private:
     RefPtr<GUI::Toolbar> m_toolbar;
     RefPtr<GUI::ToolbarContainer> m_toolbar_container;
     RefPtr<GUI::Statusbar> m_statusbar;
+    RefPtr<GUI::Menu> m_line_column_statusbar_menu;
+    RefPtr<GUI::Menu> m_syntax_statusbar_menu;
 
     RefPtr<GUI::TextBox> m_find_textbox;
     RefPtr<GUI::TextBox> m_replace_textbox;

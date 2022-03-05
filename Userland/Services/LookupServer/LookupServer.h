@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "ClientConnection.h"
+#include "ConnectionFromClient.h"
 #include "DNSName.h"
 #include "DNSPacket.h"
 #include "DNSServer.h"
@@ -24,7 +24,7 @@ class LookupServer final : public Core::Object {
 
 public:
     static LookupServer& the();
-    Vector<DNSAnswer> lookup(const DNSName& name, DNSRecordType record_type);
+    ErrorOr<Vector<DNSAnswer>> lookup(const DNSName& name, DNSRecordType record_type);
 
 private:
     LookupServer();
@@ -32,9 +32,9 @@ private:
     void load_etc_hosts();
     void put_in_cache(const DNSAnswer&);
 
-    Vector<DNSAnswer> lookup(const DNSName& hostname, const String& nameserver, bool& did_get_response, DNSRecordType record_type, ShouldRandomizeCase = ShouldRandomizeCase::Yes);
+    ErrorOr<Vector<DNSAnswer>> lookup(const DNSName& hostname, const String& nameserver, bool& did_get_response, DNSRecordType record_type, ShouldRandomizeCase = ShouldRandomizeCase::Yes);
 
-    OwnPtr<IPC::MultiServer<ClientConnection>> m_server;
+    OwnPtr<IPC::MultiServer<ConnectionFromClient>> m_server;
     RefPtr<DNSServer> m_dns_server;
     RefPtr<MulticastDNS> m_mdns;
     Vector<String> m_nameservers;

@@ -7,8 +7,8 @@
 #include "TerminalSettingsWidget.h"
 #include <LibCore/System.h>
 #include <LibGUI/Application.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/SettingsWindow.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibMain/Main.h>
 
 // Including this after to avoid LibIPC errors
@@ -18,7 +18,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath recvfd sendfd unix"));
     auto app = TRY(GUI::Application::try_create(arguments));
-    Config::pledge_domains("Terminal");
+    Config::pledge_domain("Terminal");
 
     TRY(Core::System::pledge("stdio rpath recvfd sendfd"));
     TRY(Core::System::unveil("/res", "r"));

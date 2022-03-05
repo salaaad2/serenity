@@ -9,51 +9,49 @@
 #include "WebContentConsoleClient.h"
 #include <LibJS/Interpreter.h>
 #include <LibJS/MarkupGenerator.h>
-#include <LibJS/Script.h>
 #include <LibWeb/Bindings/WindowObject.h>
+#include <LibWeb/HTML/Scripting/ClassicScript.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
 #include <WebContent/ConsoleGlobalObject.h>
 
 namespace WebContent {
 
-WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<JS::Interpreter> interpreter, ClientConnection& client)
+WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<JS::Interpreter> interpreter, ConnectionFromClient& client)
     : ConsoleClient(console)
     , m_client(client)
     , m_interpreter(interpreter)
 {
     JS::DeferGC defer_gc(m_interpreter->heap());
-    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(static_cast<Web::Bindings::WindowObject&>(m_interpreter->global_object()));
+
+    auto& vm = m_interpreter->vm();
+    auto& global_object = m_interpreter->global_object();
+
+    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(static_cast<Web::Bindings::WindowObject&>(global_object));
+
+    // NOTE: We need to push an execution context here for NativeFunction::create() to succeed during global object initialization.
+    // It gets removed immediately after creating the interpreter in Document::interpreter().
+    auto& eso = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    vm.push_execution_context(eso.realm_execution_context(), global_object);
     console_global_object->initialize_global_object();
+    vm.pop_execution_context();
+
     m_console_global_object = JS::make_handle(console_global_object);
 }
 
 void WebContentConsoleClient::handle_input(String const& js_source)
 {
-    auto script_or_error = JS::Script::parse(js_source, m_interpreter->realm(), "");
+    auto& settings = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    auto script = Web::HTML::ClassicScript::create("(console)", js_source, settings, settings.api_base_url());
+
+    // FIXME: Add parse error printouts back once ClassicScript can report parse errors.
+
+    auto result = script->run();
+
     StringBuilder output_html;
-    auto result = JS::ThrowCompletionOr<JS::Value> { JS::js_undefined() };
-    if (script_or_error.is_error()) {
-        auto error = script_or_error.error()[0];
-        auto hint = error.source_location_hint(js_source);
-        if (!hint.is_empty())
-            output_html.append(String::formatted("<pre>{}</pre>", escape_html_entities(hint)));
-        result = m_interpreter->vm().throw_completion<JS::SyntaxError>(*m_console_global_object.cell(), error.to_string());
-    } else {
-        // FIXME: This is not the correct way to do this, we probably want to have
-        //        multiple execution contexts we switch between.
-        auto& global_object_before = m_interpreter->realm().global_object();
-        VERIFY(is<Web::Bindings::WindowObject>(global_object_before));
-        auto& this_value_before = m_interpreter->realm().global_environment().global_this_value();
-        m_interpreter->realm().set_global_object(*m_console_global_object.cell(), &global_object_before);
 
-        result = m_interpreter->run(script_or_error.value());
-
-        m_interpreter->realm().set_global_object(global_object_before, &this_value_before);
-    }
-
-    if (result.is_error()) {
-        m_interpreter->vm().clear_exception();
+    if (result.is_abrupt()) {
         output_html.append("Uncaught exception: ");
-        auto error = *result.throw_completion().value();
+        auto error = *result.release_error().value();
         if (error.is_object())
             output_html.append(JS::MarkupGenerator::html_from_error(error.as_object()));
         else
@@ -62,7 +60,8 @@ void WebContentConsoleClient::handle_input(String const& js_source)
         return;
     }
 
-    print_html(JS::MarkupGenerator::html_from_value(result.value()));
+    if (result.value().has_value())
+        print_html(JS::MarkupGenerator::html_from_value(*result.value()));
 }
 
 void WebContentConsoleClient::print_html(String const& line)

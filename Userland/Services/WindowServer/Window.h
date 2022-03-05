@@ -22,7 +22,7 @@
 namespace WindowServer {
 
 class Animation;
-class ClientConnection;
+class ConnectionFromClient;
 class Cursor;
 class KeyEvent;
 class Menu;
@@ -48,7 +48,10 @@ enum class WindowTileType {
     TopLeft,
     TopRight,
     BottomLeft,
-    BottomRight
+    BottomRight,
+    VerticallyMaximized,
+    HorizontallyMaximized,
+    Maximized,
 };
 
 enum class WindowMenuAction {
@@ -105,22 +108,24 @@ public:
     bool is_resizable() const { return m_resizable && !m_fullscreen; }
     void set_resizable(bool);
 
-    bool is_maximized() const { return m_maximized; }
+    bool is_maximized() const { return m_tile_type == WindowTileType::Maximized; }
     void set_maximized(bool, Optional<Gfx::IntPoint> fixed_point = {});
 
     bool is_always_on_top() const { return m_always_on_top; }
     void set_always_on_top(bool);
 
-    void set_vertically_maximized();
-
     bool is_fullscreen() const { return m_fullscreen; }
     void set_fullscreen(bool);
 
-    WindowTileType tiled() const { return m_tiled; }
-    void set_tiled(Screen*, WindowTileType);
+    WindowTileType tile_type() const { return m_tile_type; }
+    bool is_tiled() const { return m_tile_type != WindowTileType::None; }
+    void set_tiled(WindowTileType);
     WindowTileType tile_type_based_on_rect(Gfx::IntRect const&) const;
     void check_untile_due_to_resize(Gfx::IntRect const&);
     bool set_untiled(Optional<Gfx::IntPoint> fixed_point = {});
+
+    Gfx::IntRect floating_rect() const { return m_floating_rect; }
+    void set_floating_rect(Gfx::IntRect rect) { m_floating_rect = rect; }
 
     void set_forced_shadow(bool b) { m_forced_shadow = b; }
     bool has_forced_shadow() const { return m_forced_shadow; }
@@ -138,8 +143,8 @@ public:
 
     Window* blocking_modal_window();
 
-    ClientConnection* client() { return m_client; }
-    const ClientConnection* client() const { return m_client; }
+    ConnectionFromClient* client() { return m_client; }
+    const ConnectionFromClient* client() const { return m_client; }
 
     WindowType type() const { return m_type; }
     int window_id() const { return m_window_id; }
@@ -206,9 +211,9 @@ public:
     Gfx::IntSize size() const { return m_rect.size(); }
 
     void invalidate(bool with_frame = true, bool re_render_frame = false);
-    void invalidate(Gfx::IntRect const&);
+    void invalidate(Gfx::IntRect const&, bool invalidate_frame = false);
     void invalidate_menubar();
-    bool invalidate_no_notify(const Gfx::IntRect& rect, bool with_frame = false);
+    bool invalidate_no_notify(const Gfx::IntRect& rect, bool invalidate_frame = false);
     void invalidate_last_rendered_screen_rects();
     void invalidate_last_rendered_screen_rects_now();
     [[nodiscard]] bool should_invalidate_last_rendered_screen_rects() { return exchange(m_invalidate_last_render_rects, false); }
@@ -287,12 +292,11 @@ public:
 
     void start_launch_animation(Gfx::IntRect const&);
 
-    Gfx::IntRect tiled_rect(Screen*, WindowTileType) const;
     void recalculate_rect();
 
     IntrusiveListNode<Window> m_list_node;
 
-    void detach_client(Badge<ClientConnection>);
+    void detach_client(Badge<ConnectionFromClient>);
 
     Window* parent_window() { return m_parent_window; }
     const Window* parent_window() const { return m_parent_window; }
@@ -377,7 +381,7 @@ public:
     bool is_stealable_by_client(i32 client_id) const { return m_stealable_by_client_ids.contains_slow(client_id); }
 
 private:
-    Window(ClientConnection&, WindowType, int window_id, bool modal, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, bool accessory, Window* parent_window = nullptr);
+    Window(ConnectionFromClient&, WindowType, int window_id, bool modal, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, bool accessory, Window* parent_window = nullptr);
     Window(Core::Object&, WindowType);
 
     virtual void event(Core::Event&) override;
@@ -389,7 +393,7 @@ private:
     void update_window_menu_items();
     void modal_unparented();
 
-    ClientConnection* m_client { nullptr };
+    ConnectionFromClient* m_client { nullptr };
 
     WeakPtr<Window> m_parent_window;
     Vector<WeakPtr<Window>> m_child_windows;
@@ -419,7 +423,6 @@ private:
     bool m_resizable { false };
     Optional<Gfx::IntSize> m_resize_aspect_ratio {};
     WindowMinimizedState m_minimized_state { WindowMinimizedState::None };
-    bool m_maximized { false };
     bool m_fullscreen { false };
     bool m_accessory { false };
     bool m_destroyed { false };
@@ -434,8 +437,8 @@ private:
     bool m_moving_to_another_stack { false };
     bool m_invalidate_last_render_rects { false };
     Vector<i32> m_stealable_by_client_ids;
-    WindowTileType m_tiled { WindowTileType::None };
-    Gfx::IntRect m_untiled_rect;
+    WindowTileType m_tile_type { WindowTileType::None };
+    Gfx::IntRect m_floating_rect;
     bool m_occluded { false };
     RefPtr<Gfx::Bitmap> m_backing_store;
     RefPtr<Gfx::Bitmap> m_last_backing_store;

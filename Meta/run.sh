@@ -38,8 +38,10 @@ if [ "$(uname)" = "Darwin" ]; then
         [ -z "$SERENITY_QEMU_BIN" ] && SERENITY_QEMU_BIN="qemu-system-aarch64"
     fi
 
-    if $SERENITY_QEMU_BIN --accel help | grep -q hvf; then
-        SERENITY_VIRT_TECH_ARG="--accel hvf"
+    if [ "$(uname -m)" = "x86_64" ]; then
+        if $SERENITY_QEMU_BIN --accel help | grep -q hvf; then
+            SERENITY_VIRT_TECH_ARG="--accel hvf"
+        fi
     fi
 fi
 
@@ -87,6 +89,8 @@ fi
 [ -z "$SERENITY_DISK_IMAGE" ] && {
     if [ "$SERENITY_RUN" = q35grub ] || [ "$SERENITY_RUN" = qgrub ]; then
         SERENITY_DISK_IMAGE="grub_disk_image"
+    elif [ "$SERENITY_RUN" = limine ]; then
+        SERENITY_DISK_IMAGE="limine_disk_image"
     elif [ "$SERENITY_RUN" = qextlinux ]; then
         SERENITY_DISK_IMAGE="extlinux_disk_image"
     else
@@ -183,19 +187,21 @@ else
     SERENITY_QEMU_DISPLAY_BACKEND="${SERENITY_QEMU_DISPLAY_BACKEND:-gtk,gl=off}"
 fi
 
-if [ "$SERENITY_SCREENS" -gt 1 ]; then
-    SERENITY_QEMU_DISPLAY_DEVICE="virtio-vga,max_outputs=$SERENITY_SCREENS "
-    # QEMU appears to always relay absolute mouse coordinates relative to the screen that the mouse is
-    # pointed to, without any way for us to know what screen it was. So, when dealing with multiple
-    # displays force using relative coordinates only
-    SERENITY_KERNEL_CMDLINE="$SERENITY_KERNEL_CMDLINE vmmouse=off"
-else
-    SERENITY_QEMU_DISPLAY_DEVICE="VGA,vgamem_mb=64 "
+if [ -z "$SERENITY_QEMU_DISPLAY_DEVICE" ]; then
+    if [ "$SERENITY_SCREENS" -gt 1 ]; then
+        SERENITY_QEMU_DISPLAY_DEVICE="virtio-vga,max_outputs=$SERENITY_SCREENS "
+        # QEMU appears to always relay absolute mouse coordinates relative to the screen that the mouse is
+        # pointed to, without any way for us to know what screen it was. So, when dealing with multiple
+        # displays force using relative coordinates only
+        SERENITY_KERNEL_CMDLINE="$SERENITY_KERNEL_CMDLINE vmmouse=off"
+    else
+        SERENITY_QEMU_DISPLAY_DEVICE="VGA,vgamem_mb=64 "
+    fi
 fi
 
 # Check if SERENITY_NVME_ENABLE is unset
 if [ -z ${SERENITY_NVME_ENABLE+x} ]; then
-    SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk"
+    SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk,id=disk"
 else
     if [ "$SERENITY_NVME_ENABLE" -eq 1 ]; then
         SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk,if=none,id=disk"
@@ -203,7 +209,7 @@ else
         SERENITY_BOOT_DRIVE="$SERENITY_BOOT_DRIVE -device nvme,serial=deadbeef,drive=disk,bus=bridge4"
         SERENITY_KERNEL_CMDLINE="$SERENITY_KERNEL_CMDLINE root=/dev/nvme0n1"
     else
-        SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk"
+        SERENITY_BOOT_DRIVE="-drive file=${SERENITY_DISK_IMAGE},format=raw,index=0,media=disk,id=disk"
     fi
 fi
 
@@ -253,6 +259,7 @@ fi
 $SERENITY_EXTRA_QEMU_ARGS
 $SERENITY_MACHINE
 -cpu $SERENITY_QEMU_CPU
+-name SerenityOS
 -d guest_errors
 -usb
 $SERENITY_SPICE_SERVER_CHARDEV
@@ -262,10 +269,40 @@ if [ "$SERENITY_ARCH" != "aarch64" ]; then
     if "${SERENITY_QEMU_BIN}" -chardev help | grep -iq spice; then
         SERENITY_COMMON_QEMU_ARGS="$SERENITY_COMMON_QEMU_ARGS
         -spice port=5930,agent-mouse=off,disable-ticketing=on
+        "
+    fi
+    if "${SERENITY_QEMU_BIN}" -chardev help | grep -iq 'spice\|vdagent'; then
+        SERENITY_COMMON_QEMU_ARGS="$SERENITY_COMMON_QEMU_ARGS
         -device virtserialport,chardev=vdagent,nr=1
         "
     fi
 fi
+
+[ -z "$SERENITY_COMMON_QEMU_ISA_PC_ARGS" ] && SERENITY_COMMON_QEMU_ISA_PC_ARGS="
+$SERENITY_EXTRA_QEMU_ARGS
+-m $SERENITY_RAM_SIZE
+-cpu pentium3
+-machine isapc
+-d guest_errors
+-chardev stdio,id=stdout,mux=on
+-device isa-debugcon,chardev=stdout
+$SERENITY_BOOT_DRIVE
+"
+
+[ -z "$SERENITY_COMMON_QEMU_MICROVM_ARGS" ] && SERENITY_COMMON_QEMU_MICROVM_ARGS="
+$SERENITY_EXTRA_QEMU_ARGS
+-m $SERENITY_RAM_SIZE
+-machine microvm,pit=on,rtc=on,pic=on
+-cpu qemu64
+-d guest_errors
+-chardev stdio,id=stdout,mux=on
+-device isa-debugcon,chardev=stdout
+-device isa-cirrus-vga
+-device isa-ide
+$SERENITY_BOOT_DRIVE
+-device i8042 
+-device ide-hd,drive=disk
+"
 
 [ -z "$SERENITY_COMMON_QEMU_Q35_ARGS" ] && SERENITY_COMMON_QEMU_Q35_ARGS="
 $SERENITY_EXTRA_QEMU_ARGS
@@ -363,6 +400,28 @@ elif [ "$SERENITY_RUN" = "q35" ]; then
         -kernel Kernel/Prekernel/Prekernel \
         -initrd Kernel/Kernel \
         -append "${SERENITY_KERNEL_CMDLINE}"
+elif [ "$SERENITY_RUN" = "isapc" ]; then
+    # Meta/run.sh q35: qemu (q35 chipset) with SerenityOS
+    echo "Starting SerenityOS with QEMU ISA-PC machine, Commandline: ${SERENITY_KERNEL_CMDLINE}"
+    "$SERENITY_QEMU_BIN" \
+        $SERENITY_COMMON_QEMU_ISA_PC_ARGS \
+        $SERENITY_VIRT_TECH_ARG \
+        -netdev user,id=breh,hostfwd=tcp:127.0.0.1:8888-10.0.2.15:8888,hostfwd=tcp:127.0.0.1:8823-10.0.2.15:23 \
+        -device ne2k_isa,netdev=breh \
+        -kernel Kernel/Prekernel/Prekernel \
+        -initrd Kernel/Kernel \
+        -append "${SERENITY_KERNEL_CMDLINE}"
+elif [ "$SERENITY_RUN" = "microvm" ]; then
+    # Meta/run.sh q35: qemu (q35 chipset) with SerenityOS
+    echo "Starting SerenityOS with QEMU MicroVM machine, Commandline: ${SERENITY_KERNEL_CMDLINE}"
+    "$SERENITY_QEMU_BIN" \
+        $SERENITY_COMMON_QEMU_MICROVM_ARGS \
+        $SERENITY_VIRT_TECH_ARG \
+        -netdev user,id=breh,hostfwd=tcp:127.0.0.1:8888-10.0.2.15:8888,hostfwd=tcp:127.0.0.1:8823-10.0.2.15:23 \
+        -device ne2k_isa,netdev=breh \
+        -kernel Kernel/Prekernel/Prekernel \
+        -initrd Kernel/Kernel \
+        -append "${SERENITY_KERNEL_CMDLINE}"
 elif [ "$SERENITY_RUN" = "q35grub" ]; then
     # Meta/run.sh q35grub: qemu (q35 chipset) with SerenityOS, using a grub disk image
     "$SERENITY_QEMU_BIN" \
@@ -370,6 +429,10 @@ elif [ "$SERENITY_RUN" = "q35grub" ]; then
         $SERENITY_VIRT_TECH_ARG \
         -netdev user,id=breh,hostfwd=tcp:127.0.0.1:8888-10.0.2.15:8888,hostfwd=tcp:127.0.0.1:8823-10.0.2.15:23 \
         -device $SERENITY_ETHERNET_DEVICE_TYPE,netdev=breh
+elif [ "$SERENITY_RUN" = "limine" ]; then
+    "$SERENITY_QEMU_BIN" \
+        $SERENITY_COMMON_QEMU_ARGS \
+        $SERENITY_VIRT_TECH_ARG
 elif [ "$SERENITY_RUN" = "ci" ]; then
     # Meta/run.sh ci: qemu in text mode
     echo "Running QEMU in CI"

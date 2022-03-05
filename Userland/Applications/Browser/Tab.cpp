@@ -2,6 +2,7 @@
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Maciej Zygmanowski <sppmacd@pm.me>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -13,6 +14,7 @@
 #include "ConsoleWidget.h"
 #include "DownloadWidget.h"
 #include "InspectorWidget.h"
+#include "StorageWidget.h"
 #include <AK/StringBuilder.h>
 #include <AK/URL.h>
 #include <Applications/Browser/TabGML.h>
@@ -38,20 +40,20 @@
 
 namespace Browser {
 
-URL url_from_user_input(const String& input)
+URL url_from_user_input(String const& input)
 {
-    String url_string = input;
     if (input.starts_with("?") && !g_search_engine.is_empty())
-        url_string = g_search_engine.replace("{}", URL::percent_encode(input.substring_view(1)));
+        return URL(g_search_engine.replace("{}", URL::percent_encode(input.substring_view(1))));
 
-    URL url = URL(url_string);
+    URL url_with_http_schema = URL(String::formatted("http://{}", input));
+    if (url_with_http_schema.is_valid() && url_with_http_schema.port().has_value())
+        return url_with_http_schema;
+
+    URL url = URL(input);
     if (url.is_valid())
         return url;
 
-    StringBuilder builder;
-    builder.append("http://");
-    builder.append(url_string);
-    return URL(builder.build());
+    return url_with_http_schema;
 }
 
 void Tab::start_download(const URL& url)
@@ -88,7 +90,10 @@ Tab::Tab(BrowserWindow& window)
     auto& webview_container = *find_descendant_of_type_named<GUI::Widget>("webview_container");
 
     m_web_content_view = webview_container.add<Web::OutOfProcessWebView>();
-    m_web_content_view->set_content_filters(g_content_filters);
+    if (g_content_filters_enabled)
+        m_web_content_view->set_content_filters(g_content_filters);
+    else
+        m_web_content_view->set_content_filters({});
 
     auto& go_back_button = toolbar.add_action(window.go_back_action());
     go_back_button.on_context_menu_request = [this](auto& context_menu_event) {
@@ -351,10 +356,6 @@ Tab::Tab(BrowserWindow& window)
     };
 }
 
-Tab::~Tab()
-{
-}
-
 void Tab::load(const URL& url, LoadType load_type)
 {
     m_is_history_navigation = (load_type == LoadType::HistoryNavigation);
@@ -445,6 +446,14 @@ void Tab::context_menu_requested(const Gfx::IntPoint& screen_position)
     m_tab_context_menu->popup(screen_position);
 }
 
+void Tab::content_filters_changed()
+{
+    if (g_content_filters_enabled)
+        m_web_content_view->set_content_filters(g_content_filters);
+    else
+        m_web_content_view->set_content_filters({});
+}
+
 GUI::AbstractScrollableWidget& Tab::view()
 {
     return *m_web_content_view;
@@ -521,6 +530,28 @@ void Tab::show_console_window()
     }
 
     auto* window = m_console_widget->window();
+    window->show();
+    window->move_to_front();
+}
+
+void Tab::show_storage_inspector()
+{
+    if (!m_storage_widget) {
+        auto storage_window = GUI::Window::construct(&window());
+        storage_window->resize(500, 300);
+        storage_window->set_title("Storage inspector");
+        storage_window->set_icon(g_icon_bag.cookie);
+        m_storage_widget = storage_window->set_main_widget<StorageWidget>();
+    }
+
+    if (on_want_cookies) {
+        auto cookies = on_want_cookies();
+        m_storage_widget->clear_cookies();
+        for (auto cookie : cookies)
+            m_storage_widget->add_cookie(cookie);
+    }
+
+    auto* window = m_storage_widget->window();
     window->show();
     window->move_to_front();
 }

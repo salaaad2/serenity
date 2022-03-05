@@ -9,6 +9,7 @@
 
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/Generator.h>
+#include <LibJS/Runtime/ExecutionContext.h>
 #include <LibJS/Runtime/FunctionObject.h>
 
 namespace JS {
@@ -38,8 +39,8 @@ public:
     virtual void initialize(GlobalObject&) override;
     virtual ~ECMAScriptFunctionObject();
 
-    virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedValueList arguments_list) override;
-    virtual ThrowCompletionOr<Object*> internal_construct(MarkedValueList arguments_list, FunctionObject& new_target) override;
+    virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
+    virtual ThrowCompletionOr<Object*> internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target) override;
 
     void make_method(Object& home_object);
 
@@ -86,6 +87,10 @@ public:
 
     FunctionKind kind() const { return m_kind; }
 
+    // This is used by LibWeb to disassociate event handler attribute callback functions from the nearest script on the call stack.
+    // https://html.spec.whatwg.org/multipage/webappapis.html#getting-the-current-value-of-the-event-handler Step 3.11
+    void set_script_or_module(ScriptOrModule script_or_module) { m_script_or_module = move(script_or_module); }
+
 protected:
     virtual bool is_strict_mode() const final { return m_strict; }
 
@@ -128,5 +133,8 @@ private:
     bool m_has_simple_parameter_list : 1 { false };
     FunctionKind m_kind : 3 { FunctionKind::Normal };
 };
+
+template<>
+inline bool Object::fast_is<ECMAScriptFunctionObject>() const { return is_ecmascript_function_object(); }
 
 }

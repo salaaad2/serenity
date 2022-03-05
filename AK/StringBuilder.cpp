@@ -8,12 +8,15 @@
 #include <AK/Checked.h>
 #include <AK/PrintfImplementation.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <AK/UnicodeUtils.h>
-#include <AK/Utf16View.h>
 #include <AK/Utf32View.h>
+
+#ifndef KERNEL
+#    include <AK/String.h>
+#    include <AK/Utf16View.h>
+#endif
 
 namespace AK {
 
@@ -49,7 +52,7 @@ ErrorOr<void> StringBuilder::try_append(StringView string)
 ErrorOr<void> StringBuilder::try_append(char ch)
 {
     TRY(will_append(1));
-    TRY(m_buffer.try_append(&ch, 1));
+    TRY(m_buffer.try_append(ch));
     return {};
 }
 
@@ -87,6 +90,7 @@ ByteBuffer StringBuilder::to_byte_buffer() const
     return ByteBuffer::copy(data(), length()).release_value_but_fixme_should_propagate_errors();
 }
 
+#ifndef KERNEL
 String StringBuilder::to_string() const
 {
     if (is_empty())
@@ -98,6 +102,7 @@ String StringBuilder::build() const
 {
     return to_string();
 }
+#endif
 
 StringView StringBuilder::string_view() const
 {
@@ -125,6 +130,7 @@ void StringBuilder::append_code_point(u32 code_point)
     MUST(try_append_code_point(code_point));
 }
 
+#ifndef KERNEL
 ErrorOr<void> StringBuilder::try_append(Utf16View const& utf16_view)
 {
     for (size_t i = 0; i < utf16_view.length_in_code_units();) {
@@ -140,6 +146,7 @@ void StringBuilder::append(Utf16View const& utf16_view)
 {
     MUST(try_append(utf16_view));
 }
+#endif
 
 ErrorOr<void> StringBuilder::try_append(Utf32View const& utf32_view)
 {
@@ -165,30 +172,36 @@ void StringBuilder::append_as_lowercase(char ch)
 
 void StringBuilder::append_escaped_for_json(StringView string)
 {
+    MUST(try_append_escaped_for_json(string));
+}
+
+ErrorOr<void> StringBuilder::try_append_escaped_for_json(StringView string)
+{
     for (auto ch : string) {
         switch (ch) {
         case '\b':
-            append("\\b");
+            TRY(try_append("\\b"));
             break;
         case '\n':
-            append("\\n");
+            TRY(try_append("\\n"));
             break;
         case '\t':
-            append("\\t");
+            TRY(try_append("\\t"));
             break;
         case '\"':
-            append("\\\"");
+            TRY(try_append("\\\""));
             break;
         case '\\':
-            append("\\\\");
+            TRY(try_append("\\\\"));
             break;
         default:
             if (ch >= 0 && ch <= 0x1f)
-                appendff("\\u{:04x}", ch);
+                TRY(try_appendff("\\u{:04x}", ch));
             else
-                append(ch);
+                TRY(try_append(ch));
         }
     }
+    return {};
 }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2021-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,14 +10,14 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Vector.h>
 #include <LibCore/DirIterator.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/Model.h>
-#include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/CursorParams.h>
 
 class MouseCursorModel final : public GUI::Model {
 public:
     static NonnullRefPtr<MouseCursorModel> create() { return adopt_ref(*new MouseCursorModel); }
-    virtual ~MouseCursorModel() override { }
+    virtual ~MouseCursorModel() override = default;
 
     enum Column {
         Bitmap,
@@ -60,7 +60,7 @@ public:
     {
         m_cursors.clear();
 
-        Core::DirIterator iterator(String::formatted("/res/cursor-themes/{}", GUI::WindowServerConnection::the().get_cursor_theme()), Core::DirIterator::Flags::SkipDots);
+        Core::DirIterator iterator(String::formatted("/res/cursor-themes/{}", GUI::ConnectionToWindowServer::the().get_cursor_theme()), Core::DirIterator::Flags::SkipDots);
 
         while (iterator.has_next()) {
             auto path = iterator.next_full_path();
@@ -86,7 +86,7 @@ public:
     }
 
 private:
-    MouseCursorModel() { }
+    MouseCursorModel() = default;
 
     struct Cursor {
         RefPtr<Gfx::Bitmap> bitmap;
@@ -101,7 +101,7 @@ private:
 class FileIconsModel final : public GUI::Model {
 public:
     static NonnullRefPtr<FileIconsModel> create() { return adopt_ref(*new FileIconsModel); }
-    virtual ~FileIconsModel() override { }
+    virtual ~FileIconsModel() override = default;
 
     enum Column {
         BigIcon,
@@ -189,7 +189,7 @@ public:
     }
 
 private:
-    FileIconsModel() { }
+    FileIconsModel() = default;
 
     struct IconSet {
         RefPtr<Gfx::Bitmap> big_icon;

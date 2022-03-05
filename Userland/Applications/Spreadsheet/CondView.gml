@@ -1,10 +1,9 @@
 @GUI::Widget {
-    layout: @GUI::VerticalBoxLayout
+    layout: @GUI::VerticalBoxLayout {}
 
     @GUI::Widget {
         shrink_to_fit: true
-
-        layout: @GUI::HorizontalBoxLayout
+        layout: @GUI::HorizontalBoxLayout {}
 
         @GUI::Label {
             text: "if..."
@@ -21,8 +20,7 @@
 
     @GUI::Widget {
         shrink_to_fit: true
-
-        layout: @GUI::HorizontalBoxLayout
+        layout: @GUI::HorizontalBoxLayout {}
 
         @GUI::Label {
             text: "Foreground..."
@@ -36,8 +34,7 @@
 
     @GUI::Widget {
         shrink_to_fit: true
-
-        layout: @GUI::HorizontalBoxLayout
+        layout: @GUI::HorizontalBoxLayout {}
 
         @GUI::Label {
             text: "Background..."

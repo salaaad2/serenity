@@ -34,6 +34,15 @@ void LocalSocket::for_each(Function<void(const LocalSocket&)> callback)
     });
 }
 
+ErrorOr<void> LocalSocket::try_for_each(Function<ErrorOr<void>(const LocalSocket&)> callback)
+{
+    return all_sockets().with_shared([&](const auto& sockets) -> ErrorOr<void> {
+        for (auto& socket : sockets)
+            TRY(callback(socket));
+        return {};
+    });
+}
+
 ErrorOr<NonnullRefPtr<LocalSocket>> LocalSocket::try_create(int type)
 {
     auto client_buffer = TRY(DoubleBuffer::try_create());
@@ -174,7 +183,9 @@ ErrorOr<void> LocalSocket::connect(OpenFileDescription& description, Userspace<c
     m_inode = inode;
 
     VERIFY(inode);
-    if (!inode->socket())
+
+    auto peer = inode->bound_socket();
+    if (!peer)
         return set_so_error(ECONNREFUSED);
 
     m_path = move(path);
@@ -182,7 +193,6 @@ ErrorOr<void> LocalSocket::connect(OpenFileDescription& description, Userspace<c
     VERIFY(m_connect_side_fd == &description);
     set_connect_side_role(Role::Connecting);
 
-    auto peer = file->inode()->socket();
     auto result = peer->queue_connection_from(*this);
     if (result.is_error()) {
         set_connect_side_role(Role::None);

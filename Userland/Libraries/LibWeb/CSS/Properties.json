@@ -510,6 +510,18 @@
       "hashless-hex-color"
     ]
   },
+  "content": {
+    "inherited": false,
+    "initial": "normal",
+    "__comment": "FIXME: This accepts a whole lot of other types and identifiers!",
+    "valid-types": [
+      "string"
+    ],
+    "valid-identifiers": [
+      "normal",
+      "none"
+    ]
+  },
   "cursor": {
     "inherited": true,
     "initial": "auto",
@@ -571,6 +583,7 @@
       "flex",
       "inline",
       "inline-block",
+      "inline-flex",
       "inline-table",
       "list-item",
       "none",
@@ -745,6 +758,14 @@
     ],
     "quirks": [
       "unitless-length"
+    ]
+  },
+  "image-rendering": {
+    "inherited": true,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto",
+      "pixelated"
     ]
   },
   "justify-content": {
@@ -1141,6 +1162,7 @@
     "initial": "auto",
     "valid-identifiers": [
       "auto",
+      "all",
       "none"
     ]
   },

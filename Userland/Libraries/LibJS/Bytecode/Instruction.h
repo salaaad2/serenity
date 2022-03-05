@@ -20,6 +20,8 @@
     O(ConcatString)                  \
     O(ContinuePendingUnwind)         \
     O(CopyObjectExcludingProperties) \
+    O(CreateEnvironment)             \
+    O(CreateVariable)                \
     O(Decrement)                     \
     O(Div)                           \
     O(EnterUnwindContext)            \
@@ -42,6 +44,7 @@
     O(JumpConditional)               \
     O(JumpNullish)                   \
     O(JumpUndefined)                 \
+    O(LeaveEnvironment)              \
     O(LeaveUnwindContext)            \
     O(LeftShift)                     \
     O(LessThan)                      \
@@ -95,7 +98,7 @@ public:
     Type type() const { return m_type; }
     size_t length() const;
     String to_string(Bytecode::Executable const&) const;
-    void execute(Bytecode::Interpreter&) const;
+    ThrowCompletionOr<void> execute(Bytecode::Interpreter&) const;
     void replace_references(BasicBlock const&, BasicBlock const&);
     static void destroy(Instruction&);
 

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Julius Heijmen <julius.heijmen@gmail.com>
+ * Copyright (c) 2022, kleines Filmröllchen <filmroellchen@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,10 +13,10 @@
 #include <LibDesktop/Launcher.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/FilePicker.h>
-#include <LibGUI/GMLAutocompleteProvider.h>
-#include <LibGUI/GMLFormatter.h>
-#include <LibGUI/GMLLexer.h>
-#include <LibGUI/GMLSyntaxHighlighter.h>
+#include <LibGUI/GML/AutocompleteProvider.h>
+#include <LibGUI/GML/Formatter.h>
+#include <LibGUI/GML/Lexer.h>
+#include <LibGUI/GML/SyntaxHighlighter.h>
 #include <LibGUI/Icon.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
@@ -87,8 +88,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto editor = TRY(splitter->try_add<GUI::TextEditor>());
     auto preview = TRY(splitter->try_add<GUI::Frame>());
 
-    editor->set_syntax_highlighter(make<GUI::GMLSyntaxHighlighter>());
-    editor->set_autocomplete_provider(make<GUI::GMLAutocompleteProvider>());
+    editor->set_syntax_highlighter(make<GUI::GML::SyntaxHighlighter>());
+    editor->set_autocomplete_provider(make<GUI::GML::AutocompleteProvider>());
     editor->set_should_autocomplete_automatically(true);
     editor->set_automatic_indentation_enabled(true);
     editor->set_ruler_visible(true);
@@ -174,18 +175,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     });
 
     TRY(file_menu->try_add_action(GUI::CommonActions::make_open_action([&](auto&) {
-        Optional<String> open_path = GUI::FilePicker::get_open_filepath(window);
-
-        if (!open_path.has_value())
-            return;
-
         if (window->is_modified()) {
-            auto save_document_first_result = GUI::MessageBox::show(window, "Save changes to current document first?", "Warning", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
-            if (save_document_first_result == GUI::Dialog::ExecResult::ExecYes)
+            auto result = GUI::MessageBox::ask_about_unsaved_changes(window, file_path, editor->document().undo_stack().last_unmodified_timestamp());
+            if (result == GUI::MessageBox::ExecYes)
                 save_action->activate();
-            if (save_document_first_result != GUI::Dialog::ExecResult::ExecNo && window->is_modified())
+            if (result != GUI::MessageBox::ExecNo && window->is_modified())
                 return;
         }
+
+        Optional<String> open_path = GUI::FilePicker::get_open_filepath(window);
+        if (!open_path.has_value())
+            return;
 
         auto file = Core::File::construct(open_path.value());
         if (!file->open(Core::OpenMode::ReadOnly) && file->error() != ENOENT) {
@@ -213,29 +213,25 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     })));
 
     auto edit_menu = TRY(window->try_add_menu("&Edit"));
+    TRY(edit_menu->try_add_action(editor->undo_action()));
+    TRY(edit_menu->try_add_action(editor->redo_action()));
+    TRY(edit_menu->try_add_separator());
+    TRY(edit_menu->try_add_action(editor->cut_action()));
+    TRY(edit_menu->try_add_action(editor->copy_action()));
+    TRY(edit_menu->try_add_action(editor->paste_action()));
+    TRY(edit_menu->try_add_separator());
+    TRY(edit_menu->try_add_action(editor->select_all_action()));
+    TRY(edit_menu->try_add_action(editor->go_to_line_action()));
+    TRY(edit_menu->try_add_separator());
+
     TRY(edit_menu->try_add_action(GUI::Action::create("&Format GML", { Mod_Ctrl | Mod_Shift, Key_I }, [&](auto&) {
-        auto source = editor->text();
-        GUI::GMLLexer lexer(source);
-        for (auto& token : lexer.lex()) {
-            if (token.m_type == GUI::GMLToken::Type::Comment) {
-                auto result = GUI::MessageBox::show(
-                    window,
-                    "Your GML contains comments, which currently are not supported by the formatter and will be removed. Proceed?",
-                    "Warning",
-                    GUI::MessageBox::Type::Warning,
-                    GUI::MessageBox::InputType::OKCancel);
-                if (result == GUI::MessageBox::ExecCancel)
-                    return;
-                break;
-            }
-        }
-        auto formatted_gml = GUI::format_gml(source);
-        if (!formatted_gml.is_null()) {
-            editor->set_text(formatted_gml);
+        auto formatted_gml_or_error = GUI::GML::format_gml(editor->text());
+        if (!formatted_gml_or_error.is_error()) {
+            editor->set_text(formatted_gml_or_error.release_value());
         } else {
             GUI::MessageBox::show(
                 window,
-                "GML could not be formatted, please check the debug console for parsing errors.",
+                String::formatted("GML could not be formatted: {}", formatted_gml_or_error.error()),
                 "Error",
                 GUI::MessageBox::Type::Error);
         }
@@ -260,7 +256,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         if (!window->is_modified())
             return GUI::Window::CloseRequestDecision::Close;
 
-        auto result = GUI::MessageBox::show(window, "The document has been modified. Would you like to save?", "Unsaved changes", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
+        auto result = GUI::MessageBox::ask_about_unsaved_changes(window, file_path, editor->document().undo_stack().last_unmodified_timestamp());
         if (result == GUI::MessageBox::ExecYes) {
             save_action->activate();
             if (window->is_modified())

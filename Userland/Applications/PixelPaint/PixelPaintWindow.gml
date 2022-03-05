@@ -1,7 +1,6 @@
 @GUI::Widget {
     name: "main"
     fill_with_background_color: true
-
     layout: @GUI::VerticalBoxLayout {
         spacing: 2
     }
@@ -44,9 +43,7 @@
         @GUI::Widget {
             fill_with_background_color: true
             fixed_width: 200
-
-            layout: @GUI::VerticalBoxLayout {
-            }
+            layout: @GUI::VerticalBoxLayout {}
 
             @GUI::GroupBox {
                 title: "Layers"

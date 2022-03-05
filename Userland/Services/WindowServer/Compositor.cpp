@@ -6,7 +6,7 @@
 
 #include "Compositor.h"
 #include "Animation.h"
-#include "ClientConnection.h"
+#include "ConnectionFromClient.h"
 #include "Event.h"
 #include "EventLoop.h"
 #include "MultiScaleBitmaps.h"
@@ -66,19 +66,19 @@ Compositor::Compositor()
     init_bitmaps();
 }
 
-const Gfx::Bitmap* Compositor::cursor_bitmap_for_screenshot(Badge<ClientConnection>, Screen& screen) const
+const Gfx::Bitmap* Compositor::cursor_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen& screen) const
 {
     if (!m_current_cursor)
         return nullptr;
     return &m_current_cursor->bitmap(screen.scale_factor());
 }
 
-const Gfx::Bitmap& Compositor::front_bitmap_for_screenshot(Badge<ClientConnection>, Screen& screen) const
+const Gfx::Bitmap& Compositor::front_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen& screen) const
 {
     return *screen.compositor_screen_data().m_front_bitmap;
 }
 
-Gfx::Color Compositor::color_at_position(Badge<ClientConnection>, Screen& screen, Gfx::IntPoint const& position) const
+Gfx::Color Compositor::color_at_position(Badge<ConnectionFromClient>, Screen& screen, Gfx::IntPoint const& position) const
 {
     return screen.compositor_screen_data().m_front_bitmap->get_pixel(position);
 }
@@ -672,8 +672,8 @@ void Compositor::flush(Screen& screen)
         // a scale applied. But this routine accesses the backbuffer pixels directly, so it
         // must work in physical coordinates.
         auto scaled_rect = rect * screen.scale_factor();
-        Gfx::RGBA32* front_ptr = screen_data.m_front_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
-        Gfx::RGBA32* back_ptr = screen_data.m_back_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
+        Gfx::ARGB32* front_ptr = screen_data.m_front_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
+        Gfx::ARGB32* back_ptr = screen_data.m_back_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
         size_t pitch = screen_data.m_back_bitmap->pitch();
 
         // NOTE: The meaning of a flush depends on whether we can flip buffers or not.
@@ -685,8 +685,8 @@ void Compositor::flush(Screen& screen)
         //       If flipping is not supported, flushing means that we copy the changed
         //       rects from the backing bitmap to the display framebuffer.
 
-        Gfx::RGBA32* to_ptr;
-        const Gfx::RGBA32* from_ptr;
+        Gfx::ARGB32* to_ptr;
+        const Gfx::ARGB32* from_ptr;
 
         if (screen_data.m_screen_can_set_buffer) {
             to_ptr = back_ptr;
@@ -698,8 +698,8 @@ void Compositor::flush(Screen& screen)
 
         for (int y = 0; y < scaled_rect.height(); ++y) {
             fast_u32_copy(to_ptr, from_ptr, scaled_rect.width());
-            from_ptr = (const Gfx::RGBA32*)((const u8*)from_ptr + pitch);
-            to_ptr = (Gfx::RGBA32*)((u8*)to_ptr + pitch);
+            from_ptr = (const Gfx::ARGB32*)((const u8*)from_ptr + pitch);
+            to_ptr = (Gfx::ARGB32*)((u8*)to_ptr + pitch);
         }
         if (device_can_flush_buffers) {
             // Whether or not we need to flush buffers, we need to at least track what we modified
@@ -783,48 +783,36 @@ bool Compositor::set_background_color(const String& background_color)
 
     auto& wm = WindowManager::the();
     wm.config()->write_entry("Background", "Color", background_color);
-    bool ret_val = wm.config()->sync();
+    bool succeeded = !wm.config()->sync().is_error();
 
-    if (ret_val)
+    if (succeeded)
         Compositor::invalidate_screen();
 
-    return ret_val;
+    return succeeded;
 }
 
 bool Compositor::set_wallpaper_mode(const String& mode)
 {
     auto& wm = WindowManager::the();
     wm.config()->write_entry("Background", "Mode", mode);
-    bool ret_val = wm.config()->sync();
+    bool succeeded = !wm.config()->sync().is_error();
 
-    if (ret_val) {
+    if (succeeded) {
         m_wallpaper_mode = mode_to_enum(mode);
         Compositor::invalidate_screen();
     }
 
-    return ret_val;
+    return succeeded;
 }
 
-bool Compositor::set_wallpaper(const String& path, Function<void(bool)>&& callback)
+bool Compositor::set_wallpaper(RefPtr<Gfx::Bitmap> bitmap)
 {
-    (void)Threading::BackgroundAction<ErrorOr<NonnullRefPtr<Gfx::Bitmap>>>::construct(
-        [path](auto&) {
-            return Gfx::Bitmap::try_load_from_file(path);
-        },
+    if (!bitmap)
+        m_wallpaper = nullptr;
+    else
+        m_wallpaper = bitmap;
+    invalidate_screen();
 
-        [this, path, callback = move(callback)](ErrorOr<NonnullRefPtr<Gfx::Bitmap>> bitmap) {
-            if (bitmap.is_error() && !path.is_empty()) {
-                callback(false);
-                return;
-            }
-            m_wallpaper_path = path;
-            if (bitmap.is_error())
-                m_wallpaper = nullptr;
-            else
-                m_wallpaper = bitmap.release_value();
-            invalidate_screen();
-            callback(true);
-        });
     return true;
 }
 
@@ -989,19 +977,19 @@ void Compositor::update_fonts()
 
 void Compositor::notify_display_links()
 {
-    ClientConnection::for_each_client([](auto& client) {
+    ConnectionFromClient::for_each_client([](auto& client) {
         client.notify_display_link({});
     });
 }
 
-void Compositor::increment_display_link_count(Badge<ClientConnection>)
+void Compositor::increment_display_link_count(Badge<ConnectionFromClient>)
 {
     ++m_display_link_count;
     if (m_display_link_count == 1)
         m_display_link_notify_timer->start();
 }
 
-void Compositor::decrement_display_link_count(Badge<ClientConnection>)
+void Compositor::decrement_display_link_count(Badge<ConnectionFromClient>)
 {
     VERIFY(m_display_link_count);
     --m_display_link_count;
@@ -1019,7 +1007,7 @@ void Compositor::invalidate_current_screen_number_rects()
     });
 }
 
-void Compositor::increment_show_screen_number(Badge<ClientConnection>)
+void Compositor::increment_show_screen_number(Badge<ConnectionFromClient>)
 {
     if (m_show_screen_number_count++ == 0) {
         Screen::for_each([&](auto& screen) {
@@ -1031,7 +1019,7 @@ void Compositor::increment_show_screen_number(Badge<ClientConnection>)
         });
     }
 }
-void Compositor::decrement_show_screen_number(Badge<ClientConnection>)
+void Compositor::decrement_show_screen_number(Badge<ConnectionFromClient>)
 {
     if (--m_show_screen_number_count == 0) {
         invalidate_current_screen_number_rects();

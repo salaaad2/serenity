@@ -99,30 +99,44 @@ void HIDManagement::set_maps(NonnullOwnPtr<KString> character_map_name, Keyboard
     dbgln("New Character map '{}' passed in by client.", m_character_map_name);
 }
 
-UNMAP_AFTER_INIT void HIDManagement::enumerate()
+UNMAP_AFTER_INIT ErrorOr<void> HIDManagement::enumerate()
 {
     // FIXME: When we have USB HID support, we should ensure that we disable
     // emulation of the PS/2 controller if it was set by the BIOS.
     // If ACPI indicates we have an i8042 controller and the USB controller was
     // set to emulate PS/2, we should not initialize the PS/2 controller.
     if (kernel_command_line().disable_ps2_controller())
-        return;
-    if (ACPI::Parser::the() && !ACPI::Parser::the()->have_8042())
-        return;
+        return {};
     m_i8042_controller = I8042Controller::initialize();
-    m_i8042_controller->detect_devices();
+
+    // Note: If ACPI is disabled or doesn't indicate that we have an i8042, we
+    // still perform a manual existence check via probing, which is relevant on
+    // QEMU, for example. This probing check is known to not work on bare metal
+    // in all cases, so if we can get a 'yes' from ACPI, we skip it.
+    auto has_i8042_controller = false;
+    if (ACPI::Parser::the() && ACPI::Parser::the()->have_8042())
+        has_i8042_controller = true;
+    else if (m_i8042_controller->check_existence_via_probing({}))
+        has_i8042_controller = true;
+
+    // Note: If we happen to not have i8042 just return "gracefully" for now.
+    if (!has_i8042_controller)
+        return {};
+    TRY(m_i8042_controller->detect_devices());
     if (m_i8042_controller->mouse())
         m_hid_devices.append(m_i8042_controller->mouse().release_nonnull());
 
     if (m_i8042_controller->keyboard())
         m_hid_devices.append(m_i8042_controller->keyboard().release_nonnull());
+    return {};
 }
 
 UNMAP_AFTER_INIT void HIDManagement::initialize()
 {
     VERIFY(!s_the.is_initialized());
     s_the.ensure_instance();
-    s_the->enumerate();
+    // FIXME: Propagate errors back to init to deal with them.
+    MUST(s_the->enumerate());
 }
 
 HIDManagement& HIDManagement::the()

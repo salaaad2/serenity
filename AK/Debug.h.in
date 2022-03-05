@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2020-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#ifndef AWAVLOADER_DEBUG
-#cmakedefine01 AWAVLOADER_DEBUG
-#endif
-
 #ifndef AFLACLOADER_DEBUG
 #cmakedefine01 AFLACLOADER_DEBUG
+#endif
+
+#ifndef AWAVLOADER_DEBUG
+#cmakedefine01 AWAVLOADER_DEBUG
 #endif
 
 #ifndef BMP_DEBUG
@@ -26,6 +26,10 @@
 #cmakedefine01 CALLBACK_MACHINE_DEBUG
 #endif
 
+#ifndef CANVAS_RENDERING_CONTEXT_2D_DEBUG
+#cmakedefine01 CANVAS_RENDERING_CONTEXT_2D_DEBUG
+#endif
+
 #ifndef COMPOSE_DEBUG
 #cmakedefine01 COMPOSE_DEBUG
 #endif
@@ -34,12 +38,12 @@
 #cmakedefine01 COPY_DEBUG
 #endif
 
-#ifndef CPP_LANGUAGE_SERVER_DEBUG
-#cmakedefine01 CPP_LANGUAGE_SERVER_DEBUG
-#endif
-
 #ifndef CPP_DEBUG
 #cmakedefine01 CPP_DEBUG
+#endif
+
+#ifndef CPP_LANGUAGE_SERVER_DEBUG
+#cmakedefine01 CPP_LANGUAGE_SERVER_DEBUG
 #endif
 
 #ifndef CRYPTO_DEBUG
@@ -74,12 +78,12 @@
 #cmakedefine01 DEFERRED_INVOKE_DEBUG
 #endif
 
-#ifndef DHCPV4CLIENT_DEBUG
-#cmakedefine01 DHCPV4CLIENT_DEBUG
-#endif
-
 #ifndef DHCPV4_DEBUG
 #cmakedefine01 DHCPV4_DEBUG
+#endif
+
+#ifndef DHCPV4CLIENT_DEBUG
+#cmakedefine01 DHCPV4CLIENT_DEBUG
 #endif
 
 #ifndef DIFF_DEBUG
@@ -434,6 +438,10 @@
 #cmakedefine01 TLS_DEBUG
 #endif
 
+#ifndef TLS_SSL_KEYLOG_DEBUG
+#cmakedefine01 TLS_SSL_KEYLOG_DEBUG
+#endif
+
 #ifndef TOKENIZER_TRACE_DEBUG
 #cmakedefine01 TOKENIZER_TRACE_DEBUG
 #endif
@@ -464,6 +472,10 @@
 
 #ifndef WEBSERVER_DEBUG
 #cmakedefine01 WEBSERVER_DEBUG
+#endif
+
+#ifndef WEB_WORKER_DEBUG
+#cmakedefine01 WEB_WORKER_DEBUG
 #endif
 
 #ifndef WINDOWMANAGER_DEBUG
