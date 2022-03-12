@@ -102,6 +102,7 @@
         "Object prototype must not be {} on a super property access")                                                                   \
     M(ObjectPrototypeWrongType, "Prototype must be an object or null")                                                                  \
     M(OptionIsNotValidValue, "{} is not a valid value for option {}")                                                                   \
+    M(OverloadResolutionFailed, "Overload resolution failed")                                                                           \
     M(PrivateFieldAlreadyDeclared, "Private field '{}' has already been declared")                                                      \
     M(PrivateFieldDoesNotExistOnObject, "Private field '{}' does not exist on object")                                                  \
     M(PrivateFieldGetAccessorWithoutGetter, "Cannot get private field '{}' as accessor without getter")                                 \
@@ -235,7 +236,6 @@
     M(TemporalInvalidDurationString, "Invalid duration string '{}'")                                                                    \
     M(TemporalInvalidDurationStringFractionNotLast, "Invalid duration string '{}': fractional {} must not be proceeded by {}")          \
     M(TemporalInvalidEpochNanoseconds, "Invalid epoch nanoseconds value, must be in range -86400 * 10^17 to 86400 * 10^17")             \
-    M(TemporalInvalidExtendedYearNegativeZero, "Invalid extended year, must not be negative zero")                                      \
     M(TemporalInvalidInstantString, "Invalid instant string '{}'")                                                                      \
     M(TemporalInvalidISODate, "Invalid ISO date")                                                                                       \
     M(TemporalInvalidMonthCode, "Invalid month code")                                                                                   \

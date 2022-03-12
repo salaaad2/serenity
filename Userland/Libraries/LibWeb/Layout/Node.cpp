@@ -6,7 +6,6 @@
 
 #include <AK/Demangle.h>
 #include <LibGfx/FontDatabase.h>
-#include <LibGfx/Painter.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -80,11 +79,6 @@ bool Node::establishes_stacking_context() const
     return computed_values().opacity() < 1.0f;
 }
 
-HitTestResult Node::hit_test(Gfx::IntPoint const&, HitTestType) const
-{
-    VERIFY_NOT_REACHED();
-}
-
 HTML::BrowsingContext const& Node::browsing_context() const
 {
     VERIFY(document().browsing_context());
@@ -112,7 +106,7 @@ InitialContainingBlock& Node::root()
 void Node::set_needs_display()
 {
     if (auto* block = containing_block()) {
-        block->for_each_fragment([&](auto& fragment) {
+        block->paint_box()->for_each_fragment([&](auto& fragment) {
             if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
                 browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
             }
@@ -124,11 +118,11 @@ void Node::set_needs_display()
 Gfx::FloatPoint Node::box_type_agnostic_position() const
 {
     if (is<Box>(*this))
-        return verify_cast<Box>(*this).absolute_position();
+        return verify_cast<Box>(*this).paint_box()->absolute_position();
     VERIFY(is_inline());
     Gfx::FloatPoint position;
     if (auto* block = containing_block()) {
-        block->for_each_fragment([&](auto& fragment) {
+        block->paint_box()->for_each_fragment([&](auto& fragment) {
             if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
                 position = fragment.absolute_rect().location();
                 return IterationDecision::Break;
@@ -426,6 +420,13 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
 
     computed_values.set_color(specified_style.color_or_fallback(CSS::PropertyID::Color, *this, CSS::InitialValues::color()));
 
+    // FIXME: The default text decoration color value is `currentcolor`, but since we can't resolve that easily,
+    //        we just manually grab the value from `color`. This makes it dependent on `color` being
+    //        specified first, so it's far from ideal.
+    computed_values.set_text_decoration_color(specified_style.color_or_fallback(CSS::PropertyID::TextDecorationColor, *this, computed_values.color()));
+    if (auto maybe_text_decoration_thickness = specified_style.length_percentage(CSS::PropertyID::TextDecorationThickness); maybe_text_decoration_thickness.has_value())
+        computed_values.set_text_decoration_thickness(maybe_text_decoration_thickness.release_value());
+
     computed_values.set_z_index(specified_style.z_index());
     computed_values.set_opacity(specified_style.opacity());
     if (computed_values.opacity() == 0)
@@ -507,32 +508,6 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& specified_style)
     }
 }
 
-void Node::handle_mousedown(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned)
-{
-}
-
-void Node::handle_mouseup(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned)
-{
-}
-
-void Node::handle_mousemove(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned)
-{
-}
-
-bool Node::handle_mousewheel(Badge<EventHandler>, const Gfx::IntPoint&, unsigned, unsigned, int wheel_delta_x, int wheel_delta_y)
-{
-    if (auto* containing_block = this->containing_block()) {
-        if (!containing_block->is_scrollable())
-            return false;
-        auto new_offset = containing_block->scroll_offset();
-        new_offset.translate_by(wheel_delta_x, wheel_delta_y);
-        containing_block->set_scroll_offset(new_offset);
-        return true;
-    }
-
-    return false;
-}
-
 bool Node::is_root_element() const
 {
     if (is_anonymous())
@@ -575,6 +550,16 @@ NonnullRefPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
     wrapper->m_font = m_font;
     wrapper->m_line_height = m_line_height;
     return wrapper;
+}
+
+void Node::set_paintable(RefPtr<Painting::Paintable> paintable)
+{
+    m_paintable = move(paintable);
+}
+
+RefPtr<Painting::Paintable> Node::create_paintable() const
+{
+    return nullptr;
 }
 
 }

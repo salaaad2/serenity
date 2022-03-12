@@ -9,11 +9,10 @@
 #include <AK/StringBuilder.h>
 #include <LibGfx/Painter.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/InlineFormattingContext.h>
-#include <LibWeb/Layout/Label.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Painting/TextPaintable.h>
 
 namespace Web::Layout {
 
@@ -68,34 +67,62 @@ void TextNode::paint_text_decoration(Gfx::Painter& painter, LineBoxFragment cons
         return;
     }
 
+    auto line_color = computed_values().text_decoration_color();
+
+    int line_thickness = [this] {
+        CSS::Length computed_thickness = computed_values().text_decoration_thickness().resolved(*this, CSS::Length(1, CSS::Length::Type::Em));
+        if (computed_thickness.is_auto())
+            return CSS::InitialValues::text_decoration_thickness().to_px(*this);
+
+        return computed_thickness.to_px(*this);
+    }();
+
     switch (computed_values().text_decoration_style()) {
-        // FIXME: Implement the other styles
     case CSS::TextDecorationStyle::Solid:
+        painter.draw_line(line_start_point, line_end_point, line_color, line_thickness, Gfx::Painter::LineStyle::Solid);
+        break;
     case CSS::TextDecorationStyle::Double:
+        switch (computed_values().text_decoration_line()) {
+        case CSS::TextDecorationLine::Underline:
+            break;
+        case CSS::TextDecorationLine::Overline:
+            line_start_point.translate_by(0, -line_thickness - 1);
+            line_end_point.translate_by(0, -line_thickness - 1);
+            break;
+        case CSS::TextDecorationLine::LineThrough:
+            line_start_point.translate_by(0, -line_thickness / 2);
+            line_end_point.translate_by(0, -line_thickness / 2);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        painter.draw_line(line_start_point, line_end_point, line_color, line_thickness);
+        painter.draw_line(line_start_point.translated(0, line_thickness + 1), line_end_point.translated(0, line_thickness + 1), line_color, line_thickness);
+        break;
     case CSS::TextDecorationStyle::Dashed:
+        painter.draw_line(line_start_point, line_end_point, line_color, line_thickness, Gfx::Painter::LineStyle::Dashed);
+        break;
     case CSS::TextDecorationStyle::Dotted:
-        painter.draw_line(line_start_point, line_end_point, computed_values().color());
+        painter.draw_line(line_start_point, line_end_point, line_color, line_thickness, Gfx::Painter::LineStyle::Dotted);
         break;
     case CSS::TextDecorationStyle::Wavy:
-        // FIXME: There is a thing called text-decoration-thickness which also affects the amplitude here.
-        painter.draw_triangle_wave(line_start_point, line_end_point, computed_values().color(), 2);
+        painter.draw_triangle_wave(line_start_point, line_end_point, line_color, line_thickness + 1, line_thickness);
         break;
     }
 }
 
-void TextNode::paint_fragment(PaintContext& context, const LineBoxFragment& fragment, PaintPhase phase) const
+void TextNode::paint_fragment(PaintContext& context, const LineBoxFragment& fragment, Painting::PaintPhase phase) const
 {
     auto& painter = context.painter();
 
-    if (phase == PaintPhase::Foreground) {
+    if (phase == Painting::PaintPhase::Foreground) {
         auto fragment_absolute_rect = fragment.absolute_rect();
 
         painter.set_font(font());
 
         if (document().inspected_node() == &dom_node())
             context.painter().draw_rect(enclosing_int_rect(fragment_absolute_rect), Color::Magenta);
-
-        paint_text_decoration(painter, fragment);
 
         // FIXME: text-transform should be done already in layout, since uppercase glyphs may be wider than lowercase, etc.
         auto text = m_text_for_rendering;
@@ -117,6 +144,8 @@ void TextNode::paint_fragment(PaintContext& context, const LineBoxFragment& frag
             painter.add_clip_rect(enclosing_int_rect(selection_rect));
             painter.draw_text(enclosing_int_rect(fragment_absolute_rect), text.substring_view(fragment.start(), fragment.length()), Gfx::TextAlignment::CenterLeft, context.palette().selection_text());
         }
+
+        paint_text_decoration(painter, fragment);
 
         paint_cursor_if_needed(context, fragment);
     }
@@ -210,41 +239,6 @@ void TextNode::compute_text_for_rendering(bool collapse, bool previous_is_empty_
     m_text_for_rendering = builder.to_string();
 }
 
-bool TextNode::wants_mouse_events() const
-{
-    return first_ancestor_of_type<Label>();
-}
-
-void TextNode::handle_mousedown(Badge<EventHandler>, const Gfx::IntPoint& position, unsigned button, unsigned)
-{
-    auto* label = first_ancestor_of_type<Label>();
-    if (!label)
-        return;
-    label->handle_mousedown_on_label({}, position, button);
-    browsing_context().event_handler().set_mouse_event_tracking_layout_node(this);
-}
-
-void TextNode::handle_mouseup(Badge<EventHandler>, const Gfx::IntPoint& position, unsigned button, unsigned)
-{
-    auto* label = first_ancestor_of_type<Label>();
-    if (!label)
-        return;
-
-    // NOTE: Changing the state of the DOM node may run arbitrary JS, which could disappear this node.
-    NonnullRefPtr protect = *this;
-
-    label->handle_mouseup_on_label({}, position, button);
-    browsing_context().event_handler().set_mouse_event_tracking_layout_node(nullptr);
-}
-
-void TextNode::handle_mousemove(Badge<EventHandler>, const Gfx::IntPoint& position, unsigned button, unsigned)
-{
-    auto* label = first_ancestor_of_type<Label>();
-    if (!label)
-        return;
-    label->handle_mousemove_on_label({}, position, button);
-}
-
 TextNode::ChunkIterator::ChunkIterator(StringView text, LayoutMode layout_mode, bool wrap_lines, bool respect_linebreaks)
     : m_layout_mode(layout_mode)
     , m_wrap_lines(wrap_lines)
@@ -314,7 +308,7 @@ Optional<TextNode::Chunk> TextNode::ChunkIterator::next()
     return {};
 }
 
-Optional<TextNode::Chunk> TextNode::ChunkIterator::try_commit_chunk(Utf8View::Iterator const& start, Utf8View::Iterator const& end, bool has_breaking_newline, bool must_commit)
+Optional<TextNode::Chunk> TextNode::ChunkIterator::try_commit_chunk(Utf8View::Iterator const& start, Utf8View::Iterator const& end, bool has_breaking_newline, bool must_commit) const
 {
     if (m_layout_mode == LayoutMode::OnlyRequiredLineBreaks && !must_commit)
         return {};
@@ -336,8 +330,9 @@ Optional<TextNode::Chunk> TextNode::ChunkIterator::try_commit_chunk(Utf8View::It
     return {};
 }
 
-void TextNode::paint(PaintContext&, PaintPhase)
+RefPtr<Painting::Paintable> TextNode::create_paintable() const
 {
+    return Painting::TextPaintable::create(*this);
 }
 
 }

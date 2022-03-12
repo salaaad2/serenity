@@ -55,6 +55,7 @@
 #include <LibJS/Runtime/ShadowRealm.h>
 #include <LibJS/Runtime/Shape.h>
 #include <LibJS/Runtime/StringObject.h>
+#include <LibJS/Runtime/StringPrototype.h>
 #include <LibJS/Runtime/Temporal/Calendar.h>
 #include <LibJS/Runtime/Temporal/Duration.h>
 #include <LibJS/Runtime/Temporal/Instant.h>
@@ -1273,8 +1274,9 @@ static void repl(JS::Interpreter& interpreter)
 {
     while (!s_fail_repl) {
         String piece = read_next_piece();
-        if (piece.is_empty())
+        if (Utf8View { piece }.trim(JS::whitespace_characters).is_empty())
             continue;
+
         repl_statements.append(piece);
         parse_and_run(interpreter, piece, "REPL");
     }
@@ -1451,7 +1453,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             bool indenters_starting_line = true;
             for (JS::Token token = lexer.next(); token.type() != JS::TokenType::Eof; token = lexer.next()) {
                 auto length = Utf8View { token.value() }.length();
-                auto start = token.line_column() - 1;
+                auto start = token.offset();
                 auto end = start + length;
                 if (indenters_starting_line) {
                     if (token.type() != JS::TokenType::ParenClose && token.type() != JS::TokenType::BracketClose && token.type() != JS::TokenType::CurlyClose) {
@@ -1580,6 +1582,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                         Line::CompletionSuggestion completion { key, Line::CompletionSuggestion::ForSearch };
                         if (!results.contains_slow(completion)) { // hide duplicates
                             results.append(String(key));
+                            results.last().invariant_offset = property_pattern.length();
                         }
                     }
                 }
@@ -1605,21 +1608,19 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 auto const* object = MUST(variable.to_object(interpreter->global_object()));
                 auto const& shape = object->shape();
                 list_all_properties(shape, property_name);
-                if (results.size())
-                    editor.suggest(property_name.length());
                 break;
             }
             case CompleteVariable: {
                 auto const& variable = interpreter->global_object();
                 list_all_properties(variable.shape(), variable_name);
 
-                for (String& name : global_environment.declarative_record().bindings()) {
-                    if (name.starts_with(variable_name))
+                for (auto const& name : global_environment.declarative_record().bindings()) {
+                    if (name.starts_with(variable_name)) {
                         results.empend(name);
+                        results.last().invariant_offset = variable_name.length();
+                    }
                 }
 
-                if (results.size())
-                    editor.suggest(variable_name.length());
                 break;
             }
             default:

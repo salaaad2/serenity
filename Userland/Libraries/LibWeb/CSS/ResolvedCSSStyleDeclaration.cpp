@@ -363,8 +363,14 @@ static CSS::ValueID to_css_value_id(CSS::ImageRendering value)
     switch (value) {
     case ImageRendering::Auto:
         return CSS::ValueID::Auto;
+    case ImageRendering::CrispEdges:
+        return CSS::ValueID::CrispEdges;
+    case ImageRendering::HighQuality:
+        return CSS::ValueID::HighQuality;
     case ImageRendering::Pixelated:
         return CSS::ValueID::Pixelated;
+    case ImageRendering::Smooth:
+        return CSS::ValueID::Smooth;
     }
     VERIFY_NOT_REACHED();
 }
@@ -766,7 +772,8 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
 
 Optional<StyleProperty> ResolvedCSSStyleDeclaration::property(PropertyID property_id) const
 {
-    const_cast<DOM::Document&>(m_element->document()).ensure_layout();
+    // FIXME: Only update layout if required to resolve the property we're accessing.
+    const_cast<DOM::Document&>(m_element->document()).update_layout();
 
     if (!m_element->layout_node()) {
         auto style = m_element->document().style_computer().compute_style(const_cast<DOM::Element&>(*m_element));
